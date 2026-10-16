@@ -10,6 +10,14 @@ pub enum CharClass {
 }
 
 impl CharClass {
+    /// For WORD motions (`W`, `B`, `E`): anything that is not blank is one class.
+    pub fn of_big(c: Option<char>) -> Self {
+        match Self::of(c) {
+            Self::Blank => Self::Blank,
+            _ => Self::Word,
+        }
+    }
+
     pub fn of(c: Option<char>) -> Self {
         match c {
             None => Self::Blank,
@@ -28,6 +36,7 @@ enum Step {
 
 /// Walks char by char across lines, decoding each line once.
 struct Walker<'a> {
+    big: bool,
     lines: &'a [String],
     line: usize,
     chars: Vec<char>,
@@ -36,11 +45,16 @@ struct Walker<'a> {
 
 impl<'a> Walker<'a> {
     fn new(buf: &'a Buffer, at: Pos) -> Self {
-        Self { lines: &buf.lines, line: at.line, chars: buf.lines[at.line].chars().collect(), col: at.col }
+        Self { big: false, lines: &buf.lines, line: at.line, chars: buf.lines[at.line].chars().collect(), col: at.col }
+    }
+
+    fn big(buf: &'a Buffer, at: Pos, big: bool) -> Self {
+        Self { big, ..Self::new(buf, at) }
     }
 
     fn class(&self) -> CharClass {
-        CharClass::of(self.chars.get(self.col).copied())
+        let c = self.chars.get(self.col).copied();
+        if self.big { CharClass::of_big(c) } else { CharClass::of(c) }
     }
 
     fn blank_line(&self) -> bool {
@@ -99,9 +113,9 @@ impl Buffer {
         chars.next().is_none_or(|c| CharClass::of(Some(c)) != here)
     }
 
-    /// `w`: start of the next word; empty lines count as words.
-    pub fn word_forward(&self, at: Pos) -> Pos {
-        let mut w = Walker::new(self, at);
+    /// `w` / `W`: start of the next word; empty lines count as words.
+    pub fn word_forward(&self, at: Pos, big: bool) -> Pos {
+        let mut w = Walker::big(self, at, big);
         let start = w.class();
         loop {
             match w.next() {
@@ -119,9 +133,9 @@ impl Buffer {
         w.pos()
     }
 
-    /// `e`: end of the current or next word.
-    pub fn word_end(&self, at: Pos) -> Pos {
-        let mut w = Walker::new(self, at);
+    /// `e` / `E`: end of the current or next word.
+    pub fn word_end(&self, at: Pos, big: bool) -> Pos {
+        let mut w = Walker::big(self, at, big);
         if let Step::End = w.next() {
             return at;
         }
@@ -140,9 +154,9 @@ impl Buffer {
         }
     }
 
-    /// `b`: start of the current or previous word.
-    pub fn word_back(&self, at: Pos) -> Pos {
-        let mut w = Walker::new(self, at);
+    /// `b` / `B`: start of the current or previous word.
+    pub fn word_back(&self, at: Pos, big: bool) -> Pos {
+        let mut w = Walker::big(self, at, big);
         if let Step::End = w.prev() {
             return at;
         }
@@ -159,6 +173,47 @@ impl Buffer {
                 _ => return here,
             }
         }
+    }
+
+    /// `ge` / `gE`: end of the previous word.
+    pub fn word_end_back(&self, at: Pos, big: bool) -> Pos {
+        let mut w = Walker::big(self, at, big);
+        let start = w.class();
+        // Leave the word under the cursor, then skip blanks back to the previous word's last char.
+        loop {
+            match w.prev() {
+                Step::End => return at,
+                Step::NewLine if w.blank_line() => return w.pos(),
+                Step::NewLine => break,
+                Step::Same if w.class() != start => break,
+                Step::Same => {}
+            }
+        }
+        while w.class() == CharClass::Blank && !w.blank_line() {
+            if let Step::End = w.prev() {
+                return w.pos();
+            }
+        }
+        w.pos()
+    }
+
+    /// `<C-a>` / `<C-x>`: adds `delta` to the number at or after the cursor; returns its last column.
+    pub fn number_at(&self, at: Pos) -> Option<(usize, usize, i64)> {
+        let chars: Vec<char> = self.lines[at.line].chars().collect();
+        let mut start = (at.col..chars.len()).find(|&i| chars[i].is_ascii_digit())?;
+        // The cursor may sit inside the number: walk back to its first digit.
+        while start > 0 && chars[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        let mut end = start;
+        while end < chars.len() && chars[end].is_ascii_digit() {
+            end += 1;
+        }
+        let negative = start > 0 && chars[start - 1] == '-';
+        let digits: String = chars[start..end].iter().collect();
+        let value: i64 = digits.parse().ok()?;
+        let start = if negative { start - 1 } else { start };
+        Some((start, end, if negative { -value } else { value }))
     }
 
     /// `}` / `{`: the next empty line past the current paragraph.
@@ -332,15 +387,22 @@ mod tests {
     #[test]
     fn word_motions() {
         let b = Buffer::from_text(None, "foo.bar  baz\n\nqux");
-        let w = |p| b.word_forward(p);
+        let w = |p| b.word_forward(p, false);
         assert_eq!(w(Pos::new(0, 0)), Pos::new(0, 3));
         assert_eq!(w(Pos::new(0, 3)), Pos::new(0, 4));
         assert_eq!(w(Pos::new(0, 4)), Pos::new(0, 9));
         assert_eq!(w(Pos::new(0, 9)), Pos::new(1, 0));
         assert_eq!(w(Pos::new(1, 0)), Pos::new(2, 0));
-        assert_eq!(b.word_back(Pos::new(2, 0)), Pos::new(1, 0));
-        assert_eq!(b.word_back(Pos::new(0, 9)), Pos::new(0, 4));
-        assert_eq!(b.word_end(Pos::new(0, 0)), Pos::new(0, 2));
+        assert_eq!(b.word_back(Pos::new(2, 0), false), Pos::new(1, 0));
+        assert_eq!(b.word_back(Pos::new(0, 9), false), Pos::new(0, 4));
+        assert_eq!(b.word_end(Pos::new(0, 0), false), Pos::new(0, 2));
+        assert_eq!(b.word_forward(Pos::new(0, 0), true), Pos::new(0, 9));
+        assert_eq!(b.word_end(Pos::new(0, 0), true), Pos::new(0, 6));
+        assert_eq!(b.word_end_back(Pos::new(0, 9), false), Pos::new(0, 6));
+        assert_eq!(b.word_end_back(Pos::new(0, 9), true), Pos::new(0, 6));
+        let n = Buffer::from_text(None, "x = -12, y");
+        assert_eq!(n.number_at(Pos::new(0, 0)), Some((4, 7, -12)));
+        assert_eq!(n.number_at(Pos::new(0, 6)), Some((4, 7, -12)));
         assert_eq!(b.paragraph(0, true), 1);
     }
 

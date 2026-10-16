@@ -1,6 +1,12 @@
 //! Modal editing: the state machine that turns keys into buffer edits.
 
+mod bindings;
+mod block;
+mod cheatsheet;
+mod clipboard;
 mod command;
+mod complete;
+mod extras;
 mod explorer;
 mod insert;
 mod keymap;
@@ -9,11 +15,16 @@ mod motion;
 mod normal;
 mod operator;
 mod picker;
+mod prompt;
+mod registers;
 mod recent;
+mod session;
+mod sources;
 mod repeat;
 #[cfg(test)]
 mod tests;
 mod ui;
+mod vim;
 mod visual;
 mod window;
 
@@ -27,6 +38,8 @@ use crate::term::Key;
 use motion::Motion;
 use operator::Operator;
 pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
+pub use cheatsheet::Card;
+pub use complete::{Completion, MENU_HEIGHT, words_of};
 pub use picker::{Picker, Target};
 pub use window::{Layout, Rect, View, Window};
 
@@ -45,6 +58,14 @@ pub enum Mode {
     Picker,
     /// The file tree has the keyboard.
     Explorer,
+    /// `R`: typed characters overwrite.
+    Replace,
+    /// `<C-v>`
+    VisualBlock,
+    /// A one-line input (rename, new file, indent width…).
+    Prompt,
+    /// The cheat sheet has the keyboard.
+    Cheatsheet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,10 +79,12 @@ pub enum PickAction {
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Normal | Self::BufferPick(_) | Self::Picker | Self::Explorer => "NORMAL",
+            Self::Normal | Self::BufferPick(_) | Self::Picker | Self::Explorer | Self::Prompt | Self::Cheatsheet => "NORMAL",
             Self::Insert => "INSERT",
+            Self::Replace => "REPLACE",
             Self::Visual => "VISUAL",
             Self::VisualLine => "V-LINE",
+            Self::VisualBlock => "V-BLOCK",
             Self::Command | Self::Search => "COMMAND",
         }
     }
@@ -77,6 +100,8 @@ pub enum Message {
 pub enum Selection {
     Chars(Pos, Pos),
     Lines(usize, usize),
+    /// Lines `top..=bottom`, char columns `left..=right`.
+    Block { top: usize, bottom: usize, left: usize, right: usize },
 }
 
 impl Selection {
@@ -84,18 +109,24 @@ impl Selection {
         match self {
             Self::Chars(start, end) => start <= p && p <= end,
             Self::Lines(first, last) => (first..=last).contains(&p.line),
+            Self::Block { top, bottom, left, right } => (top..=bottom).contains(&p.line) && (left..=right).contains(&p.col),
         }
     }
+}
+
+/// Randomised tests type every key: they may only touch files under the temp dir.
+pub(crate) fn may_touch(path: &Path) -> bool {
+    !cfg!(test) || std::path::absolute(path).is_ok_and(|p| p.starts_with(std::env::temp_dir()))
+}
+
+/// …and may not start programs (git switch, browsers, terminals).
+pub(crate) fn may_spawn() -> bool {
+    !cfg!(test)
 }
 
 /// snacks.notifier's default timeout.
 pub const NOTIFY_TIMEOUT: Duration = Duration::from_secs(3);
 
-#[derive(Clone, Debug)]
-struct Register {
-    text: String,
-    linewise: bool,
-}
 
 /// Keys of a normal command typed so far, e.g. the `3d` of `3dw`.
 #[derive(Clone, Copy, Debug, Default)]
@@ -120,6 +151,10 @@ pub struct Editor {
     /// When `message` was set: notifications (cmdheight=0) fade after `NOTIFY_TIMEOUT`.
     pub message_at: Instant,
     pub options: Options,
+    /// The loaded config, kept so a colorscheme switch re-applies its palette and highlight overrides.
+    config: Config,
+    /// Name of the colorscheme in use.
+    pub colorscheme: String,
     keymaps: Vec<Keymap>,
     /// Keys typed toward a user mapping, waiting for more or for `timeoutlen`.
     typeahead: Vec<Key>,
@@ -143,11 +178,41 @@ pub struct Editor {
     pub dashboard: bool,
     pub started: Instant,
     /// Set by `<F7>` / `<Leader>t…`: the main loop suspends the editor and runs `$SHELL`.
-    pub shell_requested: bool,
+    pub shell_requested: Option<Vec<String>>,
     last_picker: Option<Picker>,
     recent: Vec<std::path::PathBuf>,
+    pub registers: registers::Registers,
+    /// `"x` typed before the next yank, delete or put.
+    register_name: Option<char>,
+    /// OSC 52 clipboard sequence for the main loop to write when no clipboard tool exists.
+    pub osc52: Option<String>,
+    /// Last `f`/`F`/`t`/`T`, for `;` and `,`.
+    last_find: Option<(char, bool, bool)>,
+    /// `<C-o>` history: file and position before each jump.
+    /// File, anchor id in that file's buffer, and the position when recorded (if the buffer is gone).
+    jumps: Vec<(Option<std::path::PathBuf>, u64, Pos)>,
+    next_anchor: u64,
+    /// For `gv`: the last visual selection and its mode.
+    last_visual: Option<(Pos, Pos, Mode)>,
+    /// `/` searches forward, `?` backward; `n` follows, `N` reverses.
+    pub search_forward: bool,
+    last_substitute: Option<(String, String, bool)>,
+    pub prompt: Option<prompt::Prompt>,
+    pub cheatsheet: Option<cheatsheet::Cheatsheet>,
+    /// The insert-mode completion menu, when open.
+    pub completion: Option<Completion>,
+    /// `<C-o>` in insert mode: one normal command, then back to insert.
+    insert_once: bool,
+    /// Line as it was when `R` started, so backspace can restore it.
+    replace_original: String,
+    /// Every notification shown, for `<Leader>fn`.
+    pub history: Vec<Message>,
+    /// `<Leader>uZ`: only the focused window, centred, without chrome.
+    pub zen: bool,
+    block_insert: Option<block::BlockInsert>,
+    /// `<C-r>` in insert mode: the next key names the register to insert.
+    insert_register: bool,
     anchor: Pos,
-    register: Option<Register>,
     pending: Pending,
     /// Line whose indent was inserted automatically; it is dropped again if left blank.
     auto_indent: Option<usize>,
@@ -164,6 +229,8 @@ impl Editor {
             message: None,
             message_at: Instant::now(),
             options: Options::default(),
+            config: Config::default(),
+            colorscheme: "astrodark".into(),
             keymaps: Vec::new(),
             typeahead: Vec::new(),
             typeahead_at: Instant::now(),
@@ -181,11 +248,28 @@ impl Editor {
             explorer: None,
             dashboard: paths.is_empty(),
             started: Instant::now(),
-            shell_requested: false,
+            shell_requested: None,
             last_picker: None,
             recent: recent::load(),
+            registers: registers::Registers::default(),
+            register_name: None,
+            osc52: None,
+            last_find: None,
+            jumps: Vec::new(),
+            next_anchor: 0,
+            last_visual: None,
+            search_forward: true,
+            last_substitute: None,
+            prompt: None,
+            cheatsheet: None,
+            completion: None,
+            insert_once: false,
+            replace_original: String::new(),
+            history: Vec::new(),
+            zen: false,
+            block_insert: None,
+            insert_register: false,
             anchor: Pos::default(),
-            register: None,
             pending: Pending::default(),
             auto_indent: None,
             repeat: repeat::Repeat::default(),
@@ -215,6 +299,12 @@ impl Editor {
         match self.mode {
             Mode::Visual => Some(Selection::Chars(start, end)),
             Mode::VisualLine => Some(Selection::Lines(start.line, end.line)),
+            Mode::VisualBlock => Some(Selection::Block {
+                top: start.line,
+                bottom: end.line,
+                left: a.col.min(b.col),
+                right: a.col.max(b.col),
+            }),
             _ => None,
         }
     }
@@ -223,6 +313,7 @@ impl Editor {
     pub fn configure(&mut self, config: &Config) {
         self.options = config.options.clone();
         self.keymaps = config.keymaps.clone();
+        self.config = config.clone();
         self.dashboard &= self.options.dashboard;
         self.apply_options();
         if self.options.gitsigns {
@@ -250,7 +341,9 @@ impl Editor {
     fn dispatch(&mut self, key: Key) {
         self.track_before(key);
         let mode = self.mode;
-        let motion_key = matches!(mode, Mode::Normal | Mode::Visual | Mode::VisualLine) && self.pending.prefix.is_none();
+        let was_visual = matches!(mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock);
+        let insert_once = self.insert_once && mode == Mode::Normal;
+        let motion_key = matches!(mode, Mode::Normal | Mode::Visual | Mode::VisualLine | Mode::VisualBlock) && self.pending.prefix.is_none();
         match mode {
             Mode::Normal => self.normal(key),
             Mode::Insert => self.insert(key),
@@ -259,12 +352,16 @@ impl Editor {
             Mode::BufferPick(action) => self.pick(key, action),
             Mode::Picker => self.picker_key(key),
             Mode::Explorer => self.explorer_key(key),
+            Mode::Replace => self.replace_key(key),
+            Mode::VisualBlock => self.visual(key),
+            Mode::Prompt => self.prompt_key(key),
+            Mode::Cheatsheet => self.cheatsheet_key(key),
         }
         if let Some(window) = self.windows.get_mut(self.active) {
             window.buffer = self.current;
         }
         let motion = motion_key.then(|| Motion::from_key(key)).flatten();
-        let past_end = self.mode == Mode::Insert;
+        let past_end = matches!(self.mode, Mode::Insert | Mode::Replace);
         let buf = self.buf_mut();
         buf.clamp(past_end);
         // j/k keep aiming at the column they started from; anything else resets it.
@@ -272,6 +369,22 @@ impl Editor {
             || motion.is_some_and(Motion::is_vertical);
         if !vertical {
             buf.want_col = if motion == Some(Motion::LineEnd) { usize::MAX } else { buf.cursor.col };
+        }
+        // Leaving visual mode: remember the selection for `gv` and the `'<` / `'>` marks.
+        if was_visual && !matches!(self.mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock) {
+            let (anchor, cursor) = (self.anchor, self.buf().cursor);
+            self.last_visual = Some((anchor, cursor, mode));
+            let buf = self.buf_mut();
+            buf.marks.insert('<', anchor.min(cursor));
+            buf.marks.insert('>', anchor.max(cursor));
+        }
+        if self.mode != Mode::Insert {
+            self.completion = None;
+        }
+        // `<C-o>` from insert mode: back to insert once the normal command is complete.
+        if insert_once && self.mode == Mode::Normal && self.pending.is_empty() {
+            self.insert_once = false;
+            self.mode = Mode::Insert;
         }
         self.track_after();
     }
@@ -312,6 +425,10 @@ impl Editor {
     }
 
     pub fn set_message(&mut self, message: Message) {
+        self.history.push(message.clone());
+        if self.history.len() > 200 {
+            self.history.remove(0);
+        }
         self.message = Some(message);
         self.message_at = Instant::now();
     }

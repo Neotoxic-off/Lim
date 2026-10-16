@@ -1,19 +1,29 @@
-# Lim
+<p align="center">
+  <img src="docs/logo.png" alt="lim: the Lernaean Hydra" width="280">
+</p>
 
-**Lightweight Vim alternative.** A modal editor in Rust with **zero dependencies**, built to feel like
-an [AstroNvim](https://github.com/AstroNvim/AstroNvim) setup
-([Neotoxic-off/neovim](https://github.com/Neotoxic-off/neovim)): same keymaps, same astrodark colors,
-same statusline, tabline, picker, file tree, which-key and dashboard. One ~1 MB binary, starts in under a millisecond.
-
-![Editing with the file tree, git signs, indent guides and reference highlighting](docs/screenshots/editor.png)
-
-| Dashboard | Find files |
-|---|---|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![File picker with preview](docs/screenshots/picker.png) |
-| **Grep** | **which-key + splits** |
-| ![Live grep](docs/screenshots/grep.png) | ![which-key menu over two splits](docs/screenshots/whichkey.png) |
+<p align="center">
+  <b>A lightweight modal editor, in Rust, with zero dependencies.</b><br>
+  AstroNvim's keymaps, look and workflow in one ~1 MB binary that starts in under a millisecond.
+</p>
 
 ---
+
+**The symbol.** lim's emblem is the Lernaean Hydra, the many-headed serpent of the lake (λίμνη, *limnē*)
+of Lerna: one body, many heads, like one editor working many windows. It greets you, in plain ASCII, on
+the start screen.
+
+![Editing: file tree, git signs, indent guides, TODO and color highlights](docs/screenshots/editor.png)
+
+| Start screen | Find files |
+|---|---|
+| ![Start screen with the hydra](docs/screenshots/dashboard.png) | ![File picker with preview](docs/screenshots/picker.png) |
+| **Grep** | **which-key over two splits** |
+| ![Live grep](docs/screenshots/grep.png) | ![which-key menu](docs/screenshots/whichkey.png) |
+| **Cheat sheet** (`<F1>`) | **Theme switcher** (`<Leader>ft`, live preview) |
+| ![Cheat sheet](docs/screenshots/cheatsheet.png) | ![Theme picker](docs/screenshots/themes.png) |
+| **Completion** (words from open buffers) | **Visual line + search** |
+| ![Completion menu](docs/screenshots/completion.png) | ![Visual selection](docs/screenshots/visual.png) |
 
 ## Contents
 
@@ -21,6 +31,7 @@ same statusline, tabline, picker, file tree, which-key and dashboard. One ~1 MB 
 - [Install](#install)
 - [Usage](#usage)
 - [Keymaps](#keymaps)
+- [Themes and icons](#themes-and-icons)
 - [Configuration](#configuration)
 - [How it is built](#how-it-is-built)
 - [Limits](#limits)
@@ -30,22 +41,23 @@ same statusline, tabline, picker, file tree, which-key and dashboard. One ~1 MB 
 
 | Area | What you get |
 |---|---|
-| Editing | Normal, insert, visual, visual-line modes · counts · operators `d c y > < gc` with any motion or text object · `.` repeat · macros · undo/redo · unnamed register |
-| Motions | `h j k l w b e 0 ^ $ { } % gg G f F t T n N * #`, half/full page scrolls |
+| Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`, `"-`, `"_`, `"+`) · marks and jump list that follow edits · `:s` and line ranges |
+| Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, page and line scrolling, `zz zt zb` |
 | Text objects | `iw` `aw` `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
-| UI (AstroNvim look) | astrodark theme · NvChad-style statusline · buffer tabline with jump labels · winbar path · relative numbers · sign column · cursorline · rounded floats |
-| Code | keyword highlighting (Rust, Lua, Python, C/C++, JS/TS, Go, shell, TOML/YAML/JSON) with multi-line comments and strings · autopairs · auto-indent · comment toggling |
-| Visual helpers | indent guides · matching bracket · highlight of the word under the cursor · underlined URLs · smartcase search highlight |
-| Git | gitsigns against the index (added / changed / deleted) · `]g` `[g` hunk jumps · branch in the statusline · status colors in the file tree |
-| Files | snacks-style fuzzy picker with preview (files, git files, grep, buffers, recent files, lines, keymaps, commands) · neo-tree style explorer · dashboard |
-| Windows | `|` / `\` splits, `<C-h/j/k/l>`, `<C-w>` family, global statusline |
-| Config | one JSON file: Neovim option names, astrotheme palette, Neovim highlight groups, keymaps per mode |
-| Robustness | atomic saves (temp file + rename, permissions and symlinks kept) · refuses to clobber other files · internal errors are caught, the session goes on and unsaved buffers are backed up |
+| AstroNvim look | 23 colorschemes (astrodark by default) · NvChad-style statusline · buffer tabline with jump labels · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
+| Code | keyword highlighting (Rust, Lua, Python, C/C++, JS/TS, Go, shell, TOML/YAML/JSON) with multi-line comments and strings · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
+| Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) |
+| Git | signs against the index · hunk jumps · branches, log, file log, status and stash pickers · `git browse` · lazygit in one key · status colors in the file tree |
+| Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · sessions |
+| Windows | `\|` / `\` splits, `<C-h/j/k/l>`, `<C-arrows>` to resize, `<C-w>` family, zen mode, global statusline |
+| System | system clipboard (`clipboard=unnamedplus`, OSC 52 fallback over SSH) · `<F7>` shell, lazygit, node, python, btm, gdu |
+| Config | one JSON file: Neovim option names, colorscheme, astrotheme palette, Neovim highlight groups, keymaps per mode, icon set |
+| Robustness | atomic saves · refuses to clobber other files · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
 
 ## Install
 
-Requirements: Rust 1.88+, Linux or macOS. A [Nerd Font](https://www.nerdfonts.com) for the icons
-(or set `"icons": false`). A truecolor terminal is detected automatically; others get the 256-color palette.
+Requirements: Rust 1.88+, Linux or macOS. A [Nerd Font](https://www.nerdfonts.com) for the default icons
+(or `"iconset": "unicode"` / `"ascii"`). Truecolor is detected; other terminals get the 256-color palette.
 
 ```sh
 git clone <this repo> lim && cd lim
@@ -53,36 +65,40 @@ cargo build --release
 install -m 755 target/release/lim ~/.local/bin/lim
 ```
 
+Optional, picked up when installed: `wl-copy`/`xclip`/`xsel`/`pbcopy` (clipboard), `lazygit`, `node`,
+`python3`, `btm`, `gdu`, `xdg-open`/`open` (`gx`, `<Leader>go`).
+
 ## Usage
 
 ```sh
-lim                    # dashboard
+lim                    # start screen
 lim src/main.rs a.lua  # open files
-lim --print-config     # print the documented default config
+lim --print-config     # the documented default config
 lim --config-path      # where lim looks for config.json
 lim --help | --version
 ```
 
 Messages appear as notifications in the top-right corner (`cmdheight = 0`, as in AstroNvim); `:` and `/`
-borrow the last line while you type.
+borrow the last line while you type. Press `<F1>` (or `<Leader>fh`, `:help`) for the cheat sheet, or press
+`<Space>` and wait for which-key.
 
 ## Keymaps
 
-The leader is `<Space>`. Everything below matches AstroNvim's defaults unless marked *lim*.
-Press `<Space>` (or `g`, `]`, `[`, `<C-w>`) and wait: which-key lists what comes next.
+The leader is `<Space>`. Unless marked *lim*, everything matches AstroNvim's defaults, plus the
+`<Tab>`/`<S-Tab>` buffer navigation of the reference config.
 
 ### General
 
 | Keys | Action |
 |---|---|
-| `<Leader>w` / `<C-s>` | Save |
-| `<Leader>q` | Quit window |
-| `<Leader>Q` | Exit lim |
-| `<C-q>` | Force quit |
+| `<Leader>w` · `<C-s>` | Save · force write |
+| `<Leader>q` · `<Leader>Q` · `<C-q>` | Quit window · exit · force quit |
 | `<Leader>n` | New file |
+| `<Leader>R` | Rename file |
 | `<Leader>/` (normal, visual) · `gc{motion}` · `gcc` | Toggle comment |
-| `<Leader>h` | Home screen (dashboard) |
-| `<F7>` · `<Leader>tf` `th` `tv` | Terminal: suspends lim and opens `$SHELL`, `exit` comes back (*lim*: no embedded terminal) |
+| `gco` · `gcO` | Add a comment line below / above |
+| `<Leader>h` | Home screen |
+| `<F1>` · `<Leader>fh` · `<Leader>?` | Cheat sheet (*lim*) |
 
 ### Buffers
 
@@ -90,11 +106,12 @@ Press `<Space>` (or `g`, `]`, `[`, `<C-w>`) and wait: which-key lists what comes
 |---|---|
 | `<Tab>` `<S-Tab>` · `]b` `[b` | Next / previous buffer |
 | `>b` `<b` | Move buffer tab right / left |
-| `<Leader>c` / `<Leader>C` | Close / force close buffer |
-| `<Leader>bb` · `<Leader>bd` | Pick a buffer by its tabline label, to open / close |
+| `<Leader>c` · `<Leader>C` | Close · force close buffer |
+| `<Leader>bb` · `<Leader>bd` | Pick a buffer by its tabline label to open / close |
 | `<Leader>b\|` · `<Leader>b\` | Pick a buffer into a vertical / horizontal split |
 | `<Leader>bc` · `bC` · `bl` · `br` | Close others · all · to the left · to the right |
 | `<Leader>bp` | Previous buffer |
+| `<Leader>bse` `bsr` `bsp` `bsi` `bsm` | Sort by extension · relative path · full path · number · modification |
 
 ### Windows
 
@@ -102,53 +119,105 @@ Press `<Space>` (or `g`, `]`, `[`, `<C-w>`) and wait: which-key lists what comes
 |---|---|
 | `\|` · `\` | Vertical · horizontal split |
 | `<C-h>` `<C-j>` `<C-k>` `<C-l>` | Move between windows (and into the file tree) |
+| `<C-Up>` `<C-Down>` `<C-Left>` `<C-Right>` | Resize the split |
 | `<C-w>v` `s` `c` `q` `o` `w` `h` `j` `k` `l` | Vim window commands |
 
-### Find (picker)
+### Find
 
 | Keys | Action |
 |---|---|
-| `<Leader>ff` · `fF` | Files (git-aware) · all files including hidden |
-| `<Leader>fg` | Git files |
-| `<Leader>fw` · `fW` | Grep · grep in all files |
-| `<Leader>fc` | Grep the word under the cursor |
-| `<Leader>fb` · `fo` · `fl` | Buffers · recent files · lines of the buffer |
-| `<Leader>fk` · `fC` | Keymaps · commands |
+| `<Leader>ff` · `fF` · `fg` | Files · all files · git files |
+| `<Leader>fw` · `fW` · `fc` | Grep · grep in all files · grep the word under the cursor |
+| `<Leader>fb` · `fo` · `fO` · `fs` | Buffers · old files · old files in this directory · buffers/recent/files |
+| `<Leader>fl` · `f'` · `fr` · `fn` | Lines · marks · registers · notifications |
+| `<Leader>fk` · `fC` · `fT` | Keymaps · commands · TODO comments |
+| `<Leader>ft` · `fI` · `fa` | Colorschemes (live preview) · icon sets (*lim*) · lim config files |
 | `<Leader>f<CR>` | Resume the last search |
 
-Inside the picker: type to filter, `<C-n>`/`<C-p>` (or arrows, `<C-j>`/`<C-k>`) to move, `<CR>` to open,
-`<C-v>` / `<C-s>` to open in a vertical / horizontal split, `<Esc>` to close.
+Inside a picker: type to filter, `<C-n>`/`<C-p>` (or arrows, `<C-j>`/`<C-k>`) to move, `<CR>` to open,
+`<C-v>`/`<C-s>` to open in a vertical/horizontal split, `<Esc>` to close.
+
+### Git
+
+| Keys | Action |
+|---|---|
+| `]g` `[g` · `]G` `[G` | Next / previous hunk · last / first hunk |
+| `<Leader>gg` | lazygit |
+| `<Leader>gb` · `gc` · `gC` · `gt` · `gT` | Branches (switch) · log · log of this file · status · stash |
+| `<Leader>go` | Open the file and line on the git host |
 
 ### File tree
 
-`<Leader>e` toggles it, `<Leader>o` moves the focus in and out. Inside: `j` `k` move, `<CR>` / `l` / `o`
-open a file or fold a directory, `h` closes a directory or jumps to its parent, `H` shows hidden files,
-`R` refreshes, `q` closes, `<C-l>` / `<Esc>` back to the file.
-
-### Git and UI toggles
+`<Leader>e` toggles it, `<Leader>o` moves the focus in and out. Inside, as in neo-tree:
 
 | Keys | Action |
 |---|---|
-| `]g` `[g` · `<Leader>gg` `gG` | Next / previous git hunk |
-| `<Leader>ua` | Toggle autopairs |
-| `<Leader>ug` · `ul` · `ut` | Toggle sign column · statusline · tabline |
-| `<Leader>un` | Cycle line numbering |
-| `<Leader>uu` · `uy` · `u\|` | Toggle URL highlight · syntax highlight · indent guides |
-| `<Leader>uN` · `uD` | Toggle · dismiss notifications |
+| `j` `k` · `<CR>` `l` `o` · `h` | Move · open file or fold directory · close directory / go to parent |
+| `a` · `A` · `r` · `d` | Add file (`name/` for a directory) · add directory · rename · delete (asks) |
+| `c` · `m` · `y` · `Y` | Copy · move · copy name · copy path |
+| `s` · `S` · `P` · `O` | Open in vertical / horizontal split · preview · open with the system |
+| `.` · `<BS>` · `H` · `R` | Make root · root up · show hidden · refresh |
+| `q` · `<C-l>` `<Esc>` · `?` | Close · back to the file · cheat sheet |
+
+### Terminal and tools
+
+`<F7>`, `<Leader>tf`, `<Leader>th`, `<Leader>tv` suspend lim and open your `$SHELL` (`exit` comes back);
+`<Leader>tl` lazygit, `<Leader>tn` node, `<Leader>tp` python, `<Leader>tt` btm, `<Leader>tu` gdu.
+Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
+
+### Sessions
+
+`<Leader>Sl` last session · `Ss` save (named) · `SS` save for this directory · `S.` load this directory's ·
+`Sf` / `SF` pick a session / directory session · `Sd` / `SD` delete one. The last session is saved on exit.
+
+### UI toggles
+
+| Keys | Action |
+|---|---|
+| `<Leader>ua` · `up` · `uc`/`uC` | Autopairs · paste mode · autocompletion |
+| `<Leader>ub` | Light / dark variant of the theme |
+| `<Leader>ug` · `u>` · `ul` · `ut` | Sign column · fold column · statusline · tabline |
+| `<Leader>un` · `ui` | Cycle line numbering · indent width (prompt) |
+| `<Leader>ur` · `uu` · `uz` · `uy` · `u\|` | References · URLs · colors · syntax · indent guides |
+| `<Leader>uN` · `uD` · `uZ` | Notifications · dismiss them · zen mode |
 
 ### Vim
 
-Everything usual: `i a I A o O`, `x X s S D C Y p P J ~ r`, `u <C-r>`, `v V o`, `:` commands
-(`:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:enew` `:bn` `:bp` `:bd` `:sp` `:vs` `:only` `:close` `:noh` `:<line>`,
-`!` forces), `/pattern` with `\<word\>` boundaries, `q{reg}` … `q` and `@{reg}` / `@@`, `.`.
-Insert mode: `<C-w>`, `<C-u>`, `<Tab>`, arrows.
+Everything usual, including: `R` replace mode, `<C-a>`/`<C-x>`, `gu`/`gU`/`g~`, `gJ`, `gi`, `gI`, `gv`,
+`gx`, `ge`, `g_`, `H`/`M`/`L`, `zz`/`zt`/`zb`, `<C-e>`/`<C-y>`, `m{a-z}` with `'`/`` ` ``, `''`, `<C-o>`,
+`"{register}`, `q{r}`/`@{r}`/`@@`, `?`, `;`/`,`, `&`. Visual block: `I`, `A`, `d`, `c`, `y`, `r`, `~`/`u`/`U`, `o`/`O`,
+blockwise put. Insert mode: `<C-r>{r}`, `<C-o>`, `<C-t>`/`<C-d>`, `<C-w>`, `<C-u>`.
+Marks, `''` and `<C-o>` stay on their text when lines above are added or removed (and after undo);
+a letter mark goes away with its line, as in Vim.
+
+**Completion** (blink.cmp keys as AstroNvim maps them): words from the open buffers appear while you type,
+current buffer first. `<Tab>`/`<C-n>`/`<C-j>`/`<Down>` next, `<S-Tab>`/`<C-p>`/`<C-k>`/`<Up>` previous,
+`<CR>` accepts the selected item (with nothing selected it is a plain newline), `<C-e>` hides,
+`<C-Space>` shows the menu on demand.
+Commands: `:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:enew` `:bn` `:bp` `:bd` `:sp` `:vs` `:only`
+`:close` `:noh` `:colorscheme` `:iconset` `:help`, `:[range]s/a/b/[g]` (literal pattern, `&` = match),
+`:[range]d` `y` `>` `<` `j`, and addresses `N`, `.`, `$`, `%`, `'a`, `'<,'>`.
+
+## Themes and icons
+
+**Colorschemes**: astrodark (default), astrolight, astromars, astrojupiter, catppuccin-mocha,
+catppuccin-macchiato, catppuccin-frappe, catppuccin-latte, tokyonight-night, tokyonight-storm,
+tokyonight-moon, tokyonight-day, dracula, onedark, gruvbox, nord, nordic, night-owl, sonokai, kanagawa,
+rose-pine, rose-pine-moon, rose-pine-dawn. Colors come from each theme's own repository, mapped onto the
+astrotheme palette lim draws with.
+
+Switch with `<Leader>ft` (the editor recolors as you move through the list; `<Esc>` puts the old one back),
+`:colorscheme name`, or `<Leader>ub` for the light/dark sibling. The last one picked is remembered; set
+`"colorscheme"` in the config to pin one. `palette` and `highlights` overrides apply on top of any theme.
+
+**Icon sets**: `nerd` (default, Nerd Font devicons as AstroNvim), `unicode` (any font) and `ascii`. Switch with
+`<Leader>fI`, `:iconset name`, or the `iconset` option.
 
 ## Configuration
 
 lim reads `$LIM_CONFIG`, else `$XDG_CONFIG_HOME/lim/config.json`, else `~/.config/lim/config.json`.
-The file is JSON with `//` comments and trailing commas allowed. Every section is optional; anything
-invalid is reported in a notification and the default stays in place, so a broken config never stops the editor.
-Start from the documented defaults:
+JSON with `//` comments and trailing commas. Every section is optional; anything invalid is reported in a
+notification and the default stays, so a broken config never stops the editor.
 
 ```sh
 mkdir -p ~/.config/lim && lim --print-config > ~/.config/lim/config.json
@@ -156,8 +225,8 @@ mkdir -p ~/.config/lim && lim --print-config > ~/.config/lim/config.json
 
 ```jsonc
 {
-  "options": { "tabstop": 4, "relativenumber": false, "mapleader": "," },
-  "palette": { "ui": { "base": "#11121d" }, "syntax": { "purple": "#bb9af7" } },
+  "options": { "tabstop": 4, "relativenumber": false, "mapleader": ",", "colorscheme": "catppuccin-mocha" },
+  "palette": { "ui": { "base": "#11121d" } },
   "highlights": {
     "@comment": { "fg": "#565f89", "italic": false },
     "Visual": { "link": "Search" }
@@ -181,59 +250,55 @@ Names and defaults follow AstroNvim.
 | Option | Default | Meaning |
 |---|---|---|
 | `number` / `relativenumber` | `true` / `true` | Line numbers; both on shows the current line's absolute number |
-| `signcolumn` | `true` | Two-cell column for git signs |
+| `signcolumn` · `foldcolumn` | `true` · `true` | Two-cell git sign column · one blank column left of the numbers |
 | `cursorline` | `true` | Highlight the cursor's line |
-| `tabstop` | `2` | Width of a tab, and of `<Tab>` in insert mode |
-| `shiftwidth` | `0` | Indent step for `>`, `<` and auto-indent; `0` uses `tabstop` |
-| `expandtab` | `true` | Indent with spaces |
+| `tabstop` · `shiftwidth` · `expandtab` | `2` · `0` · `true` | Tab width · indent step (`0` = tabstop) · indent with spaces |
 | `scrolloff` / `sidescrolloff` | `0` / `0` | Lines / columns kept around the cursor |
-| `ignorecase` / `smartcase` | `true` / `true` | Search case rules |
-| `hlsearch` | `true` | Highlight every match of the last search |
-| `autopairs` | `true` | Close brackets and quotes as you type |
-| `autoindent` | `true` | Keep (and after `{`, increase) indentation on new lines |
-| `mapleader` | `" "` | Leader key, one key in notation (`","`, `"<Space>"`) |
-| `timeoutlen` | `500` | Milliseconds to wait for the rest of a mapping |
+| `ignorecase` / `smartcase` · `hlsearch` | `true` / `true` · `true` | Search case rules · highlight matches |
+| `autopairs` · `autoindent` | `true` · `true` | Close brackets and quotes · keep indentation |
+| `mapleader` · `timeoutlen` | `" "` · `500` | Leader key · ms to wait for the rest of a mapping |
 | `showtabline` / `laststatus` / `winbar` | `true` | Tabline · statusline · per-window path bar |
-| `cmdheight` | `0` | `0`: notifications and an on-demand command line; `1`: a permanent command line |
-| `icons` | `true` | Nerd Font glyphs |
+| `cmdheight` | `0` | `0`: notifications and an on-demand command line; `1`: permanent command line |
+| `clipboard` | `"unnamedplus"` | `""` keeps yanks inside lim |
+| `colorscheme` | unset | A theme name; unset uses the last one picked (astrodark at first) |
+| `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"` or `"ascii"` |
+| `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |
-| `highlighturl`, `indentguides`, `matchparen`, `gitsigns`, `wordhighlight`, `notifications`, `dashboard`, `syntax` | `true` | Turn each feature off |
+| `highlighturl` `indentguides` `matchparen` `gitsigns` `wordhighlight` `colorhighlight` `todocomments` `notifications` `dashboard` `syntax` | `true` | Turn each feature off |
 
 ### Palette
 
-astrotheme's astrodark palette, overridable color by color under `palette.syntax` and `palette.ui`:
+The theme's palette (astrotheme layout), overridable color by color under `palette.syntax` and `palette.ui`:
 
 `syntax`: `red orange yellow green cyan blue purple text comment mute` ·
 `ui`: `red orange yellow green cyan blue purple accent tabline winbar tool base inactive_base statusline split float title border current_line selection highlight none_text text text_active text_inactive prompt`
 
-Overriding a palette color recolors every group derived from it, as in astrotheme.
-
 ### Highlight groups
 
-Each group takes `fg`, `bg` (`"#RRGGBB"`), `bold`, `italic`, `underline`, or `link` to another group.
+Each takes `fg`, `bg` (`"#RRGGBB"`), `bold`, `italic`, `underline`, or `link` to another group.
 
 | Kind | Groups |
 |---|---|
 | Editor | `Normal` `NormalNC` `CursorLine` `LineNr` `CursorLineNr` `Visual` `Search` `CurSearch` `MatchParen` `LspReferenceText` `HighlightURL` `IblIndent` `Directory` |
 | Syntax | `@variable` `@comment` `@string` `@number` `@keyword` `@function` `@type` `@type.builtin` `@constant` `@function.macro` `@property` |
-| Statusline | `StatusLine` `StatusLineSection` `StatusLineNormal` `StatusLineInsert` `StatusLineVisual` `StatusLineCommand` `StatusLineCwd` `StatusLinePosition` `StatusLineRecording` |
+| Statusline | `StatusLine` `StatusLineSection` `StatusLineNormal` `StatusLineInsert` `StatusLineVisual` `StatusLineCommand` `StatusLineReplace` `StatusLineCwd` `StatusLinePosition` `StatusLineRecording` |
 | Tabline, windows | `TabLine` `TabLineSel` `TabLineFill` `TabLineIndicator` `TabLineModified` `BufferPicker` `WinSeparator` `WinBar` `WinBarNC` |
 | Messages, floats | `MsgArea` `ErrorMsg` `NormalFloat` `FloatBorder` `FloatTitle` `PmenuSel` `SnacksNotifierInfo` `SnacksNotifierError` |
-| Git | `GitSignsAdd` `GitSignsChange` `GitSignsDelete` |
-| Plugins look-alikes | `WhichKey` `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksDashboardHeader` `SnacksDashboardKey` `SnacksDashboardDesc` `SnacksDashboardFooter` · `SnacksPickerMatch` `SnacksPickerDir` · `NeoTreeNormal` `NeoTreeRootName` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
+| Completion | `BlinkCmpLabelMatch` `BlinkCmpKind` `BlinkCmpSource` (menu: `NormalFloat`, `FloatBorder`, `PmenuSel`) |
+| Git, TODO | `GitSignsAdd` `GitSignsChange` `GitSignsDelete` · `TodoFgFIX` `TodoFgTODO` `TodoFgHACK` `TodoFgWARN` `TodoFgPERF` `TodoFgNOTE` `TodoFgTEST` |
+| Plugins look-alikes | `WhichKey` `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksPickerMatch` `SnacksPickerDir` · `NeoTreeNormal` `NeoTreeRootName` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
+| lim | `LimCheatsheetKey` `LimCheatsheetDesc` (the start screen uses `Normal`) |
 
 ### Keymaps
 
-`keymaps` holds one object per mode: `"n"` (normal), `"i"` (insert), `"v"` (visual), `"nv"` (both
-normal and visual). Each entry maps a left-hand side to:
+`keymaps` holds one object per mode: `"n"`, `"i"`, `"v"`, `"nv"` (normal and visual). Each entry maps a
+left-hand side to a key sequence (`":w<CR>"`), an object with a which-key description
+(`{ "rhs": ":w<CR>", "desc": "Save" }`), or `false` to disable the key. Right-hand sides run without
+remapping and can call built-in mappings (`"<Leader>ff"`). Your mappings appear in which-key, the keymaps
+picker and the cheat sheet.
 
-- a key sequence: `"<Leader>w": ":w<CR>"`
-- an object with a which-key description: `"<Leader>w": { "rhs": ":w<CR>", "desc": "Save" }`
-- `false` to disable a key: `"Q": false`
-
-Right-hand sides run without remapping (`noremap`) and can call built-in mappings (`"<Leader>ff"`).
-Key notation: plain characters, `<Leader>`, `<CR>`, `<Esc>`, `<BS>`, `<Tab>`, `<S-Tab>`, `<Space>`,
-`<C-x>`, `<F1>`…`<F12>`, `<Up>` `<Down>` `<Left>` `<Right>`, `<Home>` `<End>`, `<Del>`, `<PageUp>`
+Key notation: plain characters, `<Leader>`, `<CR>`, `<Esc>`, `<BS>`, `<Tab>`, `<S-Tab>`, `<Space>`, `<C-x>`,
+`<C-Up>`…, `<F1>`…`<F12>`, `<Up>` `<Down>` `<Left>` `<Right>`, `<Home>` `<End>`, `<Del>`, `<PageUp>`
 `<PageDown>`, `<lt>`, `<Bar>`, `<Bslash>`.
 
 ## How it is built
@@ -247,34 +312,40 @@ src/
 ├── error.rs       Vim-worded errors (E32, E37, E492…)
 ├── term/          raw mode, window size, SIGWINCH, key decoding
 ├── buffer/        lines, undo history, motions, text objects, git signs, file I/O
-├── editor/        modes, operators, keymaps, windows, picker, file tree, which-key, repeat/macros
-├── syntax/        keyword highlighter with multi-line state, per-language tables
+├── editor/        modes, operators, registers, keymaps, the built-in binding table, windows, picker,
+│                  file tree, which-key, cheat sheet, completion, sessions, prompts, clipboard, macros
+├── syntax/        keyword highlighter with multi-line state, language tables, todo-comments
 ├── config/        JSON reader, key notation, options/palette/highlights/keymaps
-└── render/        cell grid, theme, windows, bars, floats, picker, tree, dashboard
+└── render/        cell grid, themes and palettes, icon sets, windows, bars, floats, picker, tree, start screen
 ```
 
-- **Rendering**: each frame is drawn into a grid of cells (floats are just later writes), then encoded to
-  ANSI; only rows that changed since the last frame are sent, and frames are skipped while keys are queued.
-- **Undo** stores the lines an edit replaced, not copies of the file; a typing run on one line costs one snapshot.
+- **Rendering** draws each frame into a grid of cells (floats are later writes), encodes it to ANSI and sends
+  only the rows that changed; frames are skipped while keys are queued.
+- **Built-in keys** live in one table (`editor/bindings.rs`): each prefixed key's action and description.
+  The dispatcher, which-key, the cheat sheet and the keymaps picker all read it, so they cannot disagree.
+- **Undo** stores the lines an edit replaced, not copies of the file, and keeps 1000 steps. The same
+  line-range changes move marks and jump-list anchors, so they follow the text.
+- **Completion** words are cached per buffer and re-read only when that buffer's text changed.
 - **Highlighting** state at each line start is cached and invalidated from the first edited line.
-- **Git signs** read the index once per open/save (`git show :./file`) and diff in memory when the text changes.
-- **Saving** writes a temp file next to the target, syncs it, keeps the permissions, then renames it over the
-  original; writing to another existing file needs `!`.
-- **No crashes**: `unwrap`, `expect`, `panic!` and friends are denied by lints outside tests. If a bug still
-  panics, the event loop catches it, repairs the editor state, copies unsaved buffers to the temp directory
-  and tells you where, then keeps going.
+- **Git signs** read the index once per open/save and diff in memory when the text changes.
+- **Saving** writes a temp file next to the target, syncs it, keeps permissions, then renames it over the
+  original; writing over another existing file needs `!`.
+- **No crashes**: `unwrap`, `expect`, `panic!` are denied outside tests. A panic is caught by the event loop,
+  which repairs the editor, copies unsaved buffers to the temp directory, says where, and goes on. `.` and
+  macros stop after 100 000 replayed keys, so a self-calling macro cannot hang the editor.
 
 ## Limits
 
-Not there (by design, to stay small): LSP, completion, treesitter (a keyword highlighter stands in), plugins,
-an embedded terminal (`<F7>` suspends to your shell instead), line wrapping, mouse, folds, file operations in
-the tree (create/rename/delete), sessions, persistent undo, Windows.
+Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics), completion, debugger, treesitter (a keyword
+highlighter stands in), plugins, an embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
+line wrapping, mouse, folds, spell checking, persistent undo, Windows. `:s` patterns are literal (plus
+`\<`/`\>`), not regexes. Visual-block columns count characters, so tabs and wide characters select unevenly.
 
 ## Development
 
 ```sh
-cargo test                     # 34 tests (incl. a random-key fuzz): motions, operators, keymaps, config, rendering at odd sizes…
+cargo test                     # 51 tests, including a random-key fuzz over every mode and screen size
 cargo clippy --all-targets     # clean; unwrap/expect/panic are denied
 ```
 
-Screenshots in `docs/screenshots/` are real lim frames captured in a pseudo-terminal and rasterised.
+Screenshots are real lim frames captured in a pseudo-terminal and rasterised.

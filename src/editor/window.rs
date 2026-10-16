@@ -52,7 +52,8 @@ impl Window {
 pub enum Layout {
     Leaf(WindowId),
     /// `vertical`: children side by side (`:vsplit`), else stacked (`:split`).
-    Split { vertical: bool, children: Vec<Layout> },
+    /// `adjust` holds each child's size change from `<C-arrows>`, in cells.
+    Split { vertical: bool, children: Vec<Layout>, adjust: Vec<i32> },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -80,11 +81,30 @@ pub enum Direction {
     Right,
 }
 
-/// Sizes of `n` children sharing `total` cells with one-cell separators between them.
-fn split_sizes(total: usize, n: usize) -> Vec<usize> {
+/// Sizes of `n` children sharing `total` cells with one-cell separators between them,
+/// equal shares moved by `adjust` (each child keeps at least one cell).
+fn split_sizes(total: usize, n: usize, adjust: &[i32]) -> Vec<usize> {
     let avail = total.saturating_sub(n.saturating_sub(1));
     let (base, extra) = (avail / n.max(1), avail % n.max(1));
-    (0..n).map(|i| base + usize::from(i < extra)).collect()
+    let mut sizes: Vec<usize> = (0..n)
+        .map(|i| {
+            let size = (base + usize::from(i < extra)) as i64 + i64::from(adjust.get(i).copied().unwrap_or(0));
+            size.clamp(1, avail.max(1) as i64) as usize
+        })
+        .collect();
+    // Clamping may break the total: give or take the difference from the largest children.
+    while sizes.iter().sum::<usize>() > avail && sizes.iter().any(|&s| s > 1) {
+        if let Some(big) = sizes.iter_mut().max() {
+            *big -= 1;
+        }
+    }
+    let sum: usize = sizes.iter().sum();
+    if let Some(last) = sizes.last_mut()
+        && sum < avail
+    {
+        *last += avail - sum;
+    }
+    sizes
 }
 
 impl Layout {
@@ -92,15 +112,16 @@ impl Layout {
     pub fn insert_beside(&mut self, target: WindowId, new: WindowId, vertical: bool) -> bool {
         match self {
             Self::Leaf(id) if *id == target => {
-                *self = Self::Split { vertical, children: vec![Self::Leaf(target), Self::Leaf(new)] };
+                *self = Self::Split { vertical, children: vec![Self::Leaf(target), Self::Leaf(new)], adjust: vec![0, 0] };
                 true
             }
             Self::Leaf(_) => false,
-            Self::Split { vertical: v, children } => {
+            Self::Split { vertical: v, children, adjust } => {
                 if *v == vertical
                     && let Some(i) = children.iter().position(|c| *c == Self::Leaf(target))
                 {
                     children.insert(i + 1, Self::Leaf(new));
+                    adjust.insert(i + 1, 0);
                     return true;
                 }
                 children.iter_mut().any(|c| c.insert_beside(target, new, vertical))
@@ -110,9 +131,11 @@ impl Layout {
 
     /// Removes leaf `id`, collapsing splits left with a single child.
     pub fn remove(&mut self, id: WindowId) -> bool {
-        let Self::Split { children, .. } = self else { return false };
+        let Self::Split { children, adjust, .. } = self else { return false };
         if let Some(i) = children.iter().position(|c| *c == Self::Leaf(id)) {
             children.remove(i);
+            adjust.clear();
+            adjust.resize(children.len(), 0);
         } else if !children.iter_mut().any(|c| c.remove(id)) {
             return false;
         }
@@ -122,6 +145,29 @@ impl Layout {
             *self = only;
         }
         true
+    }
+
+    /// Grows window `target` by `delta` cells along the nearest split of that orientation.
+    pub fn resize(&mut self, target: WindowId, horizontal: bool, delta: i32) -> bool {
+        let Self::Split { vertical, children, adjust } = self else { return false };
+        let Some(i) = children.iter().position(|c| c.contains(target)) else { return false };
+        if children[i].resize(target, horizontal, delta) {
+            return true;
+        }
+        if *vertical != horizontal || children.len() < 2 {
+            return false;
+        }
+        let neighbour = if i + 1 < children.len() { i + 1 } else { i - 1 };
+        adjust[i] += delta;
+        adjust[neighbour] -= delta;
+        true
+    }
+
+    fn contains(&self, target: WindowId) -> bool {
+        match self {
+            Self::Leaf(id) => *id == target,
+            Self::Split { children, .. } => children.iter().any(|c| c.contains(target)),
+        }
     }
 
     pub fn rects(&self, area: Rect, out: &mut Vec<(WindowId, Rect)>) {
@@ -135,10 +181,10 @@ impl Layout {
     fn walk(&self, area: Rect, leaf: &mut dyn FnMut(WindowId, Rect), sep: &mut dyn FnMut(Separator)) {
         match self {
             Self::Leaf(id) => leaf(*id, area),
-            Self::Split { vertical, children } => {
+            Self::Split { vertical, children, adjust } => {
                 let total = if *vertical { area.w } else { area.h };
                 let mut offset = 0;
-                for (i, (child, size)) in children.iter().zip(split_sizes(total, children.len())).enumerate() {
+                for (i, (child, size)) in children.iter().zip(split_sizes(total, children.len(), adjust)).enumerate() {
                     let rect = if *vertical {
                         Rect { x: area.x + offset, w: size, ..area }
                     } else {
@@ -207,7 +253,11 @@ mod tests {
         assert_eq!(neighbor(&rects, rects[2].1, 7, 11, Direction::Up), Some(b));
         assert_eq!(neighbor(&rects, rects[1].1, 1, 11, Direction::Right), None);
         assert!(layout.remove(b));
-        assert_eq!(layout, Layout::Split { vertical: true, children: vec![Layout::Leaf(a), Layout::Leaf(c)] });
+        assert!(layout.resize(c, true, 3));
+        assert_eq!(layout, Layout::Split { vertical: true, children: vec![Layout::Leaf(a), Layout::Leaf(c)], adjust: vec![-3, 3] });
+        let mut rects = Vec::new();
+        layout.rects(area, &mut rects);
+        assert_eq!((rects[0].1.w, rects[1].1.w), (7, 13));
         assert!(layout.remove(c));
         assert_eq!(layout, Layout::Leaf(a));
     }

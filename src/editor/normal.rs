@@ -4,20 +4,23 @@ use super::command::Command;
 use super::motion::{Motion, Span};
 use super::operator::Operator;
 use super::picker::PickerKind;
-use super::manage::CloseSet;
-use super::ui::{CTRL_W, LEADER_B, LEADER_F, LEADER_G, LEADER_T, LEADER_U};
+use super::prompt::PromptAction;
+use super::registers::Register;
+use super::session;
+use super::bindings::{self, Action};
+use super::ui::{CTRL_W, LEADER_F};
 use super::window::Direction;
-use super::{Editor, Mode, Pending, PickAction, Register};
+use super::{Editor, Mode, Pending};
 use crate::buffer::{CharClass, Pos, text};
 use crate::config::keys::LEADER;
 use crate::error::Error;
 use crate::term::Key;
 
 /// Keys that wait for one more: `gg`, `f{c}`, `r{c}`, `ZZ`, `]b`, and the leader.
-const PREFIXES: &str = "gfFtTrZq@[]\u{F8FF}";
+const PREFIXES: &str = "gfFtTrZq@[]\"m'`z\u{F8FF}";
 
 /// Prefixes visual mode takes: motions, text objects (`iw`), `gc` and the leader.
-pub(super) const VISUAL_PREFIXES: &str = "gfFtTia\u{F8FF}";
+pub(super) const VISUAL_PREFIXES: &str = "gfFtTiar\"'`\u{F8FF}";
 
 impl Editor {
     pub(super) fn normal(&mut self, key: Key) {
@@ -30,8 +33,11 @@ impl Editor {
             return self.prefixed(prefix, key);
         }
         if key == Key::F(7) {
-            self.shell_requested = true;
+            self.shell_requested = Some(Vec::new());
             return;
+        }
+        if key == Key::F(1) {
+            return self.open_cheatsheet();
         }
         // snacks.dashboard: its own keys; everything that edits text is ignored while it shows.
         if self.dashboard && self.pending.is_empty() {
@@ -53,6 +59,9 @@ impl Editor {
         if key == Key::Char('q') && self.recording().is_some() {
             return self.stop_recording();
         }
+        if self.repeat_find_key(key) {
+            return;
+        }
         // `i`/`a` after an operator start a text object (`diw`, `ca(`), otherwise they insert.
         let objects = if self.pending.op.is_some() { "ia" } else { "" };
         if self.push_count(key) || self.push_prefix(key, PREFIXES) || self.push_prefix(key, objects) {
@@ -64,6 +73,13 @@ impl Editor {
         {
             self.pending = Pending::default();
             return self.move_buffer(if op == Operator::Indent { 1 } else { -1 });
+        }
+        // AstroNvim's `gco` / `gcO`: a new comment line below / above.
+        if self.pending.op == Some(Operator::Comment)
+            && let Key::Char(c @ ('o' | 'O')) = key
+        {
+            self.pending = Pending::default();
+            return self.add_comment_line(c == 'o');
         }
         if let Some(motion) = Motion::from_key(key) {
             return self.run_motion(motion);
@@ -103,7 +119,7 @@ impl Editor {
             Key::Char('P') => self.paste(false, n),
             Key::Char('u') => self.undo(n, false),
             Key::Ctrl('r') => self.undo(n, true),
-            Key::Char('J') => self.join(n),
+            Key::Char('J') => self.join(n, true),
             Key::Char('~') => self.toggle_case(n),
             Key::Char('.') => self.repeat_change(n),
             Key::Char('*') => self.search_word(true),
@@ -111,7 +127,27 @@ impl Editor {
             Key::Char('v') => self.start_visual(Mode::Visual),
             Key::Char('V') => self.start_visual(Mode::VisualLine),
             Key::Char(':') => self.start_cmdline(Mode::Command),
-            Key::Char('/') => self.start_cmdline(Mode::Search),
+            Key::Char('/') => {
+                self.search_forward = true;
+                self.start_cmdline(Mode::Search);
+            }
+            Key::Char('?') => {
+                self.search_forward = false;
+                self.start_cmdline(Mode::Search);
+            }
+            Key::Char('R') => self.start_replace(),
+            Key::Char('&') => self.repeat_substitute(),
+            Key::Ctrl('a') => self.increment(n as i64),
+            Key::Ctrl('x') => self.increment(-(n as i64)),
+            Key::Ctrl('o') => self.jump_back(n),
+            Key::Ctrl('e') => self.scroll_view(1, n),
+            Key::Ctrl('y') => self.scroll_view(-1, n),
+            Key::Ctrl('v') => self.start_visual(Mode::VisualBlock),
+            Key::CtrlUp => self.resize_window(false, 2),
+            Key::CtrlDown => self.resize_window(false, -2),
+            Key::CtrlLeft => self.resize_window(true, -2),
+            Key::CtrlRight => self.resize_window(true, 2),
+            Key::Esc => self.register_name = None,
             Key::Char('|') => self.split(true),
             Key::Char('\\') => self.split(false),
             Key::Ctrl('h') => self.focus_direction(Direction::Left),
@@ -158,92 +194,134 @@ impl Editor {
             }
         };
         let n = self.pending.count.unwrap_or(1);
+        // Keys that take an argument rather than naming a command.
         match (prefix, c) {
-            ('g', 'g') => return self.run_motion(Motion::FileStart),
             ('f' | 'F' | 't' | 'T', ch) => {
                 let till = matches!(prefix, 't' | 'T');
+                self.last_find = Some((ch, prefix.is_ascii_lowercase(), till));
                 return self.run_motion(Motion::Find { ch, forward: prefix.is_ascii_lowercase(), till });
+            }
+            ('"', name) => {
+                self.register_name = Some(name);
+                return;
+            }
+            ('m', name) => self.set_mark(name),
+            ('\'' | '`', name) => {
+                let name = if matches!(name, '\'' | '`') { '\'' } else { name };
+                return self.run_motion(Motion::Mark { name, exact: prefix == '`' });
             }
             ('r', ch) => self.replace_chars(ch, n),
             ('i' | 'a', obj) => self.select_object(prefix == 'a', obj),
-            ('g', 'c') | (LEADER, '/') if self.mode != Mode::Normal => {
+            ('q', reg) => self.start_recording(reg),
+            ('@', reg) => self.play_macro(reg, n),
+            _ => {
+                if let Some(action) = bindings::lookup(prefix, c).filter(|&a| bindings::allowed_in(self.mode, a))
+                    && self.run_action(action, n)
+                {
+                    return;
+                }
+            }
+        }
+        self.pending = Pending::default();
+    }
+
+    /// Runs a binding from the table; true when it left a prefix or operator waiting.
+    fn run_action(&mut self, action: Action, n: usize) -> bool {
+        let visual = matches!(self.mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock);
+        match action {
+            Action::Group(sub) => {
+                self.pending.prefix = Some(sub);
+                return true;
+            }
+            Action::Motion(motion) => {
+                self.run_motion(motion);
+                return true;
+            }
+            // In visual mode an operator applies to the selection at once.
+            Action::Operator(op) if visual => {
                 let span = if self.mode == Mode::Visual { Span::Inclusive } else { Span::Linewise };
                 let cursor = self.buf().cursor;
                 self.mode = Mode::Normal;
-                self.apply(Operator::Comment, self.anchor, cursor, span);
+                self.buf_mut().seal();
+                self.apply(op, self.anchor, cursor, span);
             }
-            ('g', 'c') => {
-                self.pending.op = Some(Operator::Comment);
-                return;
+            Action::Operator(op) => {
+                self.pending.op = Some(op);
+                return true;
             }
-            (LEADER, '/') => self.apply_count_lines(Operator::Comment, n),
-            ('q', reg) => self.start_recording(reg),
-            ('@', reg) => self.play_macro(reg, n),
-            (LEADER, sub @ ('b' | 'f' | 'g' | 't' | 'u')) => {
-                self.pending.prefix = Some(match sub {
-                    'b' => LEADER_B,
-                    'f' => LEADER_F,
-                    'g' => LEADER_G,
-                    't' => LEADER_T,
-                    _ => LEADER_U,
-                });
-                return;
+            Action::CommentLines if visual => return self.run_action(Action::Operator(Operator::Comment), n),
+            Action::CommentLines => self.apply_count_lines(Operator::Comment, n),
+            Action::Save => self.run(Command::Write { path: None, force: false }),
+            Action::Quit => self.run(Command::Quit { force: false }),
+            Action::QuitAll => self.run(Command::QuitAll { force: false }),
+            Action::WriteQuit => self.run(Command::WriteQuit { path: None, force: false, only_if_dirty: true }),
+            Action::ForceQuit => self.run(Command::Quit { force: true }),
+            Action::NewFile => self.run(Command::New),
+            Action::CloseBuffer { force } => self.run(Command::BufferDelete { force }),
+            Action::RenameFile => {
+                let current = self.buf().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                self.open_prompt("New Filename", &current, PromptAction::RenameFile);
             }
-            (LEADER_U, c) => self.toggle(c),
-            (LEADER, 'e') => self.toggle_explorer(),
-            (LEADER, 'o') => self.focus_explorer(),
-            (LEADER, 'h') => self.dashboard = !self.dashboard,
-            (LEADER_T, 'f' | 'h' | 'v') => self.shell_requested = true,
-            (LEADER_F, 'f') => self.open_picker(PickerKind::Files { all: false }),
-            (LEADER_F, 'F') => self.open_picker(PickerKind::Files { all: true }),
-            (LEADER_F, 'g') => self.open_picker(PickerKind::GitFiles),
-            (LEADER_F, 'w') => self.open_picker(PickerKind::Grep { all: false }),
-            (LEADER_F, 'W') => self.open_picker(PickerKind::Grep { all: true }),
-            (LEADER_F, 'b') => self.open_picker(PickerKind::Buffers),
-            (LEADER_F, 'o') => self.open_picker(PickerKind::Recent),
-            (LEADER_F, 'k') => self.open_picker(PickerKind::Keymaps),
-            (LEADER_F, 'C') => self.open_picker(PickerKind::Commands),
-            (LEADER_F, 'l') => self.open_picker(PickerKind::Lines),
-            (LEADER_F, 'c') => self.grep_word(),
-            (LEADER_F, '\r') => self.resume_picker(),
-            (LEADER_G, 'g') | (']', 'g') => self.jump_hunk(true),
-            (LEADER_G, 'G') | ('[', 'g') => self.jump_hunk(false),
-            (']', 'b') => self.cycle(n as isize),
-            ('[', 'b') => self.cycle(-(n as isize)),
-            (LEADER, 'c') => self.run(Command::BufferDelete { force: false }),
-            (LEADER, 'C') => self.run(Command::BufferDelete { force: true }),
-            (LEADER, 'Q') => self.run(Command::QuitAll { force: false }),
-            (LEADER_B, 'b') => self.mode = Mode::BufferPick(PickAction::Go),
-            (LEADER_B, 'd') => self.mode = Mode::BufferPick(PickAction::Close),
-            (LEADER_B, '\\') => self.mode = Mode::BufferPick(PickAction::SplitBelow),
-            (LEADER_B, '|') => self.mode = Mode::BufferPick(PickAction::SplitRight),
-            (LEADER_B, 'c') => self.close_buffers(CloseSet::Others),
-            (LEADER_B, 'C') => self.close_buffers(CloseSet::All),
-            (LEADER_B, 'l') => self.close_buffers(CloseSet::Left),
-            (LEADER_B, 'r') => self.close_buffers(CloseSet::Right),
-            (LEADER_B, 'p') => self.go_previous_buffer(),
-            (CTRL_W, 'v') => self.split(true),
-            (CTRL_W, 's') => self.split(false),
-            (CTRL_W, 'c' | 'q') => self.run(Command::CloseWindow),
-            (CTRL_W, 'o') => self.only_window(),
-            (CTRL_W, 'w') => self.focus_next_window(),
-            (CTRL_W, 'h') => self.focus_direction(Direction::Left),
-            (CTRL_W, 'j') => self.focus_direction(Direction::Down),
-            (CTRL_W, 'k') => self.focus_direction(Direction::Up),
-            (CTRL_W, 'l') => self.focus_direction(Direction::Right),
-            (LEADER, 'w') => self.run(Command::Write { path: None, force: false }),
-            (LEADER, 'q') => self.run(Command::Quit { force: false }),
-            (LEADER, 'n') => self.run(Command::New),
-            ('Z', 'Z') => self.run(Command::WriteQuit { path: None, force: false, only_if_dirty: true }),
-            ('Z', 'Q') => self.run(Command::Quit { force: true }),
-            _ => {}
+            Action::ToggleExplorer => self.toggle_explorer(),
+            Action::FocusExplorer => self.focus_explorer(),
+            Action::Home => self.dashboard = !self.dashboard,
+            Action::Cheatsheet => self.open_cheatsheet(),
+            Action::Picker(kind) => self.open_picker(kind),
+            Action::ResumePicker => self.resume_picker(),
+            Action::GrepWord => self.grep_word(),
+            Action::BufferPick(pick) => self.mode = Mode::BufferPick(pick),
+            Action::CloseBuffers(set) => self.close_buffers(set),
+            Action::PreviousBuffer => self.go_previous_buffer(),
+            Action::SortBuffers(by) => self.sort_buffers(by),
+            Action::CycleBuffer(step) => self.cycle(step * n as isize),
+            Action::Shell => self.shell_requested = Some(Vec::new()),
+            Action::Tool(argv) => self.run_tool(argv),
+            Action::GitBrowse => self.git_browse(),
+            Action::Hunk { forward } => self.jump_hunk(forward),
+            Action::HunkEdge { last } => self.jump_hunk_edge(last),
+            Action::Reference { forward } => self.jump_reference(forward, n),
+            Action::Todo { forward } => self.jump_todo(forward),
+            Action::Toggle(key) => self.toggle(key),
+            Action::SessionLoadLast => self.load_session(session::LAST, false),
+            Action::SessionSave => self.open_prompt("Session name", "", PromptAction::SessionSave),
+            Action::SessionSaveDir => self.save_dirsession(),
+            Action::SessionLoadDir => self.load_dirsession(),
+            Action::Split { vertical } => self.split(vertical),
+            Action::CloseWindow => self.run(Command::CloseWindow),
+            Action::OnlyWindow => self.only_window(),
+            Action::NextWindow => self.focus_next_window(),
+            Action::Focus(direction) => self.focus_direction(direction),
+            Action::ScrollTo(place) => self.scroll_cursor_to(place),
+            Action::Reselect => self.reselect(),
+            Action::InsertLast => {
+                let at = self.buf().marks.get(&'^').copied();
+                if let Some(at) = at {
+                    self.buf_mut().cursor = at;
+                }
+                self.mode = Mode::Insert;
+            }
+            Action::InsertColumnZero => self.start_insert(0),
+            Action::JoinRaw => self.join(n, false),
+            Action::OpenUrl => self.open_url_under_cursor(),
         }
-        self.pending = Pending::default();
+        false
+    }
+
+    /// `;` and `,`: the last `f`/`t` again, same or opposite direction.
+    pub(super) fn repeat_find_key(&mut self, key: Key) -> bool {
+        let (Key::Char(c @ (';' | ',')), Some((ch, forward, till))) = (key, self.last_find) else { return false };
+        self.run_motion(Motion::Find { ch, forward: forward == (c == ';'), till });
+        true
     }
 
     /// Moves the cursor, or applies the pending operator up to the motion target.
     pub(super) fn run_motion(&mut self, motion: Motion) {
         let Pending { count, op, .. } = std::mem::take(&mut self.pending);
+        // `?` searches backward: `n` keeps that direction, `N` reverses it.
+        let motion = match motion {
+            Motion::SearchNext { forward } => Motion::SearchNext { forward: forward == self.search_forward },
+            m => m,
+        };
         let buf = self.buf();
         let from = buf.cursor;
         let Some(mut target) = motion.target(buf, count, self.view_height, &self.search) else {
@@ -264,7 +342,7 @@ impl Editor {
         {
             if op == Operator::Change && buf.class_at(from) != CharClass::Blank {
                 target = (0..count.unwrap_or(1))
-                    .fold(from, |p, i| if i == 0 && buf.at_word_end(p) { p } else { buf.word_end(p) });
+                    .fold(from, |p, i| if i == 0 && buf.at_word_end(p) { p } else { buf.word_end(p, false) });
                 span = Span::Inclusive;
             } else if target.line > from.line {
                 target = Pos::new(from.line, buf.line_len(from.line));
@@ -272,6 +350,10 @@ impl Editor {
         }
         if let Motion::SearchNext { .. } = motion {
             self.highlight_search = true;
+        }
+        // Recorded after the target is known, so `''` still reads the previous jump.
+        if op.is_none() && motion.is_jump() {
+            self.push_jump();
         }
         match op {
             Some(op) => self.apply(op, from, target, span),
@@ -330,22 +412,22 @@ impl Editor {
         self.apply(op, Pos::new(first, 0), Pos::new(last, 0), Span::Linewise);
     }
 
-    fn start_insert(&mut self, col: usize) {
+    pub(super) fn start_insert(&mut self, col: usize) {
         self.buf_mut().cursor.col = col;
         self.mode = Mode::Insert;
     }
 
-    fn start_visual(&mut self, mode: Mode) {
+    pub(super) fn start_visual(&mut self, mode: Mode) {
         self.anchor = self.buf().cursor;
         self.mode = mode;
     }
 
-    fn start_cmdline(&mut self, mode: Mode) {
+    pub(super) fn start_cmdline(&mut self, mode: Mode) {
         self.cmdline.clear();
         self.mode = mode;
     }
 
-    fn open_line(&mut self, below: bool) {
+    pub(super) fn open_line(&mut self, below: bool) {
         let buf = self.buf_mut();
         let line = buf.cursor.line;
         let indent = text::indent(buf.line(line)).to_owned();
@@ -358,7 +440,14 @@ impl Editor {
     }
 
     fn paste(&mut self, after: bool, n: usize) {
-        let Some(Register { text, linewise }) = self.register.clone() else { return };
+        let Some(reg) = self.fetch_register() else { return };
+        if reg.text.is_empty() && !reg.linewise {
+            return;
+        }
+        if reg.block {
+            return self.put_block(&reg, after);
+        }
+        let Register { text, linewise, .. } = reg;
         let buf = self.buf_mut();
         let here = buf.cursor;
         if linewise {
@@ -384,16 +473,20 @@ impl Editor {
         }
     }
 
-    fn join(&mut self, n: usize) {
+    /// `J` (one space between, trimmed) or `gJ` (`spaces = false`: lines glued as they are).
+    pub(super) fn join(&mut self, n: usize, spaces: bool) {
         let buf = self.buf_mut();
         for _ in 0..n.max(2) - 1 {
             let line = buf.cursor.line;
             if line >= buf.last_line() {
                 break;
             }
-            let left = buf.line(line).trim_end();
-            let right = buf.line(line + 1).trim_start();
-            let sep = if left.is_empty() || right.is_empty() || right.starts_with(')') { "" } else { " " };
+            let (left, right) = if spaces {
+                (buf.line(line).trim_end(), buf.line(line + 1).trim_start())
+            } else {
+                (buf.line(line), buf.line(line + 1))
+            };
+            let sep = if !spaces || left.is_empty() || right.is_empty() || right.starts_with(')') { "" } else { " " };
             let col = text::char_len(left);
             let joined = format!("{left}{sep}{right}");
             buf.splice(line..line + 2, vec![joined]);

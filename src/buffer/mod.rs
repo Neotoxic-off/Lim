@@ -37,6 +37,16 @@ pub struct Buffer {
     pub top: usize,
     pub left: usize,
     pub lang: Option<&'static Lang>,
+    /// `m{a-z}` marks, plus `'` (position before the last jump) and `^` (last insert).
+    pub marks: std::collections::HashMap<char, Pos>,
+    /// Name shown for buffers without a file (`git show` output…).
+    pub title: Option<String>,
+    /// Positions the jump list points at, kept in step with edits like marks.
+    anchors: std::collections::HashMap<u64, Pos>,
+    /// Bumped on every change (unlike `version`, which typing within one undo step keeps).
+    revision: u64,
+    /// Completion words and the revision they were read at.
+    word_cache: (u64, Vec<String>),
     lines: Vec<String>,
     crlf: bool,
     history: History,
@@ -59,6 +69,11 @@ impl Buffer {
             .collect();
         Self {
             lang: path.as_deref().and_then(syntax::lang_for),
+            marks: std::collections::HashMap::new(),
+            title: None,
+            anchors: std::collections::HashMap::new(),
+            revision: 0,
+            word_cache: (u64::MAX, Vec::new()),
             path,
             cursor: Pos::default(),
             want_col: 0,
@@ -150,6 +165,25 @@ impl Buffer {
         self.history.state() != self.saved
     }
 
+    /// Re-reads an unmodified buffer whose file changed on disk (after a shell or lazygit).
+    pub fn reload_if_changed(&mut self) {
+        let Some(path) = self.path.clone() else { return };
+        if self.is_dirty() {
+            return;
+        }
+        let Ok(bytes) = fs::read(&path) else { return };
+        let Ok(text) = String::from_utf8(bytes) else { return };
+        let fresh = Self::from_text(None, &text);
+        if fresh.lines != self.lines {
+            let all = 0..self.lines.len();
+            self.splice(all, fresh.lines);
+            self.history.seal();
+            self.saved = self.history.state();
+            self.clamp(false);
+            self.load_git_base();
+        }
+    }
+
     /// Changes whenever the text does (edits, undo, redo).
     pub fn version(&self) -> u64 {
         self.history.state()
@@ -159,7 +193,7 @@ impl Buffer {
         self.path
             .as_deref()
             .and_then(Path::file_name)
-            .map_or_else(|| "[No Name]".into(), |n| n.to_string_lossy().into_owned())
+            .map_or_else(|| self.title.clone().unwrap_or_else(|| "[No Name]".into()), |n| n.to_string_lossy().into_owned())
     }
 
     pub fn lines(&self) -> &[String] {
@@ -200,17 +234,54 @@ impl Buffer {
 
     pub fn undo(&mut self) -> bool {
         self.syntax.invalidate(0);
-        self.history.undo(&mut self.lines).map(|p| self.cursor = p).is_some()
+        self.revision += 1;
+        let (marks, anchors) = (&mut self.marks, &mut self.anchors);
+        let cursor = self.history.undo(&mut self.lines, &mut |at, removed, inserted| shift_positions(marks, anchors, at, removed, inserted));
+        cursor.map(|p| self.cursor = p).is_some()
     }
 
     pub fn redo(&mut self) -> bool {
         self.syntax.invalidate(0);
-        self.history.redo(&mut self.lines).map(|p| self.cursor = p).is_some()
+        self.revision += 1;
+        let (marks, anchors) = (&mut self.marks, &mut self.anchors);
+        let cursor = self.history.redo(&mut self.lines, &mut |at, removed, inserted| shift_positions(marks, anchors, at, removed, inserted));
+        cursor.map(|p| self.cursor = p).is_some()
+    }
+
+    /// Words for completion, re-read only when the text changed. Huge files contribute the
+    /// lines around the cursor only.
+    pub fn words(&mut self) -> &[String] {
+        const WINDOW: usize = 5_000;
+        if self.word_cache.0 != self.revision {
+            let lines = if self.lines.len() > 4 * WINDOW {
+                let from = self.cursor.line.saturating_sub(WINDOW);
+                &self.lines[from..(self.cursor.line + WINDOW).min(self.lines.len())]
+            } else {
+                &self.lines[..]
+            };
+            self.word_cache = (self.revision, crate::editor::words_of(lines));
+        }
+        &self.word_cache.1
+    }
+
+    /// Remembers `at` as a position that follows edits (jump list entries); returns its id.
+    pub fn add_anchor(&mut self, id: u64, at: Pos) {
+        self.anchors.insert(id, at);
+    }
+
+    pub fn anchor(&self, id: u64) -> Option<Pos> {
+        self.anchors.get(&id).copied()
+    }
+
+    pub fn remove_anchor(&mut self, id: u64) {
+        self.anchors.remove(&id);
     }
 
     /// The single mutation point: every edit goes through here so it is undoable.
     pub fn splice(&mut self, range: Range<usize>, new: Vec<String>) {
         self.syntax.invalidate(range.start);
+        self.revision += 1;
+        shift_positions(&mut self.marks, &mut self.anchors, range.start, range.len(), new.len());
         let new_len = new.len();
         let old = self.lines.splice(range.clone(), new).collect();
         self.history.record(Change { at: range.start, old, new_len, cursor: self.cursor });
@@ -295,6 +366,39 @@ impl Buffer {
     fn byte(&self, p: Pos) -> usize {
         text::byte_index(&self.lines[p.line], p.col)
     }
+}
+
+/// Moves marks and anchors after `removed` lines at `at` were replaced by `inserted` lines.
+/// Lines below shift; positions on lines that went away land on the last new line, and a
+/// letter mark whose line was deleted outright is dropped, as in Vim.
+fn shift_positions(
+    marks: &mut std::collections::HashMap<char, Pos>,
+    anchors: &mut std::collections::HashMap<u64, Pos>,
+    at: usize,
+    removed: usize,
+    inserted: usize,
+) {
+    if removed == inserted {
+        return;
+    }
+    let moved = |p: &mut Pos| -> bool {
+        if p.line >= at + removed {
+            p.line = p.line - removed + inserted;
+        } else if p.line >= at + inserted {
+            if inserted == 0 {
+                // Clamped to the buffer when used.
+                p.line = at;
+                p.col = 0;
+                return false;
+            }
+            p.line = at + inserted - 1;
+        }
+        true
+    };
+    marks.retain(|name, p| moved(p) || !name.is_ascii_lowercase());
+    anchors.values_mut().for_each(|p| {
+        moved(p);
+    });
 }
 
 /// Writes through a temp file + rename, so a crash or full disk never leaves a truncated file.

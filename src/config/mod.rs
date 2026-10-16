@@ -62,6 +62,20 @@ pub struct Options {
     pub dashboard: bool,
     /// Keyword highlighting (`<Leader>uy`).
     pub syntax: bool,
+    /// `clipboard=unnamedplus`: yank and put go through the system clipboard.
+    pub clipboard: bool,
+    /// One blank column left of the numbers, as AstroNvim's statuscolumn.
+    pub foldcolumn: bool,
+    /// highlight-colors: `#RRGGBB` shown in its own color.
+    pub colorhighlight: bool,
+    /// todo-comments: `TODO:`, `FIX:`, `HACK:`… highlighted in comments.
+    pub todocomments: bool,
+    /// Built-in theme name (see `:colorscheme`); unset, the last one picked (or astrodark).
+    pub colorscheme: Option<String>,
+    /// Icon set: "nerd", "unicode" or "ascii".
+    pub iconset: String,
+    /// blink.cmp-style completion from buffer words while typing.
+    pub completion: bool,
 }
 
 impl Default for Options {
@@ -97,6 +111,13 @@ impl Default for Options {
             notifications: true,
             dashboard: true,
             syntax: true,
+            clipboard: true,
+            foldcolumn: true,
+            colorhighlight: true,
+            todocomments: true,
+            colorscheme: None,
+            iconset: "nerd".into(),
+            completion: true,
         }
     }
 }
@@ -229,6 +250,31 @@ impl Config {
                 "notifications" => set_bool(&mut o.notifications, value),
                 "dashboard" => set_bool(&mut o.dashboard, value),
                 "syntax" => set_bool(&mut o.syntax, value),
+                "foldcolumn" => set_bool(&mut o.foldcolumn, value),
+                "completion" => set_bool(&mut o.completion, value),
+                "colorhighlight" => set_bool(&mut o.colorhighlight, value),
+                "todocomments" => set_bool(&mut o.todocomments, value),
+                "clipboard" => match value {
+                    Json::String(s) => {
+                        o.clipboard = s.contains("unnamed");
+                        true
+                    }
+                    other => set_bool(&mut o.clipboard, other),
+                },
+                "colorscheme" => match value {
+                    Json::String(s) => {
+                        o.colorscheme = Some(s.clone());
+                        true
+                    }
+                    _ => false,
+                },
+                "iconset" => match value {
+                    Json::String(s) if ["nerd", "unicode", "ascii"].contains(&s.as_str()) => {
+                        o.iconset = s.clone();
+                        true
+                    }
+                    _ => false,
+                },
                 "truecolor" => match value {
                     Json::Bool(b) => {
                         o.truecolor = Some(*b);

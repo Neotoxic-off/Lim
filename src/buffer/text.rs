@@ -148,6 +148,24 @@ pub fn find_urls(line: &str) -> Vec<Range<usize>> {
     urls
 }
 
+/// `#RRGGBB` color literals (highlight-colors) as char ranges with their value.
+pub fn find_hex_colors(line: &str) -> Vec<(Range<usize>, u32)> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut found = Vec::new();
+    for i in 0..chars.len() {
+        let digits = chars.get(i + 1..i + 7);
+        if chars[i] == '#'
+            && let Some(digits) = digits
+            && digits.iter().all(char::is_ascii_hexdigit)
+            && !chars.get(i + 7).is_some_and(char::is_ascii_alphanumeric)
+            && let Ok(value) = u32::from_str_radix(&digits.iter().collect::<String>(), 16)
+        {
+            found.push((i..i + 7, value));
+        }
+    }
+    found
+}
+
 fn find_plain(line: &str, pattern: &str) -> Vec<Range<usize>> {
     let smart_sensitive = SMART_CASE.load(Relaxed) && pattern.chars().any(char::is_uppercase);
     let (lowered_line, lowered_pattern);
@@ -185,6 +203,7 @@ mod tests {
         assert_eq!(find_all("é foo", "foo"), vec![2..5]);
         assert_eq!(find_all("foo food _foo foo", "\\<foo\\>"), vec![0..3, 14..17]);
         assert_eq!(find_word("Foo foo food", "foo"), vec![4..7]);
+        assert_eq!(find_hex_colors("a #1A1D23 #12345 #abcdefg"), vec![(2..9, 0x1A1D23)]);
         assert_eq!(find_urls("see https://x.io/a?b=1). and http://y"), vec![4..22, 29..37]);
     }
 }

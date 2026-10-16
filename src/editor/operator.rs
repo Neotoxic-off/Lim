@@ -3,7 +3,9 @@
 use std::ops::RangeInclusive;
 
 use super::motion::Span;
-use super::{Editor, Mode, Register};
+use super::registers::Register;
+use super::vim::Case;
+use super::{Editor, Mode};
 use crate::buffer::{Pos, text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,6 +17,10 @@ pub enum Operator {
     Dedent,
     /// `gc`: toggle line comments.
     Comment,
+    /// `gu`, `gU`, `g~`
+    Lower,
+    Upper,
+    ToggleCase,
 }
 
 impl Operator {
@@ -38,6 +44,9 @@ impl Operator {
             Self::Indent => '>',
             Self::Dedent => '<',
             Self::Comment => 'c',
+            Self::Lower => 'u',
+            Self::Upper => 'U',
+            Self::ToggleCase => '~',
         }
     }
 }
@@ -48,14 +57,26 @@ impl Editor {
         match (op, span) {
             (Operator::Indent | Operator::Dedent, _) => self.shift(op == Operator::Indent, start.line..=end.line),
             (Operator::Comment, _) => self.toggle_comment(start.line..=end.line),
+            (Operator::Lower | Operator::Upper | Operator::ToggleCase, span) => {
+                let case = match op {
+                    Operator::Lower => Case::Lower,
+                    Operator::Upper => Case::Upper,
+                    _ => Case::Toggle,
+                };
+                let end = if span == Span::Inclusive { Pos::new(end.line, end.col + 1) } else { end };
+                self.change_case(case, start, end, span == Span::Linewise);
+            }
             (_, Span::Linewise) => self.apply_lines(op, start.line, end.line),
             (_, span) => self.apply_chars(op, start, end, span == Span::Inclusive),
         }
     }
 
     fn apply_lines(&mut self, op: Operator, first: usize, last: usize) {
+        let lines = self.buf().lines()[first..=last].join("\n");
+        if matches!(op, Operator::Delete | Operator::Change | Operator::Yank) {
+            self.store_register(Register { text: lines, linewise: true, block: false }, op == Operator::Yank);
+        }
         let buf = &mut self.buffers[self.current];
-        self.register = Some(Register { text: buf.lines()[first..=last].join("\n"), linewise: true });
         match op {
             Operator::Delete => {
                 buf.splice(first..last + 1, Vec::new());
@@ -70,7 +91,7 @@ impl Editor {
                 self.auto_indent = (col > 0).then_some(first);
                 self.mode = Mode::Insert;
             }
-            Operator::Yank | Operator::Indent | Operator::Dedent | Operator::Comment => buf.cursor.line = first,
+            _ => buf.cursor.line = first,
         }
     }
 
@@ -84,7 +105,7 @@ impl Editor {
         let text = if op == Operator::Yank { buf.text(start, end) } else { buf.remove(start, end) };
         buf.cursor = start;
         if !text.is_empty() {
-            self.register = Some(Register { text, linewise: false });
+            self.store_register(Register { text, linewise: false, block: false }, op == Operator::Yank);
         }
         if op == Operator::Change {
             self.mode = Mode::Insert;
@@ -114,6 +135,13 @@ impl Editor {
             buf.set_line(y, toggled);
         }
         buf.cursor.line = first;
+    }
+
+    /// `<C-t>` / `<C-d>` in insert mode: shift one line without moving to its first char.
+    pub(super) fn shift_keep_cursor(&mut self, indent: bool, line: usize) {
+        let cursor = self.buf().cursor;
+        self.shift(indent, line..=line);
+        self.buf_mut().cursor = cursor;
     }
 
     fn shift(&mut self, indent: bool, lines: RangeInclusive<usize>) {

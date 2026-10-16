@@ -8,7 +8,7 @@ use crate::syntax;
 /// Draws the tree into `area`; returns the cursor cell when the tree has focus.
 pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, usize)> {
     let t = theme();
-    let icons = ed.options.icons;
+    let set = super::icons::icons(&ed.options);
     let open: Vec<std::path::PathBuf> =
         ed.buffers.iter().filter_map(|b| b.path.as_ref().map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()))).collect();
     let explorer = ed.explorer.as_mut()?;
@@ -16,7 +16,7 @@ pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, 
     grid.fill(area, base);
     let mut header = Row::new(area.w);
     let root = explorer.root.file_name().map_or_else(|| explorer.root.display().to_string(), |n| n.to_string_lossy().into_owned());
-    header.text(t.on(Group::ExplorerRoot, base.bg), &format!(" {}{root}", if icons { "\u{f07c} " } else { "" }));
+    header.text(t.on(Group::ExplorerRoot, base.bg), &format!(" {}{root}", super::icons::Icons::spaced(set.folder_open)));
     grid.put(area.x, area.y, &header.finish(base));
 
     let rows = area.h.saturating_sub(1);
@@ -36,12 +36,13 @@ pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, 
             let marker = if depth + 1 == entry.depth && entry.last { "\u{2514} " } else { "\u{2502} " };
             row.text(t.on(Group::ExplorerIndent, bg), marker);
         }
-        if icons {
-            let (icon, color) = if entry.dir {
-                (if entry.expanded { '\u{f07c}' } else { '\u{f07b}' }, t.fg(Group::ExplorerDirectory))
-            } else {
-                syntax::lang_for(&entry.path).map_or(('\u{f15b}', line.fg), |l| (l.icon, Rgb(l.icon_color)))
-            };
+        let (icon, color) = if entry.dir {
+            ((if entry.expanded { set.folder_open } else { set.folder_closed }).to_owned(), t.fg(Group::ExplorerDirectory))
+        } else {
+            let (icon, color) = set.for_file(syntax::lang_for(&entry.path));
+            (icon, color.map_or(line.fg, Rgb))
+        };
+        if !icon.is_empty() {
             row.text(Style { fg: color, ..line }, &format!("{icon} "));
         }
         if selected {
@@ -59,10 +60,10 @@ pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, 
         row.text(Style { fg: t.fg(name_group), ..line }, &entry.name);
         if let Some(status) = entry.git.filter(|_| !entry.dir) {
             let symbol = match status {
-                GitStatus::Modified => "\u{f111}",
-                GitStatus::Added => "\u{271a}",
-                GitStatus::Untracked => "\u{2605}",
-                GitStatus::Deleted => "\u{2716}",
+                GitStatus::Modified => set.git_modified,
+                GitStatus::Added => set.git_added,
+                GitStatus::Untracked => set.git_untracked,
+                GitStatus::Deleted => set.git_deleted,
             };
             row.pad_to(line, area.w.saturating_sub(2));
             row.text(Style { fg: t.fg(name_group), ..line }, symbol);

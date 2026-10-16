@@ -1,12 +1,13 @@
 //! astrodark (AstroNvim/astrotheme) as a palette plus Neovim-named highlight groups.
 //! The config can override palette colors (`palette.ui.base`) and any group (`highlights.Comment`).
 
-use std::sync::OnceLock;
+use std::sync::{Arc, RwLock};
 
 pub use crate::config::Rgb;
 use crate::config::{Config, HighlightSpec};
 use crate::editor::Mode;
 use crate::syntax::Hl;
+use super::palettes::THEMES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Style {
@@ -27,46 +28,6 @@ impl Style {
         self
     }
 }
-
-/// palettes/astrodark.lua, keyed like the config: `section.name`.
-const ASTRODARK: &[(&str, u32)] = &[
-    ("syntax.red", 0xFF838B),
-    ("syntax.orange", 0xF5983A),
-    ("syntax.yellow", 0xDFAB25),
-    ("syntax.green", 0x87C05F),
-    ("syntax.cyan", 0x4AC2B8),
-    ("syntax.blue", 0x5EB7FF),
-    ("syntax.purple", 0xDD97F1),
-    ("syntax.text", 0xADB0BB),
-    ("syntax.comment", 0x696C76),
-    ("syntax.mute", 0x595C66),
-    ("ui.red", 0xF8747E),
-    ("ui.orange", 0xEB8332),
-    ("ui.yellow", 0xD09214),
-    ("ui.green", 0x75AD47),
-    ("ui.cyan", 0x00B298),
-    ("ui.blue", 0x50A4E9),
-    ("ui.purple", 0xCC83E3),
-    ("ui.accent", 0x50A4E9),
-    ("ui.tabline", 0x111317),
-    ("ui.winbar", 0x797D87),
-    ("ui.tool", 0x16181D),
-    ("ui.base", 0x1A1D23),
-    ("ui.inactive_base", 0x16181D),
-    ("ui.statusline", 0x111317),
-    ("ui.split", 0x111317),
-    ("ui.float", 0x14161B),
-    ("ui.title", 0x50A4E9),
-    ("ui.border", 0x3A3E47),
-    ("ui.current_line", 0x1E222A),
-    ("ui.selection", 0x26343F),
-    ("ui.highlight", 0x23272F),
-    ("ui.none_text", 0x3A3E47),
-    ("ui.text", 0x9B9FA9),
-    ("ui.text_active", 0xADB0BB),
-    ("ui.text_inactive", 0x494D56),
-    ("ui.prompt", 0x21242A),
-];
 
 macro_rules! groups {
     ($($group:ident = $name:literal,)*) => {
@@ -103,6 +64,7 @@ groups! {
     StatusModeInsert = "StatusLineInsert",
     StatusModeVisual = "StatusLineVisual",
     StatusModeCommand = "StatusLineCommand",
+    StatusModeReplace = "StatusLineReplace",
     StatusCwd = "StatusLineCwd",
     StatusPosition = "StatusLinePosition",
     StatusRecording = "StatusLineRecording",
@@ -132,10 +94,6 @@ groups! {
     WhichKeyDesc = "WhichKeyDesc",
     WhichKeyPrefix = "WhichKeyGroup",
     WhichKeySeparator = "WhichKeySeparator",
-    DashboardHeader = "SnacksDashboardHeader",
-    DashboardKey = "SnacksDashboardKey",
-    DashboardDesc = "SnacksDashboardDesc",
-    DashboardFooter = "SnacksDashboardFooter",
     PickerMatch = "SnacksPickerMatch",
     NotifyInfo = "SnacksNotifierInfo",
     NotifyError = "SnacksNotifierError",
@@ -150,6 +108,18 @@ groups! {
     ExplorerGitUntracked = "NeoTreeGitUntracked",
     ExplorerGitDeleted = "NeoTreeGitDeleted",
     PickerDir = "SnacksPickerDir",
+    CompletionMatch = "BlinkCmpLabelMatch",
+    CompletionKind = "BlinkCmpKind",
+    CompletionSource = "BlinkCmpSource",
+    CheatsheetKey = "LimCheatsheetKey",
+    CheatsheetDesc = "LimCheatsheetDesc",
+    TodoFix = "TodoFgFIX",
+    TodoTodo = "TodoFgTODO",
+    TodoHack = "TodoFgHACK",
+    TodoWarn = "TodoFgWARN",
+    TodoPerf = "TodoFgPERF",
+    TodoNote = "TodoFgNOTE",
+    TodoTest = "TodoFgTEST",
 }
 
 /// A resolved group: unset colors fall back to `Normal` where it is drawn.
@@ -166,15 +136,18 @@ pub struct Theme {
     groups: Vec<Highlight>,
 }
 
-static THEME: OnceLock<Theme> = OnceLock::new();
+static THEME: RwLock<Option<Arc<Theme>>> = RwLock::new(None);
 
-/// The theme in use; astrodark until `install` runs.
-pub fn theme() -> &'static Theme {
-    THEME.get_or_init(|| Theme::build(&Config::default()).0)
+/// The theme in use; astrodark until `install` runs. Cheap: a shared pointer.
+pub fn theme() -> Arc<Theme> {
+    let current = THEME.read().map(|t| t.clone()).unwrap_or_else(|e| e.into_inner().clone());
+    current.unwrap_or_else(|| Arc::new(Theme::build(&Config::default(), "astrodark").0))
 }
 
+/// Swaps the theme for every later frame (colorscheme switch).
 pub fn install(theme: Theme) {
-    let _ = THEME.set(theme);
+    let mut slot = THEME.write().unwrap_or_else(|e| e.into_inner());
+    *slot = Some(Arc::new(theme));
 }
 
 fn hl(fg: Option<Rgb>, bg: Option<Rgb>) -> Highlight {
@@ -182,10 +155,11 @@ fn hl(fg: Option<Rgb>, bg: Option<Rgb>) -> Highlight {
 }
 
 impl Theme {
-    /// astrodark with the config's palette and highlight overrides, plus warnings for unknown names.
-    pub fn build(config: &Config) -> (Self, Vec<String>) {
+    /// The named built-in theme with the config's palette and highlight overrides, plus warnings for unknown names.
+    pub fn build(config: &Config, colorscheme: &str) -> (Self, Vec<String>) {
         let mut warnings = Vec::new();
-        let mut palette: Vec<(&str, Rgb)> = ASTRODARK.iter().map(|&(n, c)| (n, Rgb(c))).collect();
+        let base = THEMES.iter().find(|t| t.name == colorscheme).or(THEMES.first());
+        let mut palette: Vec<(&str, Rgb)> = base.map(|t| t.colors.iter().map(|&(n, c)| (n, Rgb(c))).collect()).unwrap_or_default();
         for (name, color) in &config.palette {
             match palette.iter_mut().find(|(n, _)| n == name) {
                 Some(slot) => slot.1 = *color,
@@ -245,9 +219,12 @@ impl Theme {
 
     pub fn mode(&self, mode: Mode) -> Group {
         match mode {
-            Mode::Normal | Mode::BufferPick(_) | Mode::Picker | Mode::Explorer => Group::StatusModeNormal,
+            Mode::Normal | Mode::BufferPick(_) | Mode::Picker | Mode::Explorer | Mode::Prompt | Mode::Cheatsheet => {
+                Group::StatusModeNormal
+            }
             Mode::Insert => Group::StatusModeInsert,
-            Mode::Visual | Mode::VisualLine => Group::StatusModeVisual,
+            Mode::Replace => Group::StatusModeReplace,
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock => Group::StatusModeVisual,
             Mode::Command | Mode::Search => Group::StatusModeCommand,
         }
     }
@@ -306,6 +283,7 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::StatusModeInsert => bold(on("ui.base", "ui.green")),
         Group::StatusModeVisual => bold(on("ui.base", "ui.purple")),
         Group::StatusModeCommand => bold(on("ui.base", "ui.yellow")),
+        Group::StatusModeReplace => bold(on("ui.base", "ui.red")),
         Group::StatusCwd => on("ui.base", "ui.red"),
         Group::StatusPosition => on("ui.base", "ui.green"),
         Group::StatusRecording => bold(on("ui.orange", "ui.statusline")),
@@ -319,7 +297,7 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::WinBar => fg("ui.winbar"),
         Group::WinBarNC => fg("ui.text_inactive"),
         Group::MsgArea => fg("syntax.text"),
-        Group::ErrorMsg => fg("syntax.red"),
+        Group::ErrorMsg => fg("ui.red"),
         Group::NormalFloat => on("ui.text", "ui.float"),
         Group::FloatBorder => on("ui.border", "ui.float"),
         Group::FloatTitle => bold(on("ui.title", "ui.float")),
@@ -335,12 +313,9 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::WhichKeyDesc => fg("ui.purple"),
         Group::WhichKeyPrefix => fg("ui.blue"),
         Group::WhichKeySeparator => fg("ui.none_text"),
-        Group::DashboardHeader | Group::DashboardFooter => fg("syntax.cyan"),
-        Group::DashboardKey => fg("syntax.yellow"),
-        Group::DashboardDesc => fg("ui.text"),
         Group::PickerMatch => bold(fg("ui.blue")),
         Group::NotifyInfo => fg("ui.green"),
-        Group::NotifyError => fg("syntax.red"),
+        Group::NotifyError => fg("ui.red"),
         Group::ExplorerNormal => on("ui.text", "ui.tool"),
         Group::ExplorerRoot => bold(fg("ui.text_active")),
         Group::ExplorerDirectory => fg("ui.blue"),
@@ -351,6 +326,17 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::ExplorerGitUntracked => fg("ui.yellow"),
         Group::ExplorerGitDeleted => fg("ui.text_inactive"),
         Group::PickerDir => fg("syntax.comment"),
+        Group::CompletionMatch => bold(fg("ui.blue")),
+        Group::CompletionKind => fg("ui.purple"),
+        Group::CompletionSource => fg("syntax.comment"),
+        Group::CheatsheetKey => fg("ui.cyan"),
+        Group::CheatsheetDesc => fg("ui.text"),
+        // todo-comments: error, info, warning, warning, hint-ish and test colors.
+        Group::TodoFix => fg("ui.red"),
+        Group::TodoTodo => fg("ui.blue"),
+        Group::TodoHack | Group::TodoWarn => fg("ui.orange"),
+        Group::TodoPerf | Group::TodoTest => fg("ui.purple"),
+        Group::TodoNote => fg("ui.green"),
     }
 }
 
@@ -364,11 +350,11 @@ mod tests {
             r##"{ "palette": { "ui": { "base": "#000001" } },
                   "highlights": { "@comment": { "italic": false }, "Visual": { "link": "CurSearch" }, "Nope": {} } }"##,
         );
-        let (theme, warnings) = Theme::build(&config);
+        let (theme, warnings) = Theme::build(&config, "astrodark");
         assert_eq!(theme.bg(Group::Normal), Rgb(1));
         assert!(!theme.get(Group::Comment).italic);
         assert_eq!(theme.get(Group::Visual), theme.get(Group::CurSearch));
         assert_eq!(warnings, vec!["unknown highlight group \"Nope\"".to_owned()]);
-        assert_eq!(GROUP_NAMES.len(), Group::PickerDir as usize + 1);
+        assert_eq!(GROUP_NAMES.len(), Group::TodoTest as usize + 1);
     }
 }

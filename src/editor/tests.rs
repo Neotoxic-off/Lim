@@ -269,3 +269,214 @@ fn recursive_macro_is_bounded() {
     assert_eq!(ed.buf().cursor.line, 1);
     assert_eq!(ed.message_text(), "Replay stopped: too many keys");
 }
+
+#[test]
+fn registers_marks_and_search_back() {
+    let mut ed = editor("one\ntwo\nthree");
+    keys(&mut ed, "\"ayyj\"byy\"_ddgg\"bp");
+    assert_eq!(text(&ed), "one\ntwo\nthree");
+    keys(&mut ed, "\"ap");
+    assert_eq!(text(&ed), "one\ntwo\none\nthree");
+    keys(&mut ed, "Gma");
+    keys(&mut ed, "gg'a");
+    assert_eq!(ed.buf().cursor.line, 3);
+    keys(&mut ed, "''");
+    assert_eq!(ed.buf().cursor.line, 0);
+    keys(&mut ed, "G?on\n");
+    assert_eq!(ed.buf().cursor, Pos::new(2, 0));
+    keys(&mut ed, "n");
+    assert_eq!(ed.buf().cursor, Pos::new(0, 0));
+    ed.handle(Key::Ctrl('o'));
+    assert_eq!(ed.buf().cursor.line, 2);
+}
+
+#[test]
+fn more_motions_and_case() {
+    let mut ed = editor("a.b c-d e,f\nx = 41;");
+    keys(&mut ed, "W");
+    assert_eq!(ed.buf().cursor.col, 4);
+    keys(&mut ed, "E");
+    assert_eq!(ed.buf().cursor.col, 6);
+    keys(&mut ed, "0f-;");
+    assert_eq!(ed.buf().cursor.col, 5);
+    keys(&mut ed, "0fe,");
+    assert_eq!(ed.buf().cursor.col, 8);
+    keys(&mut ed, "0gUiw");
+    assert_eq!(text(&ed).lines().next(), Some("A.b c-d e,f"));
+    keys(&mut ed, "g~~");
+    assert_eq!(text(&ed).lines().next(), Some("a.B C-D E,F"));
+    keys(&mut ed, "j");
+    ed.handle(Key::Ctrl('a'));
+    assert_eq!(text(&ed).lines().nth(1), Some("x = 42;"));
+    keys(&mut ed, "5");
+    ed.handle(Key::Ctrl('x'));
+    assert_eq!(text(&ed).lines().nth(1), Some("x = 37;"));
+    keys(&mut ed, "0Rab\x08z\x1b");
+    assert_eq!(text(&ed).lines().nth(1), Some("az= 37;"));
+}
+
+#[test]
+fn ex_ranges_and_substitute() {
+    let mut ed = editor("foo bar foo\nfoo\nbaz");
+    keys(&mut ed, ":s/foo/X/\n");
+    assert_eq!(text(&ed), "X bar foo\nfoo\nbaz");
+    keys(&mut ed, ":%s/foo/<&>/g\n");
+    assert_eq!(text(&ed), "X bar <foo>\n<foo>\nbaz");
+    keys(&mut ed, ":2,3d\n");
+    assert_eq!(text(&ed), "X bar <foo>");
+    let mut ed = editor("a\nb\nc\nd");
+    keys(&mut ed, "jVj:>\n");
+    assert_eq!(text(&ed), "a\n  b\n  c\nd");
+    keys(&mut ed, ":$\n");
+    assert_eq!(ed.buf().cursor.line, 3);
+    keys(&mut ed, "ggjVj\x1bgg");
+    keys(&mut ed, "gvd");
+    assert_eq!(text(&ed), "a\nd");
+}
+
+#[test]
+fn visual_block() {
+    let mut ed = editor("abcd\nefgh\nijkl");
+    ed.handle(Key::Char('l'));
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jld");
+    assert_eq!(text(&ed), "ad\neh\nijkl");
+    keys(&mut ed, "ggP");
+    assert_eq!(text(&ed), "bcad\nfgeh\nijkl");
+    keys(&mut ed, "gg");
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jjI> \x1b");
+    assert_eq!(text(&ed), "> bcad\n> fgeh\n> ijkl");
+}
+
+#[test]
+fn insert_extras_and_astro_keys() {
+    let mut ed = editor("");
+    ed.buffers[0] = Buffer::from_text(Some("x.rs".into()), "let foo = 1;\nfoo + foo");
+    keys(&mut ed, "yiwo");
+    ed.handle(Key::Ctrl('r'));
+    keys(&mut ed, "\"\x1b");
+    assert_eq!(text(&ed).lines().nth(1), Some("let"));
+    keys(&mut ed, "ggwgco");
+    assert_eq!(ed.mode, Mode::Insert);
+    keys(&mut ed, "hi\x1b");
+    assert_eq!(text(&ed).lines().nth(1), Some("// hi"));
+    keys(&mut ed, "ggw]r");
+    assert_eq!(ed.buf().cursor, Pos::new(3, 0));
+    keys(&mut ed, "]r");
+    assert_eq!(ed.buf().cursor, Pos::new(3, 6));
+    keys(&mut ed, "A ");
+    ed.handle(Key::Ctrl('o'));
+    keys(&mut ed, "0");
+    assert_eq!((ed.mode, ed.buf().cursor.col), (Mode::Insert, 0));
+}
+
+#[test]
+fn themes_cheatsheet_prompt_and_layout() {
+    let mut ed = editor("a");
+    keys(&mut ed, ":colorscheme dracula\n");
+    assert_eq!(ed.colorscheme, "dracula");
+    keys(&mut ed, " ub");
+    assert_eq!(ed.colorscheme, "astrolight");
+    keys(&mut ed, " ft");
+    keys(&mut ed, "nord");
+    assert_eq!(ed.colorscheme, "nord");
+    ed.handle(Key::Esc);
+    assert_eq!(ed.colorscheme, "astrolight");
+    keys(&mut ed, ":colorscheme nope\n");
+    assert!(ed.message_text().contains("E185"));
+
+    ed.handle(Key::F(1));
+    assert_eq!(ed.mode, Mode::Cheatsheet);
+    keys(&mut ed, "macro");
+    let cards = ed.cheatsheet_cards();
+    assert!(cards.iter().all(|c| c.rows.iter().all(|(k, d)| (k.clone() + d).to_lowercase().contains("macro") || c.title.to_lowercase().contains("macro"))));
+    assert!(!cards.is_empty());
+    ed.handle(Key::Esc);
+
+    let path = std::env::temp_dir().join(format!("lim-rename-{}.txt", std::process::id()));
+    let target = path.with_extension("md");
+    std::fs::write(&path, "x").unwrap();
+    ed.buffers[0] = Buffer::open(&path).unwrap();
+    keys(&mut ed, " R");
+    assert_eq!(ed.mode, Mode::Prompt);
+    ed.handle(Key::Ctrl('u'));
+    keys(&mut ed, &format!("{}\n", target.display()));
+    assert!(target.exists() && !path.exists());
+    assert_eq!(ed.buf().path.as_deref(), Some(target.as_path()));
+    std::fs::remove_file(target).unwrap();
+
+    keys(&mut ed, "|");
+    ed.handle(Key::CtrlRight);
+    assert!(matches!(&ed.layout, Layout::Split { adjust, .. } if adjust == &vec![-2, 2]));
+    keys(&mut ed, " uZ");
+    assert!(ed.zen);
+}
+
+#[test]
+fn marks_and_jumps_follow_edits() {
+    let mut ed = editor("a\nb\nc\nd\ne");
+    keys(&mut ed, "3Gmagg");
+    keys(&mut ed, "OX\x1bOY\x1b");
+    keys(&mut ed, "'a");
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "c");
+    keys(&mut ed, "ggdd'a");
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "c");
+    keys(&mut ed, "u'a");
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "c");
+    // A jump recorded on "d" still lands on "d" after lines above it are deleted.
+    keys(&mut ed, "/d\nG");
+    keys(&mut ed, "ggdj");
+    ed.handle(Key::Ctrl('o'));
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "e");
+    ed.handle(Key::Ctrl('o'));
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "d");
+    // Deleting the marked line drops the mark.
+    keys(&mut ed, "/c\nmadd'a");
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "d");
+}
+
+#[test]
+fn buffer_word_completion() {
+    let mut ed = editor("restock result\n");
+    keys(&mut ed, "Gores");
+    let items = ed.completion.as_ref().map(|c| c.items.clone());
+    assert_eq!(items, Some(vec!["result".to_owned(), "restock".to_owned()]));
+    ed.handle(Key::Tab);
+    ed.handle(Key::Tab);
+    ed.handle(Key::Enter);
+    assert_eq!(ed.buf().line(1), "restock");
+    assert!(ed.completion.is_none());
+    // No selection: Enter is a plain newline.
+    keys(&mut ed, " re\n");
+    assert_eq!(text(&ed), "restock result\nrestock re\n");
+    keys(&mut ed, "xyz");
+    assert!(ed.completion.is_none());
+    keys(&mut ed, "\x1b");
+    ed.options.completion = false;
+    keys(&mut ed, "ores");
+    assert!(ed.completion.is_none());
+    ed.handle(Key::Ctrl(' '));
+    assert!(ed.completion.is_some());
+}
+
+#[test]
+fn ctrl_w_w_cycles_windows() {
+    let mut ed = editor("a");
+    keys(&mut ed, "|");
+    assert_eq!(ed.active, 1);
+    ed.handle(Key::Ctrl('w'));
+    ed.handle(Key::Char('w'));
+    assert_eq!(ed.active, 0);
+    ed.handle(Key::Ctrl('w'));
+    ed.handle(Key::Ctrl('w'));
+    assert_eq!(ed.active, 1);
+    // With the file tree open, the cycle goes through it.
+    ed.explorer = Some(Explorer::new(std::env::temp_dir()));
+    ed.handle(Key::Ctrl('w'));
+    ed.handle(Key::Char('w'));
+    assert_eq!(ed.mode, Mode::Explorer);
+    ed.handle(Key::Ctrl('w'));
+    ed.handle(Key::Char('w'));
+    assert_eq!((ed.mode, ed.active), (Mode::Normal, 0));
+}

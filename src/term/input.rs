@@ -11,6 +11,11 @@ pub enum Key {
     Ctrl(char),
     /// Function keys F1–F12.
     F(u8),
+    /// Ctrl + arrow (split resizing).
+    CtrlUp,
+    CtrlDown,
+    CtrlLeft,
+    CtrlRight,
     Esc,
     Enter,
     Backspace,
@@ -104,7 +109,8 @@ fn decode(bytes: &[u8]) -> Option<(Key, usize)> {
         b'\t' => (Key::Tab, 1),
         1..=26 => (Key::Ctrl(char::from(b'a' + first - 1)), 1),
         0x20..=0x7e => (Key::Char(char::from(first)), 1),
-        0..=0x7f => (Key::Unknown, 1),
+        0 => (Key::Ctrl(' '), 1),
+        28..=31 => (Key::Unknown, 1),
         _ => {
             let len = match first {
                 0xc0..=0xdf => 2,
@@ -138,6 +144,10 @@ fn escape(bytes: &[u8]) -> Option<(Key, usize)> {
                 b"3~" => Key::Delete,
                 b"5~" => Key::PageUp,
                 b"6~" => Key::PageDown,
+                b"1;5A" => Key::CtrlUp,
+                b"1;5B" => Key::CtrlDown,
+                b"1;5C" => Key::CtrlRight,
+                b"1;5D" => Key::CtrlLeft,
                 b"P" => Key::F(1),
                 b"Q" => Key::F(2),
                 b"R" => Key::F(3),

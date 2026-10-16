@@ -26,7 +26,7 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 
 use editor::Editor;
-use render::{Screen, Theme};
+use render::Screen;
 use term::{ColorDepth, Event, Input, Terminal};
 
 /// Where the panic hook leaves its message for the recovery path.
@@ -52,9 +52,8 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let (config, mut warnings) = config::load();
-    let (theme, theme_warnings) = Theme::build(&config);
-    warnings.extend(theme_warnings);
-    render::install_theme(theme);
+    let colorscheme = render::initial_colorscheme(&config);
+    warnings.extend(render::apply_colorscheme(&colorscheme, &config));
     let depth = match config.options.truecolor {
         Some(true) => ColorDepth::TrueColor,
         Some(false) => ColorDepth::Ansi256,
@@ -63,10 +62,13 @@ fn main() -> ExitCode {
     let mut editor = Editor::new(&args);
     editor.started = started;
     editor.configure(&config);
+    editor.colorscheme = colorscheme;
     if !warnings.is_empty() {
         editor.set_message(editor::Message::Error(format!("config: {}", warnings.join("; "))));
     }
-    match run(&mut editor, depth) {
+    let result = run(&mut editor, depth);
+    editor.autosave_session();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("lim: {e}");
@@ -116,11 +118,16 @@ fn run(editor: &mut Editor, depth: ColorDepth) -> io::Result<()> {
         if handled.is_err() {
             recover(editor, &mut screen);
         }
-        if std::mem::take(&mut editor.shell_requested) {
-            if let Err(e) = terminal.run_shell() {
-                editor.set_message(editor::Message::Error(format!("shell: {e}")));
+        if let Some(command) = editor.shell_requested.take() {
+            if let Err(e) = terminal.run(&command) {
+                editor.set_message(editor::Message::Error(format!("{}: {e}", command.first().map_or("shell", String::as_str))));
             }
+            editor.reload_changed_buffers();
             screen.invalidate();
+        }
+        if let Some(sequence) = editor.osc52.take() {
+            out.write_all(sequence.as_bytes())?;
+            out.flush()?;
         }
     }
     Ok(())

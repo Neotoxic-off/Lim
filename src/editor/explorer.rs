@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use super::prompt::PromptAction;
 use super::{Editor, Mode};
 use crate::term::Key;
 
@@ -164,6 +165,22 @@ impl Editor {
     }
 
     pub(super) fn explorer_key(&mut self, key: Key) {
+        // `<C-w>` window commands work from the tree too.
+        if self.pending.prefix.take() == Some(super::ui::CTRL_W) {
+            match key {
+                Key::Char('w' | 'l' | 'p') | Key::Ctrl('w' | 'l' | 'p') => self.leave_tree_to_first_window(),
+                Key::Char('q' | 'c') | Key::Ctrl('q' | 'c') => {
+                    self.explorer = None;
+                    self.mode = Mode::Normal;
+                }
+                _ => {}
+            }
+            return;
+        }
+        if key == Key::Ctrl('w') {
+            self.pending.prefix = Some(super::ui::CTRL_W);
+            return;
+        }
         let Some(explorer) = &mut self.explorer else {
             self.mode = Mode::Normal;
             return;
@@ -181,7 +198,7 @@ impl Editor {
                 explorer.refresh();
             }
             Key::Char('R') => explorer.refresh(),
-            Key::Char('h') | Key::Left | Key::Backspace => {
+            Key::Char('h') | Key::Left => {
                 let Some(entry) = explorer.selected().cloned() else { return };
                 if entry.dir && entry.expanded {
                     explorer.expanded.remove(&entry.path);
@@ -208,6 +225,70 @@ impl Editor {
                 self.explorer = None;
                 self.mode = Mode::Normal;
             }
+            // neo-tree's file operations.
+            Key::Char('a' | 'A') => {
+                let dir = explorer.selected().map_or_else(|| explorer.root.clone(), |e| {
+                    if e.dir { e.path.clone() } else { e.path.parent().map_or_else(|| explorer.root.clone(), Path::to_path_buf) }
+                });
+                let directory = key == Key::Char('A');
+                let title = if directory { "Add a directory" } else { "Add a file (end with / for a directory)" };
+                self.open_prompt(title, "", PromptAction::TreeAdd { dir, directory });
+            }
+            Key::Char('r') => {
+                let Some(entry) = explorer.selected().cloned() else { return };
+                self.open_prompt("Rename", &entry.name, PromptAction::TreeRename { from: entry.path });
+            }
+            Key::Char('d') => {
+                let Some(entry) = explorer.selected().cloned() else { return };
+                self.open_prompt(&format!("Delete {}? (y/N)", entry.name), "", PromptAction::TreeDelete { path: entry.path });
+            }
+            Key::Char('c' | 'm') => {
+                let Some(entry) = explorer.selected().cloned() else { return };
+                let shown = entry.path.strip_prefix(&explorer.root).unwrap_or(&entry.path).display().to_string();
+                if key == Key::Char('c') {
+                    self.open_prompt("Copy to", &shown, PromptAction::TreeCopy { from: entry.path });
+                } else {
+                    self.open_prompt("Move to", &shown, PromptAction::TreeMove { from: entry.path });
+                }
+            }
+            Key::Char('y' | 'Y') => {
+                let Some(entry) = explorer.selected().cloned() else { return };
+                let text = if key == Key::Char('Y') { entry.path.display().to_string() } else { entry.name };
+                self.store_register(super::registers::Register { text: text.clone(), linewise: false, block: false }, true);
+                self.info(format!("Copied {text}"));
+            }
+            Key::Char('s' | 'S') => {
+                let Some(entry) = explorer.selected().cloned().filter(|e| !e.dir) else { return };
+                explorer.focused = false;
+                self.mode = Mode::Normal;
+                self.dashboard = false;
+                self.split(key == Key::Char('s'));
+                self.open(&entry.path);
+            }
+            Key::Char('P') => {
+                // Preview: open the file but keep the focus in the tree.
+                let Some(entry) = explorer.selected().cloned().filter(|e| !e.dir) else { return };
+                self.dashboard = false;
+                self.open(&entry.path);
+            }
+            Key::Char('O') => {
+                let Some(entry) = explorer.selected().cloned() else { return };
+                super::extras::open_external(&entry.path.display().to_string());
+            }
+            Key::Char('.') => {
+                let Some(entry) = explorer.selected().cloned().filter(|e| e.dir) else { return };
+                explorer.root = entry.path;
+                explorer.cursor = 0;
+                explorer.refresh();
+            }
+            Key::Backspace => {
+                if let Some(parent) = explorer.root.parent().map(Path::to_path_buf) {
+                    explorer.root = parent;
+                    explorer.cursor = 0;
+                    explorer.refresh();
+                }
+            }
+            Key::Char('?') => self.open_cheatsheet(),
             Key::Esc | Key::Ctrl('l') => {
                 explorer.focused = false;
                 self.mode = Mode::Normal;

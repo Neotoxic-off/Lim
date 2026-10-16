@@ -2,7 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::motion::Motion;
+use super::motion::{Motion, Span};
+use super::operator::Operator;
 use super::{Editor, Mode};
 use crate::buffer::{Buffer, Pos};
 use crate::error::Error;
@@ -27,6 +28,77 @@ pub enum Command {
     BufferDelete { force: bool },
     NoHighlight,
     Goto(usize),
+    /// `:$`, `:'a`, `:.`: a single address other than a number.
+    GotoAddress(String),
+    /// `:[range]s/pattern/replacement/[g]`
+    Substitute { range: String, pattern: String, replacement: String, global: bool },
+    /// `:[range]d`, `y`, `>`, `<`, `j`
+    LineOp { range: String, op: LineOp },
+    Colorscheme(Option<String>),
+    Iconset(Option<String>),
+    Help,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineOp {
+    Delete,
+    Yank,
+    Indent,
+    Dedent,
+    Join,
+}
+
+/// Splits a leading line range (`%`, `.`, `$`, `N`, `'x`, `a,b`) off an ex command.
+fn split_range(input: &str) -> (&str, &str) {
+    let bytes = input.as_bytes();
+    if let Some(rest) = input.strip_prefix('%') {
+        return ("%", rest);
+    }
+    let address = |mut i: usize| -> usize {
+        match bytes.get(i) {
+            Some(b'.' | b'$') => i + 1,
+            Some(b'\'') if i + 1 < bytes.len() && bytes[i + 1].is_ascii() => i + 2,
+            Some(b) if b.is_ascii_digit() => {
+                while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+                    i += 1;
+                }
+                i
+            }
+            _ => i,
+        }
+    };
+    let mut end = address(0);
+    if end > 0 && bytes.get(end) == Some(&b',') {
+        let second = address(end + 1);
+        if second > end + 1 {
+            end = second;
+        }
+    }
+    (&input[..end], &input[end..])
+}
+
+/// `s/pattern/replacement/flags` with any punctuation as the delimiter and `\` escaping it.
+fn parse_substitute(rest: &str) -> Option<(String, String, bool)> {
+    let mut chars = rest.strip_prefix('s')?.chars();
+    let delim = chars.next().filter(|c| !c.is_alphanumeric() && !c.is_whitespace())?;
+    let mut parts = vec![String::new()];
+    let mut escaped = false;
+    for c in chars {
+        match c {
+            _ if escaped => {
+                if c != delim {
+                    parts.last_mut()?.push('\\');
+                }
+                parts.last_mut()?.push(c);
+                escaped = false;
+            }
+            '\\' => escaped = true,
+            c if c == delim && parts.len() < 3 => parts.push(String::new()),
+            c => parts.last_mut()?.push(c),
+        }
+    }
+    let flags = parts.get(2).cloned().unwrap_or_default();
+    Some((parts.first()?.clone(), parts.get(1).cloned().unwrap_or_default(), flags.contains('g')))
 }
 
 impl Command {
@@ -38,6 +110,28 @@ impl Command {
         }
         if let Ok(line) = input.parse() {
             return Ok(Some(Self::Goto(line)));
+        }
+        let (range, rest) = split_range(input);
+        let rest = rest.trim();
+        if !range.is_empty() && rest.is_empty() {
+            return Ok(Some(Self::GotoAddress(range.to_owned())));
+        }
+        if let Some((pattern, replacement, global)) = parse_substitute(rest) {
+            return Ok(Some(Self::Substitute { range: range.to_owned(), pattern, replacement, global }));
+        }
+        let line_op = match rest {
+            "d" | "de" | "del" | "delete" => Some(LineOp::Delete),
+            "y" | "ya" | "yank" => Some(LineOp::Yank),
+            ">" => Some(LineOp::Indent),
+            "<" => Some(LineOp::Dedent),
+            "j" | "join" => Some(LineOp::Join),
+            _ => None,
+        };
+        if let Some(op) = line_op {
+            return Ok(Some(Self::LineOp { range: range.to_owned(), op }));
+        }
+        if !range.is_empty() {
+            return Err(Error::NotACommand(input.into()));
         }
         let (name, arg) = input.split_once(char::is_whitespace).map_or((input, ""), |(n, a)| (n, a.trim()));
         let (name, force) = name.strip_suffix('!').map_or((name, false), |n| (n, true));
@@ -60,6 +154,9 @@ impl Command {
             "bp" | "bprevious" | "bN" | "bNext" => Self::BufferPrev,
             "bd" | "bdelete" => Self::BufferDelete { force },
             "noh" | "nohlsearch" => Self::NoHighlight,
+            "colo" | "colorscheme" => Self::Colorscheme((!arg.is_empty()).then(|| arg.to_owned())),
+            "iconset" => Self::Iconset((!arg.is_empty()).then(|| arg.to_owned())),
+            "h" | "help" => Self::Help,
             _ => return Err(Error::NotACommand(input.into())),
         }))
     }
@@ -139,6 +236,44 @@ impl Editor {
             Command::BufferPrev => self.cycle(-1),
             Command::BufferDelete { force } => self.close_buffer(force)?,
             Command::NoHighlight => self.highlight_search = false,
+            Command::GotoAddress(spec) => {
+                let range = self.parse_range(&spec).ok_or_else(|| Error::NotACommand(spec.clone()))?;
+                self.push_jump();
+                let buf = self.buf_mut();
+                buf.cursor = Pos::new(range.last, buf.first_non_blank(range.last));
+            }
+            Command::Substitute { range, pattern, replacement, global } => {
+                let lines = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
+                let pattern = if pattern.is_empty() { self.search.clone() } else { pattern };
+                if pattern.is_empty() {
+                    return Err(Error::NoPattern);
+                }
+                self.buf_mut().seal();
+                match self.substitute(lines, &pattern, &replacement, global) {
+                    0 => return Err(Error::PatternNotFound(pattern)),
+                    n => self.info(format!("{n} line{} changed", if n == 1 { "" } else { "s" })),
+                }
+            }
+            Command::LineOp { range, op } => {
+                let lines = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
+                let (first, last) = (Pos::new(lines.first, 0), Pos::new(lines.last, 0));
+                self.buf_mut().seal();
+                match op {
+                    LineOp::Delete => self.apply(Operator::Delete, first, last, Span::Linewise),
+                    LineOp::Yank => self.apply(Operator::Yank, first, last, Span::Linewise),
+                    LineOp::Indent => self.apply(Operator::Indent, first, last, Span::Linewise),
+                    LineOp::Dedent => self.apply(Operator::Dedent, first, last, Span::Linewise),
+                    LineOp::Join => {
+                        self.buf_mut().cursor = first;
+                        self.join(lines.last - lines.first + 1, true);
+                    }
+                }
+            }
+            Command::Colorscheme(Some(name)) => self.set_colorscheme(&name, true),
+            Command::Colorscheme(None) => self.info(self.colorscheme.clone()),
+            Command::Iconset(Some(name)) => self.accept_extra(super::picker::Target::IconSet(name)),
+            Command::Iconset(None) => self.info(self.options.iconset.clone()),
+            Command::Help => self.open_cheatsheet(),
             Command::Goto(n) => {
                 let buf = self.buf_mut();
                 let line = n.saturating_sub(1).min(buf.last_line());
@@ -191,5 +326,15 @@ mod tests {
         );
         assert!(matches!(Command::parse("e"), Err(Error::NoFileName)));
         assert!(matches!(Command::parse("frob"), Err(Error::NotACommand(_))));
+        assert_eq!(
+            Command::parse("%s/a\\/b/c/g").unwrap(),
+            Some(Command::Substitute { range: "%".into(), pattern: "a/b".into(), replacement: "c".into(), global: true })
+        );
+        assert_eq!(
+            Command::parse("'<,'>d").unwrap(),
+            Some(Command::LineOp { range: "'<,'>".into(), op: LineOp::Delete })
+        );
+        assert_eq!(Command::parse("$").unwrap(), Some(Command::GotoAddress("$".into())));
+        assert_eq!(Command::parse("2,4>").unwrap(), Some(Command::LineOp { range: "2,4".into(), op: LineOp::Indent }));
     }
 }

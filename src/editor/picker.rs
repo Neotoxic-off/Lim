@@ -29,6 +29,20 @@ pub enum PickerKind {
     Keymaps,
     Commands,
     Lines,
+    GitBranches,
+    GitLog { file: bool },
+    GitStatus,
+    GitStash,
+    ConfigFiles,
+    RecentHere,
+    Smart,
+    Notifications,
+    Registers,
+    Marks,
+    Todos,
+    Themes,
+    IconSets,
+    Sessions { dir: bool, delete: bool },
 }
 
 impl PickerKind {
@@ -42,6 +56,23 @@ impl PickerKind {
             Self::Keymaps => "Keymaps",
             Self::Commands => "Commands",
             Self::Lines => "Lines",
+            Self::GitBranches => "Git Branches",
+            Self::GitLog { file: false } => "Git Log",
+            Self::GitLog { file: true } => "Git Log (file)",
+            Self::GitStatus => "Git Status",
+            Self::GitStash => "Git Stash",
+            Self::ConfigFiles => "Config Files",
+            Self::RecentHere => "Recent (cwd)",
+            Self::Smart => "Smart",
+            Self::Notifications => "Notifications",
+            Self::Registers => "Registers",
+            Self::Marks => "Marks",
+            Self::Todos => "Todo Comments",
+            Self::Themes => "Colorschemes",
+            Self::IconSets => "Icon Sets",
+            Self::Sessions { delete: true, .. } => "Delete Session",
+            Self::Sessions { dir: true, .. } => "Directory Sessions",
+            Self::Sessions { .. } => "Sessions",
         }
     }
 }
@@ -53,6 +84,21 @@ pub enum Target {
     Keys(Vec<Key>),
     Command(String),
     Line(usize),
+    Branch(String),
+    Commit(String),
+    Stash(String),
+    Session { name: String, dir: bool, delete: bool },
+    Theme(String),
+    IconSet(String),
+    Register(char),
+    Nothing,
+}
+
+/// A preview computed by the editor (git output), when it is not a file read at draw time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preview {
+    pub title: String,
+    pub lines: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +124,9 @@ pub struct Picker {
     pub selected: usize,
     /// Files to search, for grep (whose items depend on the query).
     files: Vec<PathBuf>,
+    pub preview: Option<Preview>,
+    /// Colorscheme before the theme picker opened, restored on `<Esc>`.
+    pub(super) original_theme: Option<String>,
 }
 
 impl Picker {
@@ -250,15 +299,35 @@ impl Editor {
                 .filter(|(_, l)| !l.trim().is_empty())
                 .map(|(y, l)| Item { label: format!("{:>5}  {}", y + 1, l.trim()), target: Target::Line(y) })
                 .collect(),
+            PickerKind::Smart => {
+                let mut seen = std::collections::HashSet::new();
+                let open = self.buffers.iter().filter_map(|b| b.path.clone());
+                let recent = self.recent.iter().filter(|p| p.is_file()).cloned();
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let all: Vec<PathBuf> = open
+                    .chain(recent)
+                    .map(|p| p.strip_prefix(&cwd).map(Path::to_path_buf).unwrap_or(p))
+                    .chain(list_files(false))
+                    .filter(|p| seen.insert(p.clone()))
+                    .collect();
+                file_items(all)
+            }
+            PickerKind::Todos => todo_items(&list_files(false)),
+            other => match self.extra_items(other) {
+                Some(items) => items,
+                None => return,
+            },
         };
         let files = match kind {
             PickerKind::Grep { all } => list_files(all),
             _ => Vec::new(),
         };
-        let mut picker = Picker { kind, query: String::new(), items, matches: Vec::new(), selected: 0, files };
+        let original_theme = (kind == PickerKind::Themes).then(|| self.colorscheme.clone());
+        let mut picker = Picker { kind, query: String::new(), items, matches: Vec::new(), selected: 0, files, preview: None, original_theme };
         picker.refilter();
         self.picker = Some(picker);
         self.mode = Mode::Picker;
+        self.selection_changed();
     }
 
     /// `<Leader>fc`: grep for the word under the cursor.
@@ -287,7 +356,12 @@ impl Editor {
         };
         let count = picker.matches.len();
         match key {
-            Key::Esc | Key::Ctrl('c') => self.close_picker(),
+            Key::Esc | Key::Ctrl('c') => {
+                if let Some(theme) = picker.original_theme.take() {
+                    self.set_colorscheme(&theme, false);
+                }
+                self.close_picker();
+            }
             Key::Enter => self.accept_picker(None),
             Key::Ctrl('v') => self.accept_picker(Some(true)),
             Key::Ctrl('s') => self.accept_picker(Some(false)),
@@ -310,9 +384,12 @@ impl Editor {
             }
             _ => {}
         }
+        if self.mode == Mode::Picker {
+            self.selection_changed();
+        }
     }
 
-    fn close_picker(&mut self) {
+    pub(super) fn close_picker(&mut self) {
         self.last_picker = self.picker.take();
         self.mode = Mode::Normal;
     }
@@ -356,6 +433,7 @@ impl Editor {
                     self.handle(key);
                 }
             }
+            other => self.accept_extra(other),
         }
     }
 
@@ -380,7 +458,28 @@ impl Editor {
     }
 }
 
-fn file_items(files: Vec<PathBuf>) -> Vec<Item> {
+/// todo-comments in the project's files, for `<Leader>fT`.
+fn todo_items(files: &[PathBuf]) -> Vec<Item> {
+    let mut items = Vec::new();
+    for path in files {
+        if fs::metadata(path).is_ok_and(|m| m.len() > MAX_GREP_BYTES) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(path) else { continue };
+        for (y, line) in content.lines().enumerate() {
+            if let Some((col, _, _)) = crate::syntax::todo(line) {
+                let label = format!("{}:{}  {}", path.display(), y + 1, line.trim());
+                items.push(Item { label, target: Target::File(path.clone(), Some(Pos::new(y, col))) });
+                if items.len() >= MAX_HITS {
+                    return items;
+                }
+            }
+        }
+    }
+    items
+}
+
+pub(super) fn file_items(files: Vec<PathBuf>) -> Vec<Item> {
     files.into_iter().map(|p| Item { label: p.display().to_string(), target: Target::File(p, None) }).collect()
 }
 

@@ -3,12 +3,15 @@
 mod bars;
 mod finder;
 mod home;
+pub mod icons;
 mod popup;
+pub mod palettes;
 mod row;
 mod theme;
 mod tree;
 
-pub use theme::{Theme, install as install_theme};
+pub use theme::Theme;
+use theme::install;
 mod view;
 
 use std::fmt::Write;
@@ -21,7 +24,45 @@ use row::Grid;
 use theme::{Group, theme};
 use crate::term::{ColorDepth, Size};
 
-/// Workspace facts shown in the statusline, read once at startup.
+fn colorscheme_file() -> Option<PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    let base = env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("state")))?;
+    Some(base.join("lim").join("colorscheme"))
+}
+
+/// The colorscheme to start with: the config's, else the last one picked, else astrodark.
+pub fn initial_colorscheme(config: &crate::config::Config) -> String {
+    config
+        .options
+        .colorscheme
+        .clone()
+        .or_else(|| colorscheme_file().and_then(|f| fs::read_to_string(f).ok()).map(|s| s.trim().to_owned()))
+        .filter(|name| palettes::THEMES.iter().any(|t| t.name == name))
+        .unwrap_or_else(|| "astrodark".into())
+}
+
+/// Builds and installs a colorscheme; returns config warnings about it.
+pub fn apply_colorscheme(name: &str, config: &crate::config::Config) -> Vec<String> {
+    let (theme, warnings) = Theme::build(config, name);
+    install(theme);
+    warnings
+}
+
+pub fn save_colorscheme(name: &str) {
+    if let Some(file) = colorscheme_file() {
+        if let Some(dir) = file.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let _ = fs::write(file, name);
+    }
+}
+
+/// Workspace facts shown in the statusline.
 pub struct Context {
     pub branch: Option<String>,
     pub cwd: String,
@@ -100,15 +141,27 @@ impl Screen {
             }
             area = Rect { x: tree_width + 1, w: width - tree_width - 1, ..area };
         }
-        let windows_cursor = self.windows(ed, area, &mut grid);
+        let windows_cursor = if ed.zen {
+            // snacks.zen: the focused window alone, centred, at most 120 columns wide.
+            let w = 120.min(area.w * 3 / 4).max(area.w.min(20));
+            let zen = Rect { x: area.x + (area.w - w) / 2, w, ..area };
+            ed.area = zen;
+            ed.view_height = zen.h;
+            view::window(ed, ed.active, zen, &mut grid)
+        } else {
+            self.windows(ed, area, &mut grid)
+        };
         if ed.dashboard {
             grid.fill(area, theme().style(Group::Normal));
-            home::dashboard(ed, &mut grid, area, startup);
+            home::dashboard(&mut grid, area, startup);
         } else if ed.mode != Mode::Explorer {
             cursor = windows_cursor;
         }
+        popup::completion(ed, &mut grid, cursor);
         popup::which_key(ed, &mut grid, area);
         if status == 1 {
+            // The branch can change under us (lazygit, `<Leader>gb`): re-read HEAD, a tiny file.
+            self.ctx.branch = env::current_dir().ok().and_then(git_branch);
             bars::statusline(ed, &self.ctx, &mut grid, top + text_height);
         }
         let prompt = matches!(ed.mode, Mode::Command | Mode::Search);
@@ -123,6 +176,13 @@ impl Screen {
         if let Some(input) = finder::picker(ed, &mut grid) {
             cursor = Some(input);
         }
+        popup::cheatsheet(ed, &mut grid);
+        if ed.mode == Mode::Cheatsheet {
+            cursor = None;
+        }
+        if let Some(input) = popup::prompt(ed, &mut grid) {
+            cursor = Some(input);
+        }
 
         let rows: Vec<String> = (0..height).map(|y| row::encode(grid.row(y), self.depth)).collect();
         for (i, line) in rows.iter().enumerate() {
@@ -132,7 +192,11 @@ impl Screen {
         }
         self.rows = rows;
         let Some((row, col)) = cursor else { return out };
-        let shape = if matches!(ed.mode, Mode::Insert | Mode::Command | Mode::Search | Mode::Picker) { 6 } else { 2 };
+        let shape = match ed.mode {
+            Mode::Insert | Mode::Command | Mode::Search | Mode::Picker | Mode::Prompt => 6,
+            Mode::Replace => 4,
+            _ => 2,
+        };
         let _ = write!(out, "\x1b[{};{}H\x1b[{shape} q\x1b[?25h", row.min(height - 1) + 1, col.min(width - 1) + 1);
         out
     }
@@ -224,7 +288,7 @@ mod fuzz {
                 let key = alphabet[next(alphabet.len())];
                 ed.handle(key);
                 ed.quit = false;
-                ed.shell_requested = false;
+                ed.shell_requested = None;
                 if step % 97 == 0 {
                     ed.tick();
                     let size = Size { cols: 1 + next(140), rows: 1 + next(50) };

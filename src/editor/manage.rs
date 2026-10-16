@@ -244,12 +244,33 @@ impl Editor {
         }
     }
 
+    /// `<C-w>w` from the file tree: back to the first window.
+    pub(super) fn leave_tree_to_first_window(&mut self) {
+        if let Some(explorer) = &mut self.explorer {
+            explorer.focused = false;
+        }
+        self.mode = Mode::Normal;
+        let mut rects = Vec::new();
+        self.layout.rects(self.area, &mut rects);
+        if let Some(index) = rects.first().and_then(|(id, _)| self.windows.iter().position(|w| w.id == *id)) {
+            self.focus(index);
+        }
+    }
+
     /// `<C-w>w`: next window in layout order.
     pub(super) fn focus_next_window(&mut self) {
         let mut rects = Vec::new();
         self.layout.rects(self.area, &mut rects);
         let Some(id) = self.windows.get(self.active).map(|w| w.id) else { return };
         let Some(pos) = rects.iter().position(|(i, _)| *i == id) else { return };
+        // As Vim with neo-tree: after the last window comes the file tree, when it is open.
+        if pos + 1 == rects.len()
+            && let Some(explorer) = &mut self.explorer
+        {
+            explorer.focused = true;
+            self.mode = Mode::Explorer;
+            return;
+        }
         let (next, _) = rects[(pos + 1) % rects.len()];
         if let Some(index) = self.windows.iter().position(|w| w.id == next) {
             self.focus(index);

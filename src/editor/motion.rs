@@ -25,6 +25,19 @@ pub enum Motion {
     PageUp,
     MatchPair,
     Find { ch: char, forward: bool, till: bool },
+    WordForwardBig,
+    WordBackBig,
+    WordEndBig,
+    /// `ge` / `gE`
+    WordEndBack { big: bool },
+    /// `H`, `M`, `L`
+    ScreenTop,
+    ScreenMiddle,
+    ScreenBottom,
+    /// `g_`
+    LastNonBlank,
+    /// `'x` (line) and `` `x `` (exact position)
+    Mark { name: char, exact: bool },
     SearchNext { forward: bool },
 }
 
@@ -50,6 +63,12 @@ impl Motion {
             Key::Char('w') => Self::WordForward,
             Key::Char('b') => Self::WordBack,
             Key::Char('e') => Self::WordEnd,
+            Key::Char('W') => Self::WordForwardBig,
+            Key::Char('B') => Self::WordBackBig,
+            Key::Char('E') => Self::WordEndBig,
+            Key::Char('H') => Self::ScreenTop,
+            Key::Char('M') => Self::ScreenMiddle,
+            Key::Char('L') => Self::ScreenBottom,
             Key::Char('}') => Self::ParagraphForward,
             Key::Char('{') => Self::ParagraphBack,
             Key::Char('G') => Self::FileEnd,
@@ -71,11 +90,31 @@ impl Motion {
         )
     }
 
+    /// Motions that record a jump (`<C-o>`, `''`), as in Vim.
+    pub fn is_jump(self) -> bool {
+        matches!(
+            self,
+            Self::FileStart
+                | Self::FileEnd
+                | Self::SearchNext { .. }
+                | Self::MatchPair
+                | Self::ParagraphForward
+                | Self::ParagraphBack
+                | Self::ScreenTop
+                | Self::ScreenMiddle
+                | Self::ScreenBottom
+                | Self::Mark { .. }
+        )
+    }
+
     pub fn span(self) -> Span {
         match self {
-            Self::FileStart | Self::FileEnd => Span::Linewise,
+            Self::FileStart | Self::FileEnd | Self::ScreenTop | Self::ScreenMiddle | Self::ScreenBottom => Span::Linewise,
+            Self::Mark { exact, .. } => if exact { Span::Exclusive } else { Span::Linewise },
             _ if self.is_vertical() => Span::Linewise,
-            Self::LineEnd | Self::WordEnd | Self::MatchPair | Self::Find { forward: true, .. } => Span::Inclusive,
+            Self::LineEnd | Self::WordEnd | Self::WordEndBig | Self::WordEndBack { .. } | Self::LastNonBlank | Self::MatchPair | Self::Find { forward: true, .. } => {
+                Span::Inclusive
+            }
             _ => Span::Exclusive,
         }
     }
@@ -102,9 +141,9 @@ impl Motion {
                 let l = (line + n - 1).min(last);
                 Pos::new(l, buf.line_len(l).saturating_sub(1))
             }
-            Self::WordForward => repeat(&|p| buf.word_forward(p)),
-            Self::WordBack => repeat(&|p| buf.word_back(p)),
-            Self::WordEnd => repeat(&|p| buf.word_end(p)),
+            Self::WordForward => repeat(&|p| buf.word_forward(p, false)),
+            Self::WordBack => repeat(&|p| buf.word_back(p, false)),
+            Self::WordEnd => repeat(&|p| buf.word_end(p, false)),
             Self::ParagraphForward => Pos::new((0..n).fold(line, |l, _| buf.paragraph(l, true)), 0),
             Self::ParagraphBack => Pos::new((0..n).fold(line, |l, _| buf.paragraph(l, false)), 0),
             Self::FileStart | Self::FileEnd => {
@@ -117,6 +156,30 @@ impl Motion {
                 Pos::new(line, if !till { i } else if forward { i - 1 } else { i + 1 })
             }
             Self::MatchPair => buf.matching_bracket(buf.cursor)?,
+            Self::WordForwardBig => repeat(&|p| buf.word_forward(p, true)),
+            Self::WordBackBig => repeat(&|p| buf.word_back(p, true)),
+            Self::WordEndBig => repeat(&|p| buf.word_end(p, true)),
+            Self::WordEndBack { big } => repeat(&|p| buf.word_end_back(p, big)),
+            Self::ScreenTop | Self::ScreenMiddle | Self::ScreenBottom => {
+                let top = buf.top.min(last);
+                let bottom = (buf.top + view_height.max(1) - 1).min(last);
+                let l = match self {
+                    Self::ScreenTop => (top + n - 1).min(bottom),
+                    Self::ScreenBottom => bottom.saturating_sub(n - 1).max(top),
+                    _ => top + (bottom - top) / 2,
+                };
+                Pos::new(l, buf.first_non_blank(l))
+            }
+            Self::LastNonBlank => {
+                let l = (line + n - 1).min(last);
+                let trimmed = buf.line(l).trim_end();
+                Pos::new(l, crate::buffer::text::char_len(trimmed).saturating_sub(1))
+            }
+            Self::Mark { name, exact } => {
+                let at = *buf.marks.get(&name)?;
+                let l = at.line.min(last);
+                if exact { Pos::new(l, at.col) } else { Pos::new(l, buf.first_non_blank(l)) }
+            }
             Self::SearchNext { forward } => buf.search(pattern, buf.cursor, forward)?,
         })
     }

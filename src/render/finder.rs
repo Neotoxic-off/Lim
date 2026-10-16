@@ -16,7 +16,7 @@ const MAX_PREVIEW_BYTES: usize = 256 * 1024;
 pub fn picker(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
     let picker = ed.picker.as_ref()?;
     let t = theme();
-    let icons = ed.options.icons;
+    let set = super::icons::icons(&ed.options);
     let (sw, sh) = (grid.width, grid.height);
     let w = (sw * 8 / 10).max(sw.min(40));
     let h = (sh * 8 / 10).max(sh.min(10));
@@ -32,7 +32,7 @@ pub fn picker(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
     // Input.
     grid.float(Rect { x, y, w: list_w, h: 3 }, border, fill, picker.kind.title());
     let mut input = Row::new(list_w - 2);
-    input.text(title, if icons { " \u{f002} " } else { " > " });
+    input.text(title, &format!(" {} ", set.search));
     input.text(fill, &picker.query);
     let cursor_col = x + 1 + input.used();
     let count = format!("{}/{} ", picker.matches.len(), picker.items.len());
@@ -52,9 +52,11 @@ pub fn picker(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
         let base = Style { bg, bold: selected, ..fill };
         let mut row = Row::new(list.w - 2);
         row.text(Style { fg: t.fg(Group::BufferPicker), ..base }, if selected { "\u{258c}" } else { " " });
-        if icons && let Target::File(path, _) = &item.target {
-            let (icon, color) = syntax::lang_for(path).map_or(('\u{f15b}', base.fg), |l| (l.icon, Rgb(l.icon_color)));
-            row.text(Style { fg: color, ..base }, &format!("{icon} "));
+        if let Target::File(path, _) = &item.target {
+            let (icon, color) = set.for_file(syntax::lang_for(path));
+            if !icon.is_empty() {
+                row.text(Style { fg: color.map_or(base.fg, Rgb), ..base }, &format!("{icon} "));
+            }
         }
         let dir_end = match &item.target {
             Target::File(..) => item.label.rfind('/').map_or(0, |i| text::char_len(&item.label[..=i])),
@@ -101,7 +103,12 @@ fn preview(ed: &Editor, grid: &mut Grid, area: Rect, fill: Style, border: Style)
             None => return,
         },
         Target::Line(y) => (ed.buf().name(), ed.buf().lines().to_vec(), *y, ed.buf().path.as_deref()),
-        Target::Keys(_) | Target::Command(_) => return grid.float(area, border, fill, ""),
+        // Themes and icon sets preview on the current buffer, already redrawn in them.
+        Target::Theme(name) | Target::IconSet(name) => (name.clone(), ed.buf().lines().to_vec(), ed.buf().cursor.line, ed.buf().path.as_deref()),
+        _ => match &ed.picker.as_ref().and_then(|p| p.preview.clone()) {
+            Some(preview) => (preview.title.clone(), preview.lines.clone(), 0, None),
+            None => return grid.float(area, border, fill, ""),
+        },
     };
     grid.float(area, border, fill, &title);
     let rows = area.h.saturating_sub(2);

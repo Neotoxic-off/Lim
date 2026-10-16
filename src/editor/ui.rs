@@ -1,6 +1,6 @@
 //! which-key menus and AstroNvim's `<Leader>u` UI toggles.
 
-use super::{Editor, Message, Mode};
+use super::{Editor, Message, Mode, bindings};
 use crate::config::keys::{self, LEADER};
 use crate::term::Key;
 
@@ -11,6 +11,9 @@ pub const LEADER_U: char = '\u{F8F2}';
 pub const LEADER_T: char = '\u{F8F3}';
 pub const LEADER_G: char = '\u{F8F4}';
 pub const CTRL_W: char = '\u{17}';
+pub const LEADER_S: char = '\u{F8F5}';
+/// `<Leader>bs`: sort buffers.
+pub const LEADER_BS: char = '\u{F8F6}';
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuEntry {
@@ -20,95 +23,26 @@ pub struct MenuEntry {
     pub group: bool,
 }
 
-/// AstroNvim's descriptions for the built-in prefixes.
-fn builtin(prefix: char) -> (&'static str, &'static [(&'static str, &'static str)]) {
-    match prefix {
-        LEADER => ("<Leader>", &[
-            ("b", "+Buffers"),
-            ("f", "+Find"),
-            ("g", "+Git"),
-            ("t", "+Terminal"),
-            ("u", "+UI/UI Toggles"),
-            ("c", "Close buffer"),
-            ("C", "Force close buffer"),
-            ("e", "Toggle Explorer"),
-            ("o", "Toggle Explorer Focus"),
-            ("h", "Home Screen"),
-            ("n", "New File"),
-            ("q", "Quit Window"),
-            ("Q", "Exit lim"),
-            ("w", "Save"),
-            ("/", "Toggle comment line"),
-        ]),
-        LEADER_B => ("<Leader>b", &[
-            ("b", "Select buffer from tabline"),
-            ("c", "Close all buffers except current"),
-            ("C", "Close all buffers"),
-            ("d", "Close buffer from tabline"),
-            ("l", "Close all buffers to the left"),
-            ("p", "Previous buffer"),
-            ("r", "Close all buffers to the right"),
-            ("\\", "Horizontal split buffer from tabline"),
-            ("|", "Vertical split buffer from tabline"),
-        ]),
-        LEADER_F => ("<Leader>f", &[
-            ("<CR>", "Resume previous search"),
-            ("b", "Find buffers"),
-            ("c", "Find word under cursor"),
-            ("C", "Find commands"),
-            ("f", "Find files"),
-            ("F", "Find all files"),
-            ("g", "Find git files"),
-            ("k", "Find keymaps"),
-            ("l", "Find lines"),
-            ("o", "Find old files"),
-            ("w", "Find words"),
-            ("W", "Find words in all files"),
-        ]),
-        LEADER_G => ("<Leader>g", &[("g", "Next Git hunk"), ("G", "Previous Git hunk")]),
-        LEADER_T => ("<Leader>t", &[
-            ("f", "ToggleTerm float"),
-            ("h", "ToggleTerm horizontal split"),
-            ("v", "ToggleTerm vertical split"),
-        ]),
-        LEADER_U => ("<Leader>u", &[
-            ("a", "Toggle autopairs"),
-            ("D", "Dismiss notifications"),
-            ("g", "Toggle signcolumn"),
-            ("l", "Toggle statusline"),
-            ("n", "Change line numbering"),
-            ("N", "Toggle notifications"),
-            ("t", "Toggle tabline"),
-            ("u", "Toggle URL highlight"),
-            ("y", "Toggle syntax highlight"),
-            ("|", "Toggle indent guides"),
-        ]),
-        'g' => ("g", &[("g", "First line"), ("c", "Toggle comment"), ("cc", "Toggle comment line")]),
-        ']' => ("]", &[("b", "Next buffer"), ("g", "Next Git hunk")]),
-        '[' => ("[", &[("b", "Previous buffer"), ("g", "Previous Git hunk")]),
-        CTRL_W => ("<C-w>", &[
-            ("v", "Split window vertically"),
-            ("s", "Split window"),
-            ("c", "Close window"),
-            ("o", "Close all other windows"),
-            ("w", "Switch windows"),
-            ("h", "Go to the left window"),
-            ("j", "Go to the down window"),
-            ("k", "Go to the up window"),
-            ("l", "Go to the right window"),
-        ]),
-        _ => ("", &[]),
-    }
+/// A menu's title and its (key, description, opens a group) entries.
+type Menu = (&'static str, Vec<(String, &'static str, bool)>);
+
+/// A built-in menu from the binding table.
+fn builtin(prefix: char) -> Option<Menu> {
+    let title = bindings::menu_title(prefix)?;
+    let entries = bindings::BINDINGS
+        .iter()
+        .filter(|b| b.prefix == prefix)
+        .map(|b| (bindings::key_name(b.key), b.desc, matches!(b.action, bindings::Action::Group(_))))
+        .collect();
+    Some((title, entries))
 }
 
-/// Every built-in mapping as (prefix notation, [(key, description)]), for the keymaps picker.
-pub fn builtin_maps() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
-    [LEADER, LEADER_B, LEADER_F, LEADER_G, LEADER_T, LEADER_U, 'g', ']', '[', CTRL_W]
+/// Every built-in command as (menu notation, [(key, description)]), for the keymaps picker and cheat sheet.
+pub fn builtin_maps() -> Vec<(&'static str, Vec<(String, &'static str)>)> {
+    bindings::MENUS
         .iter()
-        .map(|&p| {
-            let (title, entries) = builtin(p);
-            (title, entries.iter().filter(|(_, d)| !d.starts_with('+')).copied().collect())
-        })
+        .filter_map(|&(prefix, _)| builtin(prefix))
+        .map(|(title, entries)| (title, entries.into_iter().filter(|(_, _, group)| !group).map(|(k, d, _)| (k, d)).collect()))
         .collect()
 }
 
@@ -120,6 +54,8 @@ fn prefix_keys(prefix: char) -> Vec<Key> {
         LEADER_G => vec![Key::Char(LEADER), Key::Char('g')],
         LEADER_T => vec![Key::Char(LEADER), Key::Char('t')],
         LEADER_U => vec![Key::Char(LEADER), Key::Char('u')],
+        LEADER_S => vec![Key::Char(LEADER), Key::Char('S')],
+        LEADER_BS => vec![Key::Char(LEADER), Key::Char('b'), Key::Char('s')],
         CTRL_W => vec![Key::Ctrl('w')],
         c => vec![Key::Char(c)],
     }
@@ -128,16 +64,13 @@ fn prefix_keys(prefix: char) -> Vec<Key> {
 impl Editor {
     /// The which-key popup for the keys typed so far, if they open a menu.
     pub fn which_key(&self) -> Option<(String, Vec<MenuEntry>)> {
-        let (title, typed, builtins) = match self.pending.prefix {
-            Some(p) if !matches!(p, 'f' | 'F' | 't' | 'T' | 'r' | 'q' | '@' | 'i' | 'a' | 'Z') => {
-                let (title, entries) = builtin(p);
-                (title.to_owned(), prefix_keys(p), entries)
-            }
-            _ if !self.typeahead.is_empty() => (keys::display(&self.typeahead), self.typeahead.clone(), &[][..]),
-            _ => return None,
+        let (title, typed, builtins) = match self.pending.prefix.and_then(|p| builtin(p).map(|b| (p, b))) {
+            Some((p, (title, entries))) => (title.to_owned(), prefix_keys(p), entries),
+            None if !self.typeahead.is_empty() => (keys::display(&self.typeahead), self.typeahead.clone(), Vec::new()),
+            None => return None,
         };
         let mut entries: Vec<MenuEntry> =
-            builtins.iter().map(|(k, d)| MenuEntry { key: (*k).to_owned(), desc: (*d).to_owned(), group: d.starts_with('+') }).collect();
+            builtins.into_iter().map(|(key, desc, group)| MenuEntry { key, desc: desc.to_owned(), group }).collect();
         let mode = self.map_mode_for_menu();
         for map in self.keymaps.iter().filter(|m| Some(m.mode) == mode && m.lhs.len() > typed.len() && m.lhs.starts_with(&typed)) {
             let key = keys::display(&map.lhs[typed.len()..=typed.len()]);
@@ -173,6 +106,26 @@ impl Editor {
             't' => ("tabline", flip(&mut o.showtabline)),
             'u' => ("URL highlighting", flip(&mut o.highlighturl)),
             'y' => ("syntax highlighting", flip(&mut o.syntax)),
+            'r' => ("reference highlighting", flip(&mut o.wordhighlight)),
+            'c' | 'C' => ("autocompletion", flip(&mut o.completion)),
+            'z' => ("color highlighting", flip(&mut o.colorhighlight)),
+            '>' => ("foldcolumn", flip(&mut o.foldcolumn)),
+            'p' => {
+                // Paste mode: no autopairs, no auto-indent, so pasted text arrives as typed.
+                let on = o.autopairs || o.autoindent;
+                o.autopairs = !on;
+                o.autoindent = !on;
+                ("paste mode", on)
+            }
+            'Z' => {
+                self.zen = !self.zen;
+                ("zen mode", self.zen)
+            }
+            'i' => {
+                let width = if o.expandtab { o.indent_width() as i64 } else { -(o.tabstop as i64) };
+                return self.open_prompt("Set indent value (>0 expandtab, <=0 noexpandtab)", &width.to_string(), super::prompt::PromptAction::IndentWidth);
+            }
+            'b' => return self.toggle_background(),
             '|' => ("indent guides", flip(&mut o.indentguides)),
             'n' => {
                 // AstroNvim cycles: both → number → relativenumber → none → both.
@@ -192,6 +145,29 @@ impl Editor {
             _ => return,
         };
         self.set_message(Message::Info(format!("{name} {}", if on { "enabled" } else { "disabled" })));
+    }
+}
+
+impl Editor {
+    /// `<Leader>ub`: the light or dark variant of the current theme family.
+    fn toggle_background(&mut self) {
+        const PAIRS: &[(&str, &str)] = &[
+            ("astrodark", "astrolight"),
+            ("catppuccin-mocha", "catppuccin-latte"),
+            ("catppuccin-macchiato", "catppuccin-latte"),
+            ("catppuccin-frappe", "catppuccin-latte"),
+            ("tokyonight-night", "tokyonight-day"),
+            ("tokyonight-storm", "tokyonight-day"),
+            ("tokyonight-moon", "tokyonight-day"),
+            ("rose-pine", "rose-pine-dawn"),
+            ("rose-pine-moon", "rose-pine-dawn"),
+        ];
+        let current = self.colorscheme.clone();
+        let other = PAIRS
+            .iter()
+            .find_map(|&(dark, light)| if dark == current { Some(light) } else if light == current { Some(dark) } else { None })
+            .unwrap_or(if crate::render::palettes::THEMES.iter().any(|t| t.name == current && t.light) { "astrodark" } else { "astrolight" });
+        self.set_colorscheme(other, true);
     }
 }
 

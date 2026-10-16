@@ -63,23 +63,30 @@ impl History {
     }
 
     /// Reverts the latest group; returns where the cursor was before it.
-    pub fn undo(&mut self, lines: &mut Vec<String>) -> Option<Pos> {
+    /// Reverts the latest group; `edited(at, removed, inserted)` hears about each line range replaced.
+    pub fn undo(&mut self, lines: &mut Vec<String>, edited: &mut dyn FnMut(usize, usize, usize)) -> Option<Pos> {
         self.sealed = true;
-        swap(&mut self.undo, &mut self.redo, lines)
+        swap(&mut self.undo, &mut self.redo, lines, edited)
     }
 
-    pub fn redo(&mut self, lines: &mut Vec<String>) -> Option<Pos> {
+    pub fn redo(&mut self, lines: &mut Vec<String>, edited: &mut dyn FnMut(usize, usize, usize)) -> Option<Pos> {
         self.sealed = true;
-        swap(&mut self.redo, &mut self.undo, lines)
+        swap(&mut self.redo, &mut self.undo, lines, edited)
     }
 }
 
-fn swap(from: &mut Vec<Group>, to: &mut Vec<Group>, lines: &mut Vec<String>) -> Option<Pos> {
+fn swap(
+    from: &mut Vec<Group>,
+    to: &mut Vec<Group>,
+    lines: &mut Vec<String>,
+    edited: &mut dyn FnMut(usize, usize, usize),
+) -> Option<Pos> {
     let group = from.pop()?;
     let mut inverse = Vec::with_capacity(group.changes.len());
     let mut cursor = None;
     for change in group.changes.into_iter().rev() {
         let new_len = change.old.len();
+        edited(change.at, change.new_len, new_len);
         let old = lines.splice(change.at..change.at + change.new_len, change.old).collect();
         inverse.push(Change { at: change.at, old, new_len, cursor: change.cursor });
         cursor = Some(change.cursor);

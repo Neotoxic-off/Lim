@@ -2,8 +2,10 @@
 //! (block comments, long strings) carried from line to line.
 
 mod lang;
+mod todo;
 
 pub use lang::{Lang, lang_for};
+pub use todo::{Todo, todo};
 
 /// Highlight groups, named after the treesitter captures astrotheme colors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

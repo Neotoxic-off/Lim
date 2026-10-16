@@ -57,9 +57,16 @@ fn special(name: &str) -> Option<Key> {
         "del" | "delete" => Key::Delete,
         "pageup" => Key::PageUp,
         "pagedown" => Key::PageDown,
+        "c-up" => Key::CtrlUp,
+        "c-down" => Key::CtrlDown,
+        "c-left" => Key::CtrlLeft,
+        "c-right" => Key::CtrlRight,
         _ => {
             if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=12).contains(n)) {
                 return Some(Key::F(n));
+            }
+            if lower == "c-space" {
+                return Some(Key::Ctrl(' '));
             }
             let c = lower.strip_prefix("c-")?;
             let mut it = c.chars();
@@ -78,6 +85,7 @@ pub fn display(keys: &[Key]) -> String {
             Key::Char(LEADER) => "<Leader>".to_owned(),
             Key::Char(' ') => "<Space>".to_owned(),
             Key::Char(c) => c.to_string(),
+            Key::Ctrl(' ') => "<C-Space>".into(),
             Key::Ctrl(c) => format!("<C-{c}>"),
             Key::F(n) => format!("<F{n}>"),
             Key::Esc => "<Esc>".into(),
@@ -94,6 +102,10 @@ pub fn display(keys: &[Key]) -> String {
             Key::Delete => "<Del>".into(),
             Key::PageUp => "<PageUp>".into(),
             Key::PageDown => "<PageDown>".into(),
+            Key::CtrlUp => "<C-Up>".into(),
+            Key::CtrlDown => "<C-Down>".into(),
+            Key::CtrlLeft => "<C-Left>".into(),
+            Key::CtrlRight => "<C-Right>".into(),
             Key::Unknown => "?".into(),
         })
         .collect()

@@ -1,13 +1,14 @@
 //! One window: winbar, then the buffer with AstroNvim's statuscolumn (fold space, numbers,
 //! sign column), cursorline, search and selection highlights. No wrapping (`wrap = false`).
 
+use super::icons::icons;
 use super::row::{Cell, Grid, Row};
 use super::theme::{Group, Rgb, Style, theme};
 use crate::buffer::git::Sign;
 use crate::buffer::{Buffer, CharClass, Pos, text};
 use crate::config::Options;
 use crate::editor::{Editor, Mode, Rect, Selection};
-use crate::syntax::Hl;
+use crate::syntax::{self, Hl, Todo};
 
 /// Draws window `index` into `rect`; returns the cursor's screen cell when it is the focused window.
 pub fn window(ed: &mut Editor, index: usize, rect: Rect, grid: &mut Grid) -> Option<(usize, usize)> {
@@ -17,7 +18,7 @@ pub fn window(ed: &mut Editor, index: usize, rect: Rect, grid: &mut Grid) -> Opt
         normal_mode: ed.mode == Mode::Normal,
         selection: if active { ed.selection() } else { None },
         pattern: if ed.highlight_search && ed.options.hlsearch { ed.search.clone() } else { String::new() },
-        options: ed.options.clone(),
+        options: if ed.zen { zen_options(&ed.options) } else { ed.options.clone() },
         base: theme().bg(if active { Group::Normal } else { Group::NormalNC }),
     };
     ed.with_view(index, |buf| {
@@ -31,6 +32,11 @@ pub fn window(ed: &mut Editor, index: usize, rect: Rect, grid: &mut Grid) -> Opt
         active.then_some((top + row, rect.x + col))
     })
     .flatten()
+}
+
+/// snacks.zen's window options: no numbers, signs, fold column or winbar.
+fn zen_options(options: &Options) -> Options {
+    Options { number: false, relativenumber: false, signcolumn: false, foldcolumn: false, winbar: false, ..options.clone() }
 }
 
 struct Context {
@@ -55,12 +61,13 @@ fn winbar_cells(buf: &Buffer, width: usize, active: bool, ctx: &Context) -> Vec<
         for (i, part) in parts.iter().enumerate() {
             if i + 1 < parts.len() {
                 row.text(style, part);
-                row.text(style, if ctx.options.icons { " \u{f105} " } else { " > " });
+                row.text(style, &format!(" {} ", icons(&ctx.options).path_separator));
                 continue;
             }
-            if ctx.options.icons {
-                let (icon, color) = buf.lang.map_or(('\u{f15b}', style.fg), |l| (l.icon, Rgb(l.icon_color)));
-                row.text(Style { fg: if active { color } else { style.fg }, ..style }, &format!("{icon} "));
+            let (icon, color) = icons(&ctx.options).for_file(buf.lang);
+            if !icon.is_empty() {
+                let fg = if active { color.map_or(style.fg, Rgb) } else { style.fg };
+                row.text(Style { fg, ..style }, &format!("{icon} "));
             }
             row.text(style.bold(), part);
         }
@@ -75,7 +82,8 @@ fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (u
     let numbers = o.number || o.relativenumber;
     let number_width = if numbers { buf.line_count().to_string().len().max(3) } else { 0 };
     let signs = if o.signcolumn { 2 } else { usize::from(numbers) };
-    let gutter = 1 + number_width + signs;
+    let fold = usize::from(o.foldcolumn);
+    let gutter = fold + number_width + signs;
     let cursor = buf.cursor;
     let cursor_x = text::display_col(buf.line(cursor.line), cursor.col);
     scroll(buf, cursor_x, area.h.max(1), area.w.saturating_sub(gutter).max(1), o);
@@ -93,7 +101,7 @@ fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (u
         let mut row = Row::new(area.w);
         if y < buf.line_count() {
             let current = y == cursor.line;
-            row.text(blank, " ");
+            row.pad_to(blank, fold);
             if numbers {
                 let number = match (o.number, o.relativenumber, current) {
                     (true, _, true) | (true, false, false) => y + 1,
@@ -118,6 +126,8 @@ fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (u
                 urls: if o.highlighturl { text::find_urls(buf.line(y)) } else { Vec::new() },
                 words: word.as_deref().map(|w| text::find_word(buf.line(y), w)).unwrap_or_default(),
                 parens: parens.map(|p| p.filter(|p| p.line == y).map(|p| p.col)),
+                colors: if o.colorhighlight { text::find_hex_colors(buf.line(y)) } else { Vec::new() },
+                todo: if o.todocomments { syntax::todo(buf.line(y)) } else { None },
             };
             draw_line(&mut row, buf, y, &decor, ctx);
         }
@@ -135,6 +145,27 @@ struct Decor {
     urls: Vec<std::ops::Range<usize>>,
     words: Vec<std::ops::Range<usize>>,
     parens: [Option<usize>; 2],
+    colors: Vec<(std::ops::Range<usize>, u32)>,
+    todo: Option<(usize, usize, Todo)>,
+}
+
+/// todo-comments' colors per keyword kind.
+fn todo_group(kind: Todo) -> Group {
+    match kind {
+        Todo::Fix => Group::TodoFix,
+        Todo::Task => Group::TodoTodo,
+        Todo::Hack => Group::TodoHack,
+        Todo::Warn => Group::TodoWarn,
+        Todo::Perf => Group::TodoPerf,
+        Todo::Note => Group::TodoNote,
+        Todo::Test => Group::TodoTest,
+    }
+}
+
+/// Black or white, whichever reads better on `bg`.
+fn contrast(bg: u32) -> Rgb {
+    let (r, g, b) = ((bg >> 16 & 0xff) as f32, (bg >> 8 & 0xff) as f32, (bg & 0xff) as f32);
+    if 0.299 * r + 0.587 * g + 0.114 * b > 140.0 { Rgb(0x000000) } else { Rgb(0xFFFFFF) }
 }
 
 /// `matchparen`: the bracket under the cursor and its partner, searched within a screenful.
@@ -222,6 +253,21 @@ fn draw_line(row: &mut Row, buf: &Buffer, y: usize, decor: &Decor, ctx: &Context
         {
             style.bg = word_bg;
         }
+        // todo-comments only inside comments (or anywhere when there is no highlighter).
+        if let Some((col, len, kind)) = decor.todo
+            && x >= col.saturating_sub(1)
+            && group_at(decor, col).is_none_or(|g| g == Hl::Comment)
+        {
+            let color = t.fg(todo_group(kind));
+            if x < col + len + 1 {
+                style = Style { fg: ctx.base, bg: color, bold: true, ..style };
+            } else {
+                style.fg = color;
+            }
+        }
+        if let Some((_, value)) = decor.colors.iter().find(|(r, _)| r.contains(&x)) {
+            style = Style { fg: contrast(*value), bg: Rgb(*value), ..style };
+        }
         if decor.parens.contains(&Some(x)) {
             let paren = t.get(Group::MatchParen);
             style.fg = paren.fg.unwrap_or(style.fg);
@@ -259,4 +305,8 @@ fn draw_line(row: &mut Row, buf: &Buffer, y: usize, decor: &Decor, ctx: &Context
         screen_x += 1;
     }
     row.pad_to(Style::new(t.fg(Group::Normal), bg), usize::MAX);
+}
+
+fn group_at(decor: &Decor, col: usize) -> Option<Hl> {
+    decor.groups.as_ref().and_then(|g| g.get(col)).copied()
 }

@@ -37,14 +37,17 @@ impl Terminal {
 }
 
 impl Terminal {
-    /// Hands the terminal to `$SHELL` (toggleterm stand-in) and takes it back when the shell exits.
-    pub fn run_shell(&self) -> io::Result<()> {
+    /// Hands the terminal to `command` (`$SHELL` when empty) and takes it back when it exits.
+    pub fn run(&self, command: &[String]) -> io::Result<()> {
         let mut out = io::stdout();
         out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l")?;
         out.flush()?;
         sys::set_mode(&self.original)?;
         let shell = std::env::var_os("SHELL").filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
-        let status = std::process::Command::new(shell).status();
+        let status = match command.split_first() {
+            Some((program, args)) => std::process::Command::new(program).args(args).status(),
+            None => std::process::Command::new(shell).status(),
+        };
         sys::set_mode(&sys::raw_mode(self.original))?;
         out.write_all(b"\x1b[?1049h")?;
         out.flush()?;
