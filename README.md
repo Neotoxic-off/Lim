@@ -1,0 +1,2 @@
+# Lim
+Lightweight Vim alternative
