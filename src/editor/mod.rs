@@ -1,15 +1,19 @@
 //! Modal editing: the state machine that turns keys into buffer edits.
 
 mod command;
+mod explorer;
 mod insert;
 mod keymap;
 mod manage;
 mod motion;
 mod normal;
 mod operator;
+mod picker;
+mod recent;
 mod repeat;
 #[cfg(test)]
 mod tests;
+mod ui;
 mod visual;
 mod window;
 
@@ -22,6 +26,8 @@ use crate::error::Error;
 use crate::term::Key;
 use motion::Motion;
 use operator::Operator;
+pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
+pub use picker::{Picker, Target};
 pub use window::{Layout, Rect, View, Window};
 
 
@@ -35,6 +41,10 @@ pub enum Mode {
     Search,
     /// Waiting for a tabline label (`<Leader>bb`, `<Leader>bd`, …).
     BufferPick(PickAction),
+    /// The fuzzy finder has the keyboard.
+    Picker,
+    /// The file tree has the keyboard.
+    Explorer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,7 +58,7 @@ pub enum PickAction {
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Normal | Self::BufferPick(_) => "NORMAL",
+            Self::Normal | Self::BufferPick(_) | Self::Picker | Self::Explorer => "NORMAL",
             Self::Insert => "INSERT",
             Self::Visual => "VISUAL",
             Self::VisualLine => "V-LINE",
@@ -127,6 +137,15 @@ pub struct Editor {
     pub area: Rect,
     next_window_id: u32,
     previous_buffer: Option<usize>,
+    pub picker: Option<Picker>,
+    pub explorer: Option<Explorer>,
+    /// The start screen is showing (no file given, or `<Leader>h`).
+    pub dashboard: bool,
+    pub started: Instant,
+    /// Set by `<F7>` / `<Leader>t…`: the main loop suspends the editor and runs `$SHELL`.
+    pub shell_requested: bool,
+    last_picker: Option<Picker>,
+    recent: Vec<std::path::PathBuf>,
     anchor: Pos,
     register: Option<Register>,
     pending: Pending,
@@ -158,6 +177,13 @@ impl Editor {
             area: Rect { x: 0, y: 1, w: 80, h: 20 },
             next_window_id: 1,
             previous_buffer: None,
+            picker: None,
+            explorer: None,
+            dashboard: paths.is_empty(),
+            started: Instant::now(),
+            shell_requested: false,
+            last_picker: None,
+            recent: recent::load(),
             anchor: Pos::default(),
             register: None,
             pending: Pending::default(),
@@ -197,7 +223,13 @@ impl Editor {
     pub fn configure(&mut self, config: &Config) {
         self.options = config.options.clone();
         self.keymaps = config.keymaps.clone();
+        self.dashboard &= self.options.dashboard;
         self.apply_options();
+        if self.options.gitsigns {
+            for buf in &mut self.buffers {
+                buf.load_git_base();
+            }
+        }
     }
 
     pub(super) fn apply_options(&mut self) {
@@ -225,6 +257,8 @@ impl Editor {
             Mode::Visual | Mode::VisualLine => self.visual(key),
             Mode::Command | Mode::Search => self.command_line(key),
             Mode::BufferPick(action) => self.pick(key, action),
+            Mode::Picker => self.picker_key(key),
+            Mode::Explorer => self.explorer_key(key),
         }
         if let Some(window) = self.windows.get_mut(self.active) {
             window.buffer = self.current;

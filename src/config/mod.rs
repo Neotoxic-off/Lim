@@ -60,6 +60,8 @@ pub struct Options {
     pub wordhighlight: bool,
     pub notifications: bool,
     pub dashboard: bool,
+    /// Keyword highlighting (`<Leader>uy`).
+    pub syntax: bool,
 }
 
 impl Default for Options {
@@ -94,6 +96,7 @@ impl Default for Options {
             wordhighlight: true,
             notifications: true,
             dashboard: true,
+            syntax: true,
         }
     }
 }
@@ -225,6 +228,7 @@ impl Config {
                 "wordhighlight" => set_bool(&mut o.wordhighlight, value),
                 "notifications" => set_bool(&mut o.notifications, value),
                 "dashboard" => set_bool(&mut o.dashboard, value),
+                "syntax" => set_bool(&mut o.syntax, value),
                 "truecolor" => match value {
                     Json::Bool(b) => {
                         o.truecolor = Some(*b);

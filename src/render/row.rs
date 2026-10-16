@@ -5,6 +5,7 @@ use std::fmt::Write;
 
 use super::theme::{Rgb, Style};
 use crate::buffer::text;
+use crate::editor::Rect;
 use crate::term::ColorDepth;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,14 +133,21 @@ impl Grid {
         }
     }
 
+    pub fn fill(&mut self, area: Rect, style: Style) {
+        for y in area.y..area.y + area.h {
+            self.put(area.x, y, &vec![Cell::blank(style); area.w]);
+        }
+    }
+
     pub fn text(&mut self, x: usize, y: usize, width: usize, style: Style, s: &str) {
         let mut row = Row::new(width);
         row.text(style, s);
         self.put(x, y, &row.finish(style));
     }
 
-    /// A rounded float (`winborder = "rounded"`) with an optional title; returns the inner area.
-    pub fn float(&mut self, x: usize, y: usize, w: usize, h: usize, border: Style, fill: Style, title: &str) {
+    /// A rounded float (`winborder = "rounded"`) with an optional title.
+    pub fn float(&mut self, area: Rect, border: Style, fill: Style, title: &str) {
+        let Rect { x, y, w, h } = area;
         if w < 2 || h < 2 {
             return;
         }

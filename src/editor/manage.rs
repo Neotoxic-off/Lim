@@ -24,7 +24,22 @@ impl Editor {
             return self.switch_to(i);
         }
         match Buffer::open(path) {
-            Ok(buf) => {
+            Ok(mut buf) => {
+                if self.options.gitsigns {
+                    buf.load_git_base();
+                }
+                self.remember(path);
+                // The first file opened replaces the untouched start buffer, as in Vim.
+                if self.buffers.len() == 1 && self.buffers[0].path.is_none() && !self.buffers[0].is_dirty() {
+                    self.buffers.clear();
+                    self.current = 0;
+                    self.previous_buffer = None;
+                    for window in &mut self.windows {
+                        window.buffer = 0;
+                    }
+                    self.buffers.push(buf);
+                    return;
+                }
                 self.buffers.push(buf);
                 self.switch_to(self.buffers.len() - 1);
             }
@@ -210,6 +225,15 @@ impl Editor {
         self.layout.rects(self.area, &mut rects);
         let Some(id) = self.windows.get(self.active).map(|w| w.id) else { return };
         let Some(&(_, from)) = rects.iter().find(|(i, _)| *i == id) else { return };
+        // `<C-h>` from the leftmost window goes into the open file tree.
+        if dir == Direction::Left
+            && let Some(explorer) = &mut self.explorer
+            && !rects.iter().any(|(_, r)| r.x + r.w <= from.x)
+        {
+            explorer.focused = true;
+            self.mode = Mode::Explorer;
+            return;
+        }
         let buf = self.buf();
         let row = from.y + 1 + buf.cursor.line.saturating_sub(buf.top);
         let row = row.min(from.y + from.h.saturating_sub(1));

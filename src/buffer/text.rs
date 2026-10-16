@@ -104,6 +104,50 @@ pub fn find_all(line: &str, pattern: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
+/// Whole-word, case-sensitive matches of `word` (the word under the cursor).
+pub fn find_word(line: &str, word: &str) -> Vec<Range<usize>> {
+    if word.is_empty() {
+        return Vec::new();
+    }
+    let chars: Vec<char> = line.chars().collect();
+    let width = char_len(word);
+    let is_word = |i: usize| chars.get(i).is_some_and(|c| c.is_alphanumeric() || *c == '_');
+    let (mut byte, mut col) = (0, 0);
+    line.match_indices(word)
+        .map(|(b, _)| {
+            col += char_len(&line[byte..b]);
+            byte = b;
+            col..col + width
+        })
+        .filter(|m| (m.start == 0 || !is_word(m.start - 1)) && !is_word(m.end))
+        .collect()
+}
+
+/// URLs (`http://`, `https://`, `file://`) as char ranges, for `highlighturl`.
+pub fn find_urls(line: &str) -> Vec<Range<usize>> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut urls = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let rest: String = chars[i..chars.len().min(i + 8)].iter().collect();
+        if ["https://", "http://", "file://"].iter().any(|p| rest.starts_with(p)) {
+            let start = i;
+            while i < chars.len() && !chars[i].is_whitespace() && !"\"'<>`".contains(chars[i]) {
+                i += 1;
+            }
+            // Trailing punctuation usually ends the sentence, not the URL.
+            while i > start && ".,;:!?)]}".contains(chars[i - 1]) {
+                i -= 1;
+            }
+            urls.push(start..i);
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    urls
+}
+
 fn find_plain(line: &str, pattern: &str) -> Vec<Range<usize>> {
     let smart_sensitive = SMART_CASE.load(Relaxed) && pattern.chars().any(char::is_uppercase);
     let (lowered_line, lowered_pattern);
@@ -140,5 +184,7 @@ mod tests {
         assert_eq!(find_all("Foo bar foo", "Foo"), vec![0..3]);
         assert_eq!(find_all("é foo", "foo"), vec![2..5]);
         assert_eq!(find_all("foo food _foo foo", "\\<foo\\>"), vec![0..3, 14..17]);
+        assert_eq!(find_word("Foo foo food", "foo"), vec![4..7]);
+        assert_eq!(find_urls("see https://x.io/a?b=1). and http://y"), vec![4..22, 29..37]);
     }
 }

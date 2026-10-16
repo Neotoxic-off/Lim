@@ -4,6 +4,7 @@ use super::*;
 
 fn editor(text: &str) -> Editor {
     let mut ed = Editor::new(&[]);
+    ed.dashboard = false;
     ed.buffers[0] = Buffer::from_text(None, text);
     ed
 }
@@ -196,4 +197,75 @@ fn buffers_and_windows() {
     assert_eq!(ed.windows[0].buffer, 0);
     keys(&mut ed, ":q\n");
     assert!(ed.quit);
+}
+
+#[test]
+fn user_keymaps_and_leader() {
+    let (config, warnings) = crate::config::Config::from_str(
+        r#"{ "options": { "mapleader": "," },
+             "keymaps": { "i": { "jk": "<Esc>" }, "n": { "<Leader>d": "dd", "Q": false, "H": "^" } } }"#,
+    );
+    assert!(warnings.is_empty());
+    let mut ed = editor("  abc\nxyz");
+    ed.configure(&config);
+    keys(&mut ed, "$H");
+    assert_eq!(ed.buf().cursor.col, 2);
+    keys(&mut ed, "Ajk");
+    assert_eq!((ed.mode, text(&ed).as_str()), (Mode::Normal, "  abc\nxyz"));
+    keys(&mut ed, "Aj");
+    assert_eq!(text(&ed), "  abc\nxyz"); // `j` waits for a possible `k`
+    ed.typeahead_at -= std::time::Duration::from_secs(1);
+    ed.tick();
+    assert_eq!(text(&ed), "  abcj\nxyz");
+    keys(&mut ed, "x\x1b,d");
+    assert_eq!(text(&ed), "xyz");
+    keys(&mut ed, "Q");
+    assert!(!ed.quit);
+    keys(&mut ed, " ");
+    assert_eq!(ed.buf().cursor.col, 0); // space is no longer the leader
+}
+
+#[test]
+fn picker_explorer_and_dashboard() {
+    let mut ed = editor("alpha\nbeta\ngamma");
+    ed.buffers.push(Buffer::from_text(Some("other.rs".into()), "x"));
+    keys(&mut ed, " fl");
+    assert_eq!(ed.mode, Mode::Picker);
+    keys(&mut ed, "gm\n");
+    assert_eq!((ed.mode, ed.buf().cursor.line), (Mode::Normal, 2));
+    keys(&mut ed, " fbothe");
+    assert_eq!(ed.picker.as_ref().map(|p| p.matches.len()), Some(1));
+    ed.handle(Key::Enter);
+    assert_eq!(ed.buf().name(), "other.rs");
+    keys(&mut ed, " f\n");
+    assert_eq!(ed.picker.as_ref().map(|p| p.query.as_str()), Some("othe"));
+    ed.handle(Key::Esc);
+
+    let dir = std::env::temp_dir().join(format!("lim-tree-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("sub/inner.txt"), "inside").unwrap();
+    std::fs::write(dir.join("top.txt"), "top").unwrap();
+    ed.explorer = Some(Explorer::new(dir.clone()));
+    ed.mode = Mode::Explorer;
+    let names = |ed: &Editor| ed.explorer.as_ref().map(|e| e.entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
+    assert_eq!(names(&ed), Some(vec!["sub".to_owned(), "top.txt".to_owned()]));
+    keys(&mut ed, "ljl");
+    assert_eq!(names(&ed), Some(vec!["sub".to_owned(), "inner.txt".to_owned(), "top.txt".to_owned()]));
+    assert_eq!((ed.mode, ed.buf().name()), (Mode::Normal, "inner.txt".to_owned()));
+    std::fs::remove_dir_all(dir).unwrap();
+
+    let mut ed = Editor::new(&[]);
+    assert!(ed.dashboard);
+    keys(&mut ed, "ix");
+    assert_eq!(text(&ed), "");
+    keys(&mut ed, "n");
+    assert!(!ed.dashboard);
+}
+
+#[test]
+fn recursive_macro_is_bounded() {
+    let mut ed = editor("x\ny");
+    keys(&mut ed, "qaj99@aq@a");
+    assert_eq!(ed.buf().cursor.line, 1);
+    assert_eq!(ed.message_text(), "Replay stopped: too many keys");
 }

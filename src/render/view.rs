@@ -1,129 +1,208 @@
-//! One window: winbar, then buffer text with AstroNvim's options
-//! (number + relativenumber, signcolumn=yes, cursorline, nowrap).
+//! One window: winbar, then the buffer with AstroNvim's statuscolumn (fold space, numbers,
+//! sign column), cursorline, search and selection highlights. No wrapping (`wrap = false`).
 
-
-use super::row::Row;
-use super::theme::{
-    self, BASE, CURSOR_LINE, INACTIVE_BASE, LINE_NR, SELECTION, Style, TEXT, TEXT_INACTIVE, UI_PURPLE, WINBAR,
-};
-use crate::buffer::{Buffer, Pos, text};
-use crate::editor::{Editor, Rect, Selection};
+use super::row::{Cell, Grid, Row};
+use super::theme::{Group, Rgb, Style, theme};
+use crate::buffer::git::Sign;
+use crate::buffer::{Buffer, CharClass, Pos, text};
+use crate::config::Options;
+use crate::editor::{Editor, Mode, Rect, Selection};
 use crate::syntax::Hl;
-use crate::term::ColorDepth;
 
-/// A rendered window: exactly `rect.h` rows of `rect.w` cells, and the cursor cell when focused.
-pub struct Drawn {
-    pub rows: Vec<String>,
-    pub cursor: Option<(usize, usize)>,
-}
-
-pub fn window(ed: &mut Editor, index: usize, rect: Rect, depth: ColorDepth) -> Drawn {
+/// Draws window `index` into `rect`; returns the cursor's screen cell when it is the focused window.
+pub fn window(ed: &mut Editor, index: usize, rect: Rect, grid: &mut Grid) -> Option<(usize, usize)> {
     let active = index == ed.active;
-    let selection = if active { ed.selection() } else { None };
-    let pattern = if ed.highlight_search { ed.search.clone() } else { String::new() };
-    let bg = if active { BASE } else { INACTIVE_BASE };
-    let drawn = ed.with_view(index, |buf| {
-        let mut rows = Vec::with_capacity(rect.h);
-        let has_winbar = rect.h > 1;
-        if has_winbar {
-            rows.push(winbar(buf, rect.w, depth, active, bg));
+    let ctx = Context {
+        active,
+        normal_mode: ed.mode == Mode::Normal,
+        selection: if active { ed.selection() } else { None },
+        pattern: if ed.highlight_search && ed.options.hlsearch { ed.search.clone() } else { String::new() },
+        options: ed.options.clone(),
+        base: theme().bg(if active { Group::Normal } else { Group::NormalNC }),
+    };
+    ed.with_view(index, |buf| {
+        let winbar = ctx.options.winbar && rect.h > 1;
+        if winbar {
+            grid.put(rect.x, rect.y, &winbar_cells(buf, rect.w, active, &ctx));
         }
-        let height = rect.h - usize::from(has_winbar);
-        let cursor = text_rows(buf, rect.w, height, depth, bg, selection, &pattern, &mut rows);
-        let cursor = active.then_some((rect.y + usize::from(has_winbar) + cursor.0, rect.x + cursor.1));
-        Drawn { rows, cursor }
-    });
-    drawn.unwrap_or_else(|| Drawn { rows: (0..rect.h).map(|_| Row::new(depth, rect.w).finish(Style::new(TEXT, bg))).collect(), cursor: None })
+        let top = rect.y + usize::from(winbar);
+        let height = rect.h - usize::from(winbar);
+        let (row, col) = text_rows(buf, Rect { y: top, h: height, ..rect }, &ctx, grid);
+        active.then_some((top + row, rect.x + col))
+    })
+    .flatten()
 }
 
-/// heirline winbar: the file's path relative to the working directory, dimmed when unfocused.
-fn winbar(buf: &Buffer, width: usize, depth: ColorDepth, active: bool, bg: theme::Rgb) -> String {
-    let style = Style::new(if active { WINBAR } else { TEXT_INACTIVE }, bg);
-    let mut row = Row::new(depth, width);
+struct Context {
+    active: bool,
+    normal_mode: bool,
+    selection: Option<Selection>,
+    pattern: String,
+    options: Options,
+    base: Rgb,
+}
+
+/// heirline winbar: the file's path from the working directory, dimmed when unfocused.
+fn winbar_cells(buf: &Buffer, width: usize, active: bool, ctx: &Context) -> Vec<Cell> {
+    let t = theme();
+    let style = t.on(if active { Group::WinBar } else { Group::WinBarNC }, ctx.base);
+    let mut row = Row::new(width);
     if let Some(path) = &buf.path {
         let cwd = std::env::current_dir().unwrap_or_default();
         let shown = path.strip_prefix(&cwd).unwrap_or(path);
         let parts: Vec<String> = shown.iter().map(|p| p.to_string_lossy().into_owned()).collect();
         row.text(style, " ");
         for (i, part) in parts.iter().enumerate() {
-            if i + 1 == parts.len() {
-                let (icon, color) = buf.lang.map_or(('\u{f15b}', WINBAR), |l| (l.icon, theme::Rgb(l.icon_color)));
-                row.text(Style::new(if active { color } else { TEXT_INACTIVE }, bg), &format!("{icon} "));
-                row.text(style.bold(), part);
-            } else {
+            if i + 1 < parts.len() {
                 row.text(style, part);
-                row.text(style, " \u{f105} ");
+                row.text(style, if ctx.options.icons { " \u{f105} " } else { " > " });
+                continue;
             }
+            if ctx.options.icons {
+                let (icon, color) = buf.lang.map_or(('\u{f15b}', style.fg), |l| (l.icon, Rgb(l.icon_color)));
+                row.text(Style { fg: if active { color } else { style.fg }, ..style }, &format!("{icon} "));
+            }
+            row.text(style.bold(), part);
         }
     }
-    row.finish(Style::new(TEXT, bg))
+    row.finish(Style::new(style.fg, ctx.base))
 }
 
-/// Pushes `height` text rows; returns the cursor's (row, col) inside them.
-#[allow(clippy::too_many_arguments)]
-fn text_rows(
-    buf: &mut Buffer,
-    width: usize,
-    height: usize,
-    depth: ColorDepth,
-    bg: theme::Rgb,
-    selection: Option<Selection>,
-    pattern: &str,
-    rows: &mut Vec<String>,
-) -> (usize, usize) {
-    let number_width = buf.line_count().to_string().len().max(3);
-    let gutter = number_width + 3; // fold space, numbers, 2-cell sign column
+/// Text rows inside `area`; returns the cursor's (row, col) relative to it.
+fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (usize, usize) {
+    let t = theme();
+    let o = &ctx.options;
+    let numbers = o.number || o.relativenumber;
+    let number_width = if numbers { buf.line_count().to_string().len().max(3) } else { 0 };
+    let signs = if o.signcolumn { 2 } else { usize::from(numbers) };
+    let gutter = 1 + number_width + signs;
     let cursor = buf.cursor;
     let cursor_x = text::display_col(buf.line(cursor.line), cursor.col);
-    scroll(buf, cursor_x, height.max(1), width.saturating_sub(gutter).max(1));
-    for y in buf.top..buf.top + height {
-        let mut row = Row::new(depth, width);
+    scroll(buf, cursor_x, area.h.max(1), area.w.saturating_sub(gutter).max(1), o);
+    let bottom = (buf.top + area.h).min(buf.line_count());
+    let git: Vec<Option<Sign>> = if o.gitsigns && o.signcolumn {
+        let top = buf.top;
+        buf.git_signs().get(top..bottom).map(<[_]>::to_vec).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let parens = if o.matchparen && ctx.active { matching_pair(buf, area.h) } else { [None, None] };
+    let word = if o.wordhighlight && ctx.active && ctx.normal_mode { word_under_cursor(buf) } else { None };
+    let blank = Style::new(t.fg(Group::Normal), ctx.base);
+    for (r, y) in (buf.top..buf.top + area.h).enumerate() {
+        let mut row = Row::new(area.w);
         if y < buf.line_count() {
             let current = y == cursor.line;
-            let number = if current { y + 1 } else { y.abs_diff(cursor.line) };
-            row.text(Style::new(TEXT, bg), " ");
-            row.text(Style::new(if current { TEXT } else { LINE_NR }, bg), &format!("{number:>number_width$}"));
-            row.text(Style::new(TEXT, bg), "  ");
-            let groups = buf.highlight_line(y);
-            draw_line(&mut row, buf, y, groups.as_deref(), selection, pattern, bg);
+            row.text(blank, " ");
+            if numbers {
+                let number = match (o.number, o.relativenumber, current) {
+                    (true, _, true) | (true, false, false) => y + 1,
+                    _ => y.abs_diff(cursor.line),
+                };
+                let group = if current { Group::CursorLineNr } else { Group::LineNr };
+                row.text(t.on(group, ctx.base), &format!("{number:>number_width$}"));
+            }
+            if let Some(Some(sign)) = git.get(r) {
+                let group = match sign {
+                    Sign::Add => Group::GitSignsAdd,
+                    Sign::Change => Group::GitSignsChange,
+                    Sign::Delete => Group::GitSignsDelete,
+                };
+                row.text(t.on(group, ctx.base), "\u{258e}");
+            }
+            row.pad_to(blank, gutter);
+            let decor = Decor {
+                groups: if o.syntax { buf.highlight_line(y) } else { None },
+                guide_to: if o.indentguides { guide_indent(buf, y) } else { 0 },
+                indent_width: o.indent_width(),
+                urls: if o.highlighturl { text::find_urls(buf.line(y)) } else { Vec::new() },
+                words: word.as_deref().map(|w| text::find_word(buf.line(y), w)).unwrap_or_default(),
+                parens: parens.map(|p| p.filter(|p| p.line == y).map(|p| p.col)),
+            };
+            draw_line(&mut row, buf, y, &decor, ctx);
         }
-        rows.push(row.finish(Style::new(TEXT, bg)));
+        grid.put(area.x, area.y + r, &row.finish(blank));
     }
     (cursor.line.saturating_sub(buf.top), (gutter + cursor_x).saturating_sub(buf.left))
 }
 
-fn scroll(buf: &mut Buffer, cursor_x: usize, height: usize, width: usize) {
-    let line = buf.cursor.line;
-    if line < buf.top {
-        buf.top = line;
-    } else if line >= buf.top + height {
-        buf.top = line + 1 - height;
+/// Per-line extras drawn over the syntax colors.
+struct Decor {
+    groups: Option<Vec<Hl>>,
+    /// Indent guides are drawn in leading blanks left of this screen column.
+    guide_to: usize,
+    indent_width: usize,
+    urls: Vec<std::ops::Range<usize>>,
+    words: Vec<std::ops::Range<usize>>,
+    parens: [Option<usize>; 2],
+}
+
+/// `matchparen`: the bracket under the cursor and its partner, searched within a screenful.
+fn matching_pair(buf: &Buffer, height: usize) -> [Option<Pos>; 2] {
+    let at = buf.cursor;
+    let Some(c) = buf.line(at.line).chars().nth(at.col).filter(|c| "()[]{}".contains(*c)) else { return [None, None] };
+    match buf.bracket_partner(at, c, height) {
+        Some(partner) => [Some(at), Some(partner)],
+        None => [None, None],
     }
-    if cursor_x < buf.left {
-        buf.left = cursor_x;
-    } else if cursor_x >= buf.left + width {
-        buf.left = cursor_x + 1 - width;
+}
+
+/// The keyword under the cursor, highlighted elsewhere like LSP document highlights.
+fn word_under_cursor(buf: &Buffer) -> Option<String> {
+    let (start, end) = buf.word_object(buf.cursor, false)?;
+    (buf.class_at(start) == CharClass::Word).then(|| buf.text(start, end))
+}
+
+/// Screen columns of indentation to guide on line `y`; a blank line takes its neighbours' depth.
+fn guide_indent(buf: &Buffer, y: usize) -> usize {
+    let depth = |l: &str| text::display_col(l, text::char_len(text::indent(l)));
+    let line = buf.line(y);
+    if !line.trim().is_empty() {
+        return depth(line);
+    }
+    const LOOK: usize = 100;
+    let lines = buf.lines();
+    let before = lines[y.saturating_sub(LOOK)..y].iter().rev().find(|l| !l.trim().is_empty());
+    let after = lines.get(y + 1..(y + 1 + LOOK).min(lines.len())).and_then(|ls| ls.iter().find(|l| !l.trim().is_empty()));
+    match (before, after) {
+        (Some(b), Some(a)) => depth(b).min(depth(a)),
+        _ => 0,
+    }
+}
+
+fn scroll(buf: &mut Buffer, cursor_x: usize, height: usize, width: usize, o: &Options) {
+    let line = buf.cursor.line;
+    let margin = o.scrolloff.min(height.saturating_sub(1) / 2);
+    if line < buf.top + margin {
+        buf.top = line.saturating_sub(margin);
+    } else if line + margin >= buf.top + height {
+        buf.top = (line + margin + 1).saturating_sub(height).min(line);
+    }
+    let side = o.sidescrolloff.min(width.saturating_sub(1) / 2);
+    if cursor_x < buf.left + side {
+        buf.left = cursor_x.saturating_sub(side);
+    } else if cursor_x + side >= buf.left + width {
+        buf.left = (cursor_x + side + 1).saturating_sub(width);
     }
 }
 
 // shortcut: highlights the whole line even when only part is visible; slice to the view for huge lines.
-fn draw_line(
-    row: &mut Row,
-    buf: &Buffer,
-    y: usize,
-    groups: Option<&[Hl]>,
-    selection: Option<Selection>,
-    pattern: &str,
-    base: theme::Rgb,
-) {
+fn draw_line(row: &mut Row, buf: &Buffer, y: usize, decor: &Decor, ctx: &Context) {
+    let t = theme();
     let line = buf.line(y);
-    let matches = text::find_all(line, pattern);
+    let matches = text::find_all(line, &ctx.pattern);
     let cursor = buf.cursor;
-    let bg = if y == cursor.line { CURSOR_LINE } else { base };
+    let bg = match t.get(Group::CursorLine).bg {
+        Some(cursorline) if y == cursor.line && ctx.options.cursorline => cursorline,
+        _ => ctx.base,
+    };
+    let guide = t.on(Group::IndentGuide, bg);
+    let is_guide = |col: usize| decor.indent_width > 0 && col < decor.guide_to && col.is_multiple_of(decor.indent_width);
+    let leading = text::char_len(text::indent(line));
     let mut next_match = 0;
     let mut screen_x = 0;
     for (x, c) in line.chars().enumerate() {
-        let cells = if c == '\t' { text::TAB_WIDTH - screen_x % text::TAB_WIDTH } else { text::char_width(c) };
+        let cells = if c == '\t' { text::tab_cells(screen_x) } else { text::char_width(c) };
         let end = screen_x + cells;
         if end <= buf.left && cells > 0 {
             screen_x = end;
@@ -133,20 +212,38 @@ fn draw_line(
             next_match += 1;
         }
         let hit = matches.get(next_match).filter(|m| m.contains(&x));
-        let group = groups.and_then(|g| g.get(x)).copied().unwrap_or(Hl::Text);
-        let mut style = theme::syntax(group, bg);
-        if hit.is_some() || selection.is_some_and(|s| s.contains(Pos::new(y, x))) {
-            style.bg = SELECTION;
+        let group = decor.groups.as_ref().and_then(|g| g.get(x)).copied().unwrap_or(Hl::Text);
+        let mut style = t.syntax(group, bg);
+        if decor.urls.iter().any(|u| u.contains(&x)) {
+            style.underline |= t.get(Group::Url).underline;
+        }
+        if decor.words.iter().any(|w| w.contains(&x))
+            && let Some(word_bg) = t.get(Group::WordHighlight).bg
+        {
+            style.bg = word_bg;
+        }
+        if decor.parens.contains(&Some(x)) {
+            let paren = t.get(Group::MatchParen);
+            style.fg = paren.fg.unwrap_or(style.fg);
+            style.bold |= paren.bold;
+        }
+        if let Some(selection) = ctx.selection
+            && selection.contains(Pos::new(y, x))
+        {
+            style.bg = t.bg(Group::Visual);
+        } else if hit.is_some() {
+            style.bg = t.bg(Group::Search);
         }
         if hit.is_some_and(|m| y == cursor.line && m.contains(&cursor.col)) {
-            style = Style::new(BASE, UI_PURPLE); // CurSearch
+            style = t.style(Group::CurSearch);
         }
-        if c == '\t' || screen_x < buf.left {
-            // Tabs, and wide chars cut by the left edge, show as blanks over their visible cells.
-            for _ in screen_x.max(buf.left)..end {
-                row.cell(style, ' ');
+        if c == '\t' || c == ' ' || screen_x < buf.left {
+            // Blanks (with indent guides), and wide chars cut by the left edge, cell by cell.
+            for col in screen_x.max(buf.left)..end {
+                let guided = x < leading && is_guide(col) && c.is_whitespace();
+                row.cell(if guided { Style { bg: style.bg, ..guide } } else { style }, if guided { '\u{258f}' } else { ' ' });
             }
-        } else if cells > 0 || screen_x > buf.left {
+        } else {
             row.cell(style, c);
         }
         screen_x = end;
@@ -154,5 +251,12 @@ fn draw_line(
             break;
         }
     }
-    row.pad_to(Style::new(TEXT, bg), usize::MAX);
+    // Blank lines inside a block still show the block's guides.
+    while screen_x < decor.guide_to && !row.is_full() {
+        if screen_x >= buf.left {
+            row.cell(if is_guide(screen_x) { guide } else { Style::new(guide.fg, bg) }, if is_guide(screen_x) { '\u{258f}' } else { ' ' });
+        }
+        screen_x += 1;
+    }
+    row.pad_to(Style::new(t.fg(Group::Normal), bg), usize::MAX);
 }

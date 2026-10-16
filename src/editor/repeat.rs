@@ -5,6 +5,8 @@ use crate::term::Key;
 
 /// Nested `@` beyond this depth is ignored, so a macro calling itself cannot loop forever.
 const MAX_MACRO_DEPTH: usize = 32;
+/// Keys one command may replay through `.` and macros; `99@a` inside `@a` would otherwise never end.
+const REPLAY_BUDGET: usize = 100_000;
 
 #[derive(Debug, Default)]
 pub(super) struct Repeat {
@@ -20,6 +22,8 @@ pub(super) struct Repeat {
     recording: Option<(char, Vec<Key>)>,
     last_macro: Option<char>,
     depth: usize,
+    /// Keys left to replay in the current top-level command.
+    budget: usize,
 }
 
 impl Editor {
@@ -67,8 +71,14 @@ impl Editor {
         }
         let keys = self.repeat.last_change.clone();
         self.repeat.replaying = true;
-        for _ in 0..count {
+        if self.repeat.depth == 0 {
+            self.repeat.budget = REPLAY_BUDGET;
+        }
+        'replay: for _ in 0..count {
             for &key in &keys {
+                if !self.spend_replay_key() {
+                    break 'replay;
+                }
                 self.dispatch(key);
             }
         }
@@ -96,12 +106,27 @@ impl Editor {
             return;
         }
         self.repeat.last_macro = reg;
+        if self.repeat.depth == 0 && !self.repeat.replaying {
+            self.repeat.budget = REPLAY_BUDGET;
+        }
         self.repeat.depth += 1;
-        for _ in 0..count {
+        'replay: for _ in 0..count {
             for &key in &keys {
+                if !self.spend_replay_key() {
+                    break 'replay;
+                }
                 self.dispatch(key);
             }
         }
         self.repeat.depth -= 1;
+    }
+
+    fn spend_replay_key(&mut self) -> bool {
+        if self.repeat.budget == 0 {
+            self.info("Replay stopped: too many keys");
+            return false;
+        }
+        self.repeat.budget -= 1;
+        true
     }
 }

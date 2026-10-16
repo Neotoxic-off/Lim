@@ -11,7 +11,7 @@ use crate::term::Key;
 impl Editor {
     /// The configured `mapleader` becomes the internal leader key where commands start.
     pub(super) fn translate_leader(&self, key: Key) -> Key {
-        let at_command_start = matches!(self.mode, Mode::Normal | Mode::Visual | Mode::VisualLine)
+        let at_command_start = matches!(self.mode, Mode::Normal | Mode::Visual | Mode::VisualLine | Mode::Explorer)
             && self.pending.prefix.is_none_or(|p| p == LEADER);
         if at_command_start && key == self.options.mapleader { Key::Char(LEADER) } else { key }
     }

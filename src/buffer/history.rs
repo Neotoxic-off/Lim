@@ -17,6 +17,9 @@ struct Group {
     changes: Vec<Change>,
 }
 
+/// Vim's default `undolevels`: older steps are dropped so memory stays bounded.
+const UNDO_LEVELS: usize = 1000;
+
 #[derive(Debug, Default)]
 pub struct History {
     undo: Vec<Group>,
@@ -41,6 +44,9 @@ impl History {
         if self.sealed || self.undo.is_empty() {
             self.next_id += 1;
             self.undo.push(Group { id: self.next_id, changes: Vec::new() });
+            if self.undo.len() > UNDO_LEVELS {
+                self.undo.remove(0);
+            }
             self.sealed = false;
         }
         let Some(group) = self.undo.last_mut() else { return };

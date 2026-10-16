@@ -3,7 +3,9 @@
 use super::command::Command;
 use super::motion::{Motion, Span};
 use super::operator::Operator;
+use super::picker::PickerKind;
 use super::manage::CloseSet;
+use super::ui::{CTRL_W, LEADER_B, LEADER_F, LEADER_G, LEADER_T, LEADER_U};
 use super::window::Direction;
 use super::{Editor, Mode, Pending, PickAction, Register};
 use crate::buffer::{CharClass, Pos, text};
@@ -13,8 +15,7 @@ use crate::term::Key;
 
 /// Keys that wait for one more: `gg`, `f{c}`, `r{c}`, `ZZ`, `]b`, and the leader.
 const PREFIXES: &str = "gfFtTrZq@[]\u{F8FF}";
-/// Prefix slot used for `<C-w>` window commands.
-const CTRL_W: char = '\u{17}';
+
 /// Prefixes visual mode takes: motions, text objects (`iw`), `gc` and the leader.
 pub(super) const VISUAL_PREFIXES: &str = "gfFtTia\u{F8FF}";
 
@@ -27,6 +28,27 @@ impl Editor {
         }
         if let Some(prefix) = self.pending.prefix.take() {
             return self.prefixed(prefix, key);
+        }
+        if key == Key::F(7) {
+            self.shell_requested = true;
+            return;
+        }
+        // snacks.dashboard: its own keys; everything that edits text is ignored while it shows.
+        if self.dashboard && self.pending.is_empty() {
+            let picker = match key {
+                Key::Char('n') => {
+                    self.dashboard = false;
+                    return self.new_buffer();
+                }
+                Key::Char('f') => Some(PickerKind::Files { all: false }),
+                Key::Char('o') => Some(PickerKind::Recent),
+                Key::Char('w') => Some(PickerKind::Grep { all: false }),
+                Key::Char(':' | LEADER) | Key::Ctrl(_) | Key::F(_) | Key::Tab | Key::BackTab => None,
+                _ => return,
+            };
+            if let Some(kind) = picker {
+                return self.open_picker(kind);
+            }
         }
         if key == Key::Char('q') && self.recording().is_some() {
             return self.stop_recording();
@@ -129,6 +151,7 @@ impl Editor {
         let c = match key {
             Key::Char(c) => c,
             Key::Ctrl(c) if prefix == CTRL_W => c,
+            Key::Enter if prefix == LEADER_F => '\r',
             _ => {
                 self.pending = Pending::default();
                 return;
@@ -156,24 +179,49 @@ impl Editor {
             (LEADER, '/') => self.apply_count_lines(Operator::Comment, n),
             ('q', reg) => self.start_recording(reg),
             ('@', reg) => self.play_macro(reg, n),
-            (LEADER, 'b') => {
-                self.pending.prefix = Some('b');
+            (LEADER, sub @ ('b' | 'f' | 'g' | 't' | 'u')) => {
+                self.pending.prefix = Some(match sub {
+                    'b' => LEADER_B,
+                    'f' => LEADER_F,
+                    'g' => LEADER_G,
+                    't' => LEADER_T,
+                    _ => LEADER_U,
+                });
                 return;
             }
+            (LEADER_U, c) => self.toggle(c),
+            (LEADER, 'e') => self.toggle_explorer(),
+            (LEADER, 'o') => self.focus_explorer(),
+            (LEADER, 'h') => self.dashboard = !self.dashboard,
+            (LEADER_T, 'f' | 'h' | 'v') => self.shell_requested = true,
+            (LEADER_F, 'f') => self.open_picker(PickerKind::Files { all: false }),
+            (LEADER_F, 'F') => self.open_picker(PickerKind::Files { all: true }),
+            (LEADER_F, 'g') => self.open_picker(PickerKind::GitFiles),
+            (LEADER_F, 'w') => self.open_picker(PickerKind::Grep { all: false }),
+            (LEADER_F, 'W') => self.open_picker(PickerKind::Grep { all: true }),
+            (LEADER_F, 'b') => self.open_picker(PickerKind::Buffers),
+            (LEADER_F, 'o') => self.open_picker(PickerKind::Recent),
+            (LEADER_F, 'k') => self.open_picker(PickerKind::Keymaps),
+            (LEADER_F, 'C') => self.open_picker(PickerKind::Commands),
+            (LEADER_F, 'l') => self.open_picker(PickerKind::Lines),
+            (LEADER_F, 'c') => self.grep_word(),
+            (LEADER_F, '\r') => self.resume_picker(),
+            (LEADER_G, 'g') | (']', 'g') => self.jump_hunk(true),
+            (LEADER_G, 'G') | ('[', 'g') => self.jump_hunk(false),
             (']', 'b') => self.cycle(n as isize),
             ('[', 'b') => self.cycle(-(n as isize)),
             (LEADER, 'c') => self.run(Command::BufferDelete { force: false }),
             (LEADER, 'C') => self.run(Command::BufferDelete { force: true }),
             (LEADER, 'Q') => self.run(Command::QuitAll { force: false }),
-            ('b', 'b') => self.mode = Mode::BufferPick(PickAction::Go),
-            ('b', 'd') => self.mode = Mode::BufferPick(PickAction::Close),
-            ('b', '\\') => self.mode = Mode::BufferPick(PickAction::SplitBelow),
-            ('b', '|') => self.mode = Mode::BufferPick(PickAction::SplitRight),
-            ('b', 'c') => self.close_buffers(CloseSet::Others),
-            ('b', 'C') => self.close_buffers(CloseSet::All),
-            ('b', 'l') => self.close_buffers(CloseSet::Left),
-            ('b', 'r') => self.close_buffers(CloseSet::Right),
-            ('b', 'p') => self.go_previous_buffer(),
+            (LEADER_B, 'b') => self.mode = Mode::BufferPick(PickAction::Go),
+            (LEADER_B, 'd') => self.mode = Mode::BufferPick(PickAction::Close),
+            (LEADER_B, '\\') => self.mode = Mode::BufferPick(PickAction::SplitBelow),
+            (LEADER_B, '|') => self.mode = Mode::BufferPick(PickAction::SplitRight),
+            (LEADER_B, 'c') => self.close_buffers(CloseSet::Others),
+            (LEADER_B, 'C') => self.close_buffers(CloseSet::All),
+            (LEADER_B, 'l') => self.close_buffers(CloseSet::Left),
+            (LEADER_B, 'r') => self.close_buffers(CloseSet::Right),
+            (LEADER_B, 'p') => self.go_previous_buffer(),
             (CTRL_W, 'v') => self.split(true),
             (CTRL_W, 's') => self.split(false),
             (CTRL_W, 'c' | 'q') => self.run(Command::CloseWindow),
@@ -265,6 +313,14 @@ impl Editor {
         self.search = format!("\\<{}\\>", buf.text(start, end));
         self.buf_mut().cursor = start;
         self.run_motion(Motion::SearchNext { forward });
+    }
+
+    fn jump_hunk(&mut self, forward: bool) {
+        let buf = self.buf_mut();
+        match buf.next_hunk(buf.cursor.line, forward) {
+            Some(line) => buf.cursor = Pos::new(line, buf.first_non_blank(line)),
+            None => self.info("No hunks"),
+        }
     }
 
     fn apply_count_lines(&mut self, op: Operator, n: usize) {

@@ -1,8 +1,14 @@
 //! Screen composition: tabline, text, statusline, command line. Only changed rows are rewritten.
 
 mod bars;
+mod finder;
+mod home;
+mod popup;
 mod row;
 mod theme;
+mod tree;
+
+pub use theme::{Theme, install as install_theme};
 mod view;
 
 use std::fmt::Write;
@@ -10,9 +16,9 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 use crate::buffer::text;
-use crate::editor::{Editor, Mode, Rect};
-use row::Row;
-use theme::{BASE, SPLIT, Style};
+use crate::editor::{EXPLORER_WIDTH, Editor, Mode, Rect};
+use row::Grid;
+use theme::{Group, theme};
 use crate::term::{ColorDepth, Size};
 
 /// Workspace facts shown in the statusline, read once at startup.
@@ -46,60 +52,13 @@ pub struct Screen {
     ctx: Context,
     size: Size,
     rows: Vec<String>,
+    /// Time from launch to the first frame, for the dashboard footer.
+    startup: Option<std::time::Duration>,
 }
 
 impl Screen {
     pub fn new(depth: ColorDepth) -> Self {
-        Self { depth, ctx: Context::detect(), size: Size::default(), rows: Vec::new() }
-    }
-
-    /// Every window and split border inside `area`, as full screen rows, plus the cursor cell.
-    fn windows(&self, ed: &mut Editor, area: Rect) -> (Vec<String>, Option<(usize, usize)>) {
-        ed.area = area;
-        let mut rects = Vec::new();
-        ed.layout.rects(area, &mut rects);
-        let mut separators = Vec::new();
-        ed.layout.separators(area, &mut separators);
-        // Each screen row is assembled from (x, rendered segment) pieces sorted left to right.
-        let mut pieces: Vec<Vec<(usize, String)>> = vec![Vec::new(); area.h];
-        let mut cursor = None;
-        for (id, rect) in rects {
-            let Some(index) = ed.windows.iter().position(|w| w.id == id) else { continue };
-            if index == ed.active {
-                ed.view_height = rect.h.saturating_sub(1).max(1);
-            }
-            let drawn = view::window(ed, index, rect, self.depth);
-            cursor = cursor.or(drawn.cursor);
-            for (i, row) in drawn.rows.into_iter().enumerate() {
-                if let Some(line) = pieces.get_mut(rect.y + i - area.y) {
-                    line.push((rect.x, row));
-                }
-            }
-        }
-        let border = Style::new(SPLIT, BASE);
-        for sep in separators {
-            if sep.vertical {
-                for r in sep.y..sep.y + sep.len {
-                    let mut cell = Row::new(self.depth, 1);
-                    cell.text(border, "\u{2502}");
-                    if let Some(line) = pieces.get_mut(r - area.y) {
-                        line.push((sep.x, cell.finish(border)));
-                    }
-                }
-            } else if let Some(line) = pieces.get_mut(sep.y - area.y) {
-                let mut row = Row::new(self.depth, sep.len);
-                row.text(border, &"\u{2500}".repeat(sep.len));
-                line.push((sep.x, row.finish(border)));
-            }
-        }
-        let rows = pieces
-            .into_iter()
-            .map(|mut line| {
-                line.sort_by_key(|(x, _)| *x);
-                line.into_iter().map(|(_, s)| s).collect()
-            })
-            .collect();
-        (rows, cursor)
+        Self { depth, ctx: Context::detect(), size: Size::default(), rows: Vec::new(), startup: None }
     }
 
     /// Forces the next frame to repaint everything.
@@ -110,6 +69,7 @@ impl Screen {
 
     /// Escape sequences taking the terminal from the previous frame to this one.
     pub fn draw(&mut self, ed: &mut Editor, size: Size) -> String {
+        let t = theme();
         let mut out = String::from("\x1b[?25l");
         if size != self.size {
             self.size = size;
@@ -117,31 +77,160 @@ impl Screen {
             out.push_str("\x1b[0m\x1b[2J");
         }
         let (width, height) = (size.cols.max(1), size.rows.max(1));
-        let text_height = height.saturating_sub(3).max(1);
+        let options = ed.options.clone();
+        let mut grid = Grid::new(width, height, t.style(Group::Normal));
+        let roomy = height > 3;
+        let top = usize::from(options.showtabline && roomy);
+        let status = usize::from(options.laststatus && roomy);
+        let cmd = options.cmdheight.min(1) * usize::from(roomy);
+        let text_height = height.saturating_sub(top + status + cmd).max(1);
 
-        let mut frame = Vec::with_capacity(text_height + 3);
-        frame.push(bars::tabline(ed, width, self.depth));
-        let area = Rect { x: 0, y: 1, w: width, h: text_height };
-        let (rows, cursor) = self.windows(ed, area);
-        frame.extend(rows);
-        frame.push(bars::statusline(ed, &self.ctx, width, self.depth));
-        frame.push(bars::cmdline(ed, width, self.depth));
-        frame.truncate(height);
-        let (row, col) = cursor.unwrap_or((1, 0));
+        if top == 1 {
+            bars::tabline(ed, &mut grid, 0);
+        }
+        let startup = *self.startup.get_or_insert_with(|| ed.started.elapsed());
+        let mut area = Rect { x: 0, y: top, w: width, h: text_height };
+        let mut cursor = None;
+        if ed.explorer.is_some() && width >= 20 {
+            let tree_width = EXPLORER_WIDTH.min(width / 2);
+            cursor = tree::explorer(ed, &mut grid, Rect { w: tree_width, ..area });
+            let border = theme().style(Group::WinSeparator);
+            for y in area.y..area.y + area.h {
+                grid.text(tree_width, y, 1, border, "\u{2502}");
+            }
+            area = Rect { x: tree_width + 1, w: width - tree_width - 1, ..area };
+        }
+        let windows_cursor = self.windows(ed, area, &mut grid);
+        if ed.dashboard {
+            grid.fill(area, theme().style(Group::Normal));
+            home::dashboard(ed, &mut grid, area, startup);
+        } else if ed.mode != Mode::Explorer {
+            cursor = windows_cursor;
+        }
+        popup::which_key(ed, &mut grid, area);
+        if status == 1 {
+            bars::statusline(ed, &self.ctx, &mut grid, top + text_height);
+        }
+        let prompt = matches!(ed.mode, Mode::Command | Mode::Search);
+        if cmd == 1 || prompt {
+            bars::cmdline(ed, &mut grid, height - 1);
+        } else if options.notifications {
+            bars::notification(ed, &mut grid, top);
+        }
+        if prompt {
+            cursor = Some((height - 1, 1 + text::str_width(&ed.cmdline)));
+        }
+        if let Some(input) = finder::picker(ed, &mut grid) {
+            cursor = Some(input);
+        }
 
-        for (i, line) in frame.iter().enumerate() {
+        let rows: Vec<String> = (0..height).map(|y| row::encode(grid.row(y), self.depth)).collect();
+        for (i, line) in rows.iter().enumerate() {
             if self.rows.get(i) != Some(line) {
                 let _ = write!(out, "\x1b[{};1H{line}", i + 1);
             }
         }
-        self.rows = frame;
-
-        let (row, col, shape) = match ed.mode {
-            Mode::Command | Mode::Search => (height - 1, 1 + text::str_width(&ed.cmdline), 6),
-            Mode::Insert => (row, col, 6),
-            _ => (row, col, 2),
-        };
+        self.rows = rows;
+        let Some((row, col)) = cursor else { return out };
+        let shape = if matches!(ed.mode, Mode::Insert | Mode::Command | Mode::Search | Mode::Picker) { 6 } else { 2 };
         let _ = write!(out, "\x1b[{};{}H\x1b[{shape} q\x1b[?25h", row.min(height - 1) + 1, col.min(width - 1) + 1);
         out
+    }
+
+    /// Every window and split border inside `area`; returns the focused cursor's screen cell.
+    fn windows(&self, ed: &mut Editor, area: Rect, grid: &mut Grid) -> Option<(usize, usize)> {
+        ed.area = area;
+        let mut rects = Vec::new();
+        ed.layout.rects(area, &mut rects);
+        let mut separators = Vec::new();
+        ed.layout.separators(area, &mut separators);
+        let mut cursor = None;
+        for (id, rect) in rects {
+            let Some(index) = ed.windows.iter().position(|w| w.id == id) else { continue };
+            if index == ed.active {
+                ed.view_height = rect.h.saturating_sub(usize::from(ed.options.winbar)).max(1);
+            }
+            cursor = cursor.or(view::window(ed, index, rect, grid));
+        }
+        let border = theme().style(Group::WinSeparator);
+        for sep in separators {
+            if sep.vertical {
+                for y in sep.y..sep.y + sep.len {
+                    grid.text(sep.x, y, 1, border, "\u{2502}");
+                }
+            } else {
+                grid.text(sep.x, sep.y, sep.len, border, &"\u{2500}".repeat(sep.len));
+            }
+        }
+        cursor
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::term::Key;
+
+    /// Every mode and odd sizes render without panicking.
+    #[test]
+    fn draws_any_size_and_mode() {
+        let mut ed = Editor::new(&[]);
+        for k in "ifn main() {\n日本 é\t\"x\"".chars() {
+            ed.handle(if k == '\n' { Key::Enter } else { Key::Char(k) });
+        }
+        ed.handle(Key::Esc);
+        let mut screen = Screen::new(ColorDepth::TrueColor);
+        for keys in ["", "|", "\\", " bb", "\x1b:w", "\x1bv", "\x1b/x"] {
+            for k in keys.chars() {
+                ed.handle(if k == '\x1b' { Key::Esc } else { Key::Char(k) });
+            }
+            for (cols, rows) in [(80, 24), (1, 1), (3, 2), (10, 4), (200, 3)] {
+                let frame = screen.draw(&mut ed, Size { cols, rows });
+                assert!(frame.starts_with("\x1b[?25l"));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod fuzz {
+    use super::*;
+    use crate::buffer::Buffer;
+    use crate::term::Key;
+
+    /// Random keys in every mode, frames at random sizes: nothing may panic or hang.
+    #[test]
+    fn random_keys_never_crash() {
+        let alphabet: Vec<Key> = "hjklwbeWBE0^$%{}gGfFtTnN*#iaIAoOxXsSDCYpPJ~ruvV.q@:/<>dcy|\\ 123456789()[]{}\"'`;,-_=+abc\u{e9}日"
+            .chars()
+            .map(Key::Char)
+            .chain([
+                Key::Esc, Key::Enter, Key::Backspace, Key::Tab, Key::BackTab, Key::Up, Key::Down, Key::Left,
+                Key::Right, Key::Home, Key::End, Key::Delete, Key::PageUp, Key::PageDown, Key::F(7), Key::Unknown,
+            ])
+            .chain(('a'..='z').map(Key::Ctrl))
+            .collect();
+        for seed in [1u64, 7, 42, 2026] {
+            let mut ed = Editor::new(&[]);
+            ed.dashboard = false;
+            ed.buffers[0] = Buffer::from_text(Some("fuzz.rs".into()), "fn main() {\n    let x = \"a\";\n}\n\n/* c\n*/");
+            let mut screen = Screen::new(ColorDepth::Ansi256);
+            let mut state = seed;
+            let mut next = move |n: usize| {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                (state >> 33) as usize % n
+            };
+            for step in 0..20_000 {
+                let key = alphabet[next(alphabet.len())];
+                ed.handle(key);
+                ed.quit = false;
+                ed.shell_requested = false;
+                if step % 97 == 0 {
+                    ed.tick();
+                    let size = Size { cols: 1 + next(140), rows: 1 + next(50) };
+                    screen.draw(&mut ed, size);
+                }
+            }
+        }
     }
 }

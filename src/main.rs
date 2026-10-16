@@ -26,13 +26,14 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 
 use editor::Editor;
-use render::Screen;
-use term::{Event, Input, Terminal};
+use render::{Screen, Theme};
+use term::{ColorDepth, Event, Input, Terminal};
 
 /// Where the panic hook leaves its message for the recovery path.
 static LAST_PANIC: Mutex<String> = Mutex::new(String::new());
 
 fn main() -> ExitCode {
+    let started = std::time::Instant::now();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("usage: lim [file...]");
@@ -42,8 +43,30 @@ fn main() -> ExitCode {
         println!("lim {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
+    if args.iter().any(|a| a == "--print-config") {
+        print!("{}", config::EXAMPLE);
+        return ExitCode::SUCCESS;
+    }
+    if args.iter().any(|a| a == "--config-path") {
+        println!("{}", config::path().map(|p| p.display().to_string()).unwrap_or_default());
+        return ExitCode::SUCCESS;
+    }
+    let (config, mut warnings) = config::load();
+    let (theme, theme_warnings) = Theme::build(&config);
+    warnings.extend(theme_warnings);
+    render::install_theme(theme);
+    let depth = match config.options.truecolor {
+        Some(true) => ColorDepth::TrueColor,
+        Some(false) => ColorDepth::Ansi256,
+        None => term::color_depth(),
+    };
     let mut editor = Editor::new(&args);
-    match run(&mut editor) {
+    editor.started = started;
+    editor.configure(&config);
+    if !warnings.is_empty() {
+        editor.set_message(editor::Message::Error(format!("config: {}", warnings.join("; "))));
+    }
+    match run(&mut editor, depth) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("lim: {e}");
@@ -52,8 +75,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(editor: &mut Editor) -> io::Result<()> {
-    let _terminal = Terminal::enter()?;
+fn run(editor: &mut Editor, depth: ColorDepth) -> io::Result<()> {
+    let terminal = Terminal::enter()?;
     // A bug must never kill the session: record it quietly, recover, keep editing.
     panic::set_hook(Box::new(|info| {
         let what = info
@@ -68,7 +91,7 @@ fn run(editor: &mut Editor) -> io::Result<()> {
         }
     }));
     let mut input = Input::default();
-    let mut screen = Screen::new(term::color_depth());
+    let mut screen = Screen::new(depth);
     let mut out = io::stdout().lock();
     while !editor.quit {
         // Skip frames while keys are still queued (pastes, key repeat).
@@ -84,10 +107,20 @@ fn run(editor: &mut Editor) -> io::Result<()> {
             out.write_all(frame.as_bytes())?;
             out.flush()?;
         }
-        if let Event::Key(key) = input.read()?
-            && panic::catch_unwind(AssertUnwindSafe(|| editor.handle(key))).is_err()
-        {
+        let event = input.read(editor.deadline())?;
+        let handled = panic::catch_unwind(AssertUnwindSafe(|| match event {
+            Event::Key(key) => editor.handle(key),
+            Event::Timeout => editor.tick(),
+            Event::Resize => {}
+        }));
+        if handled.is_err() {
             recover(editor, &mut screen);
+        }
+        if std::mem::take(&mut editor.shell_requested) {
+            if let Err(e) = terminal.run_shell() {
+                editor.set_message(editor::Message::Error(format!("shell: {e}")));
+            }
+            screen.invalidate();
         }
     }
     Ok(())

@@ -1,6 +1,7 @@
 //! Raw stdin bytes → keys. Reads the fd directly so `select` sees exactly what is unread.
 
 use std::io;
+use std::time::Instant;
 
 use super::sys;
 
@@ -31,6 +32,8 @@ pub enum Key {
 pub enum Event {
     Key(Key),
     Resize,
+    /// The deadline passed without input.
+    Timeout,
 }
 
 /// How long to wait for the rest of an escape sequence before taking a lone Esc.
@@ -46,7 +49,8 @@ impl Input {
         !self.pending.is_empty()
     }
 
-    pub fn read(&mut self) -> io::Result<Event> {
+    /// Next key or resize; `Timeout` once `deadline` passes with nothing typed.
+    pub fn read(&mut self, deadline: Option<Instant>) -> io::Result<Event> {
         loop {
             if !self.pending.is_empty() {
                 let (key, used) = match decode(&self.pending) {
@@ -61,7 +65,13 @@ impl Input {
             if sys::take_resized() {
                 return Ok(Event::Resize);
             }
-            self.fill(None)?;
+            let wait = deadline.map(|d| d.saturating_duration_since(Instant::now()).as_millis().min(u128::from(u32::MAX)) as u32);
+            if wait == Some(0) {
+                return Ok(Event::Timeout);
+            }
+            if !self.fill(wait)? && deadline.is_some_and(|d| Instant::now() >= d) {
+                return Ok(Event::Timeout);
+            }
         }
     }
 

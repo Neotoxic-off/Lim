@@ -26,11 +26,6 @@ impl Style {
         self.bold = true;
         self
     }
-
-    pub const fn italic(mut self) -> Self {
-        self.italic = true;
-        self
-    }
 }
 
 /// palettes/astrodark.lua, keyed like the config: `section.name`.
@@ -122,7 +117,6 @@ groups! {
     WinBarNC = "WinBarNC",
     MsgArea = "MsgArea",
     ErrorMsg = "ErrorMsg",
-    WarningMsg = "WarningMsg",
     NormalFloat = "NormalFloat",
     FloatBorder = "FloatBorder",
     FloatTitle = "FloatTitle",
@@ -132,12 +126,11 @@ groups! {
     GitSignsChange = "GitSignsChange",
     GitSignsDelete = "GitSignsDelete",
     IndentGuide = "IblIndent",
-    IndentScope = "IblScope",
     WordHighlight = "LspReferenceText",
     Url = "HighlightURL",
     WhichKey = "WhichKey",
     WhichKeyDesc = "WhichKeyDesc",
-    WhichKeyGroup = "WhichKeyGroup",
+    WhichKeyPrefix = "WhichKeyGroup",
     WhichKeySeparator = "WhichKeySeparator",
     DashboardHeader = "SnacksDashboardHeader",
     DashboardKey = "SnacksDashboardKey",
@@ -152,6 +145,11 @@ groups! {
     ExplorerFile = "NeoTreeFileName",
     ExplorerIndent = "NeoTreeIndentMarker",
     ExplorerOpened = "NeoTreeFileNameOpened",
+    ExplorerGitModified = "NeoTreeGitModified",
+    ExplorerGitAdded = "NeoTreeGitAdded",
+    ExplorerGitUntracked = "NeoTreeGitUntracked",
+    ExplorerGitDeleted = "NeoTreeGitDeleted",
+    PickerDir = "SnacksPickerDir",
 }
 
 /// A resolved group: unset colors fall back to `Normal` where it is drawn.
@@ -247,7 +245,7 @@ impl Theme {
 
     pub fn mode(&self, mode: Mode) -> Group {
         match mode {
-            Mode::Normal | Mode::BufferPick(_) => Group::StatusModeNormal,
+            Mode::Normal | Mode::BufferPick(_) | Mode::Picker | Mode::Explorer => Group::StatusModeNormal,
             Mode::Insert => Group::StatusModeInsert,
             Mode::Visual | Mode::VisualLine => Group::StatusModeVisual,
             Mode::Command | Mode::Search => Group::StatusModeCommand,
@@ -322,7 +320,6 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::WinBarNC => fg("ui.text_inactive"),
         Group::MsgArea => fg("syntax.text"),
         Group::ErrorMsg => fg("syntax.red"),
-        Group::WarningMsg => fg("ui.yellow"),
         Group::NormalFloat => on("ui.text", "ui.float"),
         Group::FloatBorder => on("ui.border", "ui.float"),
         Group::FloatTitle => bold(on("ui.title", "ui.float")),
@@ -332,12 +329,11 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::GitSignsChange => fg("ui.orange"),
         Group::GitSignsDelete => fg("ui.red"),
         Group::IndentGuide => fg("ui.none_text"),
-        Group::IndentScope => fg("ui.text"),
         Group::WordHighlight => hl(None, p("ui.highlight")),
         Group::Url => Highlight { underline: true, ..Highlight::default() },
         Group::WhichKey => fg("ui.cyan"),
         Group::WhichKeyDesc => fg("ui.purple"),
-        Group::WhichKeyGroup => fg("ui.blue"),
+        Group::WhichKeyPrefix => fg("ui.blue"),
         Group::WhichKeySeparator => fg("ui.none_text"),
         Group::DashboardHeader | Group::DashboardFooter => fg("syntax.cyan"),
         Group::DashboardKey => fg("syntax.yellow"),
@@ -350,7 +346,11 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::ExplorerDirectory => fg("ui.blue"),
         Group::ExplorerFile => fg("ui.text"),
         Group::ExplorerIndent => fg("ui.none_text"),
-        Group::ExplorerOpened => fg("ui.green"),
+        Group::ExplorerOpened | Group::ExplorerGitAdded => fg("ui.green"),
+        Group::ExplorerGitModified => fg("ui.orange"),
+        Group::ExplorerGitUntracked => fg("ui.yellow"),
+        Group::ExplorerGitDeleted => fg("ui.text_inactive"),
+        Group::PickerDir => fg("syntax.comment"),
     }
 }
 
@@ -369,6 +369,6 @@ mod tests {
         assert!(!theme.get(Group::Comment).italic);
         assert_eq!(theme.get(Group::Visual), theme.get(Group::CurSearch));
         assert_eq!(warnings, vec!["unknown highlight group \"Nope\"".to_owned()]);
-        assert_eq!(GROUP_NAMES.len(), Group::ExplorerOpened as usize + 1);
+        assert_eq!(GROUP_NAMES.len(), Group::PickerDir as usize + 1);
     }
 }

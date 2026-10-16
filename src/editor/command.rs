@@ -149,7 +149,12 @@ impl Editor {
     }
 
     fn write(&mut self, path: Option<&Path>, force: bool) -> Result<(), Error> {
-        let summary = self.buf_mut().save(path, force)?;
+        let gitsigns = self.options.gitsigns;
+        let buf = self.buf_mut();
+        let summary = buf.save(path, force)?;
+        if gitsigns {
+            buf.load_git_base();
+        }
         self.info(summary);
         Ok(())
     }

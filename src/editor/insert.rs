@@ -23,6 +23,11 @@ impl Editor {
         let between_pair = self.options.autopairs && prev.and_then(closing).is_some_and(|c| next == Some(c));
         let left_blank = self.auto_indent == Some(here.line) && line.trim().is_empty();
         match key {
+            Key::F(7) => {
+                buf.cursor.col = here.col.saturating_sub(1);
+                self.mode = Mode::Normal;
+                self.shell_requested = true;
+            }
             Key::Esc | Key::Ctrl('c') => {
                 if left_blank {
                     buf.set_line(here.line, String::new());

@@ -1,0 +1,47 @@
+{
+  // lim configuration: copy to ~/.config/lim/config.json (or point $LIM_CONFIG at it).
+  // Comments and trailing commas are allowed. Every value below is the default.
+  "options": {
+    "number": true,
+    "relativenumber": true,
+    "signcolumn": true,
+    "cursorline": true,
+    "tabstop": 2,
+    "shiftwidth": 0,          // 0: use tabstop
+    "expandtab": true,
+    "scrolloff": 0,
+    "sidescrolloff": 0,
+    "ignorecase": true,
+    "smartcase": true,
+    "hlsearch": true,
+    "autopairs": true,
+    "autoindent": true,
+    "mapleader": " ",
+    "timeoutlen": 500,        // ms to wait for the rest of a mapping
+    "showtabline": true,
+    "laststatus": true,
+    "winbar": true,
+    "cmdheight": 0,           // 0: messages become notifications, ':' borrows the last line
+    "icons": true,            // Nerd Font glyphs
+    "truecolor": "auto",      // true, false or "auto"
+    "highlighturl": true,
+    "indentguides": true,
+    "matchparen": true,
+    "gitsigns": true,
+    "wordhighlight": true,
+    "notifications": true,
+    "dashboard": true,
+    "syntax": true
+  },
+
+  // astrotheme palette overrides, e.g. "ui": { "base": "#000000" }.
+  "palette": {},
+
+  // Highlight groups by Neovim name: fg, bg, bold, italic, underline, link.
+  // e.g. "@comment": { "fg": "#7f848e", "italic": false }, "Visual": { "link": "Search" }
+  "highlights": {},
+
+  // Keymaps per mode ("n", "i", "v", "nv"): a key sequence, { "rhs": ..., "desc": ... }, or false to disable.
+  // e.g. "i": { "jk": "<Esc>" }, "n": { "<Leader>w": { "rhs": ":w<CR>", "desc": "Save" } }
+  "keymaps": {}
+}

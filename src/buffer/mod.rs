@@ -1,5 +1,6 @@
 //! A text buffer: lines, cursor, file I/O and undo.
 
+pub mod git;
 mod history;
 mod motion;
 pub mod text;
@@ -41,6 +42,7 @@ pub struct Buffer {
     history: History,
     saved: u64,
     syntax: syntax::Cache,
+    git: git::GitState,
 }
 
 impl Buffer {
@@ -67,6 +69,7 @@ impl Buffer {
             history: History::default(),
             saved: 0,
             syntax: syntax::Cache::default(),
+            git: git::GitState::default(),
         }
     }
 
@@ -94,6 +97,11 @@ impl Buffer {
             (None, Some(own)) => own.clone(),
             (None, None) => return Err(Error::NoFileName),
         };
+        // Randomised tests type `:w name`; they must never write into the project.
+        #[cfg(test)]
+        if !path.starts_with(std::env::temp_dir()) {
+            return Err(Error::Io(path, io::Error::other("tests only write under the temp dir")));
+        }
         let out = self.contents();
         write_atomic(&path, out.as_bytes()).map_err(|e| Error::Io(path.clone(), e))?;
         let summary = format!("\"{}\" {}L, {}B written", path.display(), self.lines.len(), out.len());
@@ -252,6 +260,31 @@ impl Buffer {
         parts[last].push_str(tail);
         self.splice(at.line..at.line + 1, parts);
         Pos::new(at.line + last, end_col)
+    }
+
+    /// Re-reads the git index version (on open and after writes).
+    pub fn load_git_base(&mut self) {
+        if let Some(path) = self.path.clone() {
+            self.git.load(&path);
+        }
+    }
+
+    /// gitsigns for every line, recomputed only when the text changed.
+    pub fn git_signs(&mut self) -> &[Option<git::Sign>] {
+        let version = self.version();
+        self.git.signs(&self.lines, version)
+    }
+
+    /// `]g` / `[g`: first line of the next (or previous) hunk, wrapping around.
+    pub fn next_hunk(&mut self, from: usize, forward: bool) -> Option<usize> {
+        let signs = self.git_signs();
+        let starts: Vec<usize> =
+            (0..signs.len()).filter(|&y| signs[y].is_some() && (y == 0 || signs[y - 1].is_none())).collect();
+        if forward {
+            starts.iter().find(|&&y| y > from).or(starts.first()).copied()
+        } else {
+            starts.iter().rev().find(|&&y| y < from).or(starts.last()).copied()
+        }
     }
 
     /// Highlight groups for line `y`, one per char; None for files without a known language.
