@@ -5,10 +5,13 @@ mod history;
 mod motion;
 pub mod text;
 
+use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::string::FromUtf8Error;
 
 use crate::error::Error;
 use crate::syntax::{self, Hl, Lang};
@@ -38,11 +41,11 @@ pub struct Buffer {
     pub left: usize,
     pub lang: Option<&'static Lang>,
     /// `m{a-z}` marks, plus `'` (position before the last jump) and `^` (last insert).
-    pub marks: std::collections::HashMap<char, Pos>,
+    pub marks: HashMap<char, Pos>,
     /// Name shown for buffers without a file (`git show` output…).
     pub title: Option<String>,
     /// Positions the jump list points at, kept in step with edits like marks.
-    anchors: std::collections::HashMap<u64, Pos>,
+    anchors: HashMap<u64, Pos>,
     /// Bumped on every change (unlike `version`, which typing within one undo step keeps).
     revision: u64,
     /// Completion words and the revision they were read at.
@@ -61,17 +64,15 @@ impl Buffer {
     }
 
     pub fn from_text(path: Option<PathBuf>, text: &str) -> Self {
-        let crlf = text.contains("\r\n");
-        let body = text.strip_suffix('\n').unwrap_or(text);
-        let lines = body
-            .split('\n')
-            .map(|l| if crlf { l.strip_suffix('\r').unwrap_or(l) } else { l }.to_owned())
-            .collect();
+        let crlf: bool = text.contains("\r\n");
+        let body: &str = text.strip_suffix('\n').unwrap_or(text);
+        let lines: Vec<String> =
+            body.split('\n').map(|l| if crlf { l.strip_suffix('\r').unwrap_or(l) } else { l }.to_owned()).collect();
         Self {
             lang: path.as_deref().and_then(syntax::lang_for),
-            marks: std::collections::HashMap::new(),
+            marks: HashMap::new(),
             title: None,
-            anchors: std::collections::HashMap::new(),
+            anchors: HashMap::new(),
             revision: 0,
             word_cache: (u64::MAX, Vec::new()),
             path,
@@ -96,7 +97,7 @@ impl Buffer {
         }
         match fs::read(path) {
             Ok(bytes) => {
-                let text = String::from_utf8(bytes).map_err(|_| Error::NotUtf8(path.into()))?;
+                let text: String = String::from_utf8(bytes).map_err(|_| Error::NotUtf8(path.into()))?;
                 Ok(Self::from_text(Some(path.into()), &text))
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::from_text(Some(path.into()), "")),
@@ -106,7 +107,7 @@ impl Buffer {
 
     /// Writes to `target` (default: own path). Refuses to clobber another existing file unless `force`.
     pub fn save(&mut self, target: Option<&Path>, force: bool) -> Result<String, Error> {
-        let path = match (target, &self.path) {
+        let path: PathBuf = match (target, &self.path) {
             (Some(t), Some(own)) if t != own && t.exists() && !force => return Err(Error::FileExists(t.into())),
             (Some(t), _) => t.to_path_buf(),
             (None, Some(own)) => own.clone(),
@@ -117,9 +118,9 @@ impl Buffer {
         if !path.starts_with(std::env::temp_dir()) {
             return Err(Error::Io(path, io::Error::other("tests only write under the temp dir")));
         }
-        let out = self.contents();
+        let out: String = self.contents();
         write_atomic(&path, out.as_bytes()).map_err(|e| Error::Io(path.clone(), e))?;
-        let summary = format!("\"{}\" {}L, {}B written", path.display(), self.lines.len(), out.len());
+        let summary: String = format!("\"{}\" {}L, {}B written", path.display(), self.lines.len(), out.len());
         if self.path.is_none() {
             self.lang = syntax::lang_for(&path);
             self.syntax.invalidate(0);
@@ -134,8 +135,8 @@ impl Buffer {
 
     /// The file as it would be written: one terminator per line, nothing for an empty buffer.
     fn contents(&self) -> String {
-        let newline = if self.crlf { "\r\n" } else { "\n" };
-        let mut out = String::with_capacity(self.lines.iter().map(|l| l.len() + 2).sum());
+        let newline: &str = if self.crlf { "\r\n" } else { "\n" };
+        let mut out: String = String::with_capacity(self.lines.iter().map(|l| l.len() + 2).sum());
         if !(self.lines.len() == 1 && self.lines.first().is_some_and(String::is_empty)) {
             for line in &self.lines {
                 out.push_str(line);
@@ -167,15 +168,15 @@ impl Buffer {
 
     /// Re-reads an unmodified buffer whose file changed on disk (after a shell or lazygit).
     pub fn reload_if_changed(&mut self) {
-        let Some(path) = self.path.clone() else { return };
+        let Some(path): Option<PathBuf> = self.path.clone() else { return };
         if self.is_dirty() {
             return;
         }
-        let Ok(bytes) = fs::read(&path) else { return };
-        let Ok(text) = String::from_utf8(bytes) else { return };
-        let fresh = Self::from_text(None, &text);
+        let Ok(bytes): Result<Vec<u8>, io::Error> = fs::read(&path) else { return };
+        let Ok(text): Result<String, FromUtf8Error> = String::from_utf8(bytes) else { return };
+        let fresh: Buffer = Self::from_text(None, &text);
         if fresh.lines != self.lines {
-            let all = 0..self.lines.len();
+            let all: Range<usize> = 0..self.lines.len();
             self.splice(all, fresh.lines);
             self.history.seal();
             self.saved = self.history.state();
@@ -190,10 +191,10 @@ impl Buffer {
     }
 
     pub fn name(&self) -> String {
-        self.path
-            .as_deref()
-            .and_then(Path::file_name)
-            .map_or_else(|| self.title.clone().unwrap_or_else(|| "[No Name]".into()), |n| n.to_string_lossy().into_owned())
+        self.path.as_deref().and_then(Path::file_name).map_or_else(
+            || self.title.clone().unwrap_or_else(|| "[No Name]".into()),
+            |n| n.to_string_lossy().into_owned(),
+        )
     }
 
     pub fn lines(&self) -> &[String] {
@@ -222,9 +223,9 @@ impl Buffer {
 
     /// Keeps the cursor on a char, or one past the end when `past_end` (insert mode).
     pub fn clamp(&mut self, past_end: bool) {
-        let line = self.cursor.line.min(self.last_line());
-        let len = self.line_len(line);
-        let max = if past_end { len } else { len.saturating_sub(1) };
+        let line: usize = self.cursor.line.min(self.last_line());
+        let len: usize = self.line_len(line);
+        let max: usize = if past_end { len } else { len.saturating_sub(1) };
         self.cursor = Pos::new(line, self.cursor.col.min(max));
     }
 
@@ -235,16 +236,20 @@ impl Buffer {
     pub fn undo(&mut self) -> bool {
         self.syntax.invalidate(0);
         self.revision += 1;
-        let (marks, anchors) = (&mut self.marks, &mut self.anchors);
-        let cursor = self.history.undo(&mut self.lines, &mut |at, removed, inserted| shift_positions(marks, anchors, at, removed, inserted));
+        let (marks, anchors): (&mut HashMap<char, Pos>, &mut HashMap<u64, Pos>) = (&mut self.marks, &mut self.anchors);
+        let cursor: Option<Pos> = self
+            .history
+            .undo(&mut self.lines, &mut |at, removed, inserted| shift_positions(marks, anchors, at, removed, inserted));
         cursor.map(|p| self.cursor = p).is_some()
     }
 
     pub fn redo(&mut self) -> bool {
         self.syntax.invalidate(0);
         self.revision += 1;
-        let (marks, anchors) = (&mut self.marks, &mut self.anchors);
-        let cursor = self.history.redo(&mut self.lines, &mut |at, removed, inserted| shift_positions(marks, anchors, at, removed, inserted));
+        let (marks, anchors): (&mut HashMap<char, Pos>, &mut HashMap<u64, Pos>) = (&mut self.marks, &mut self.anchors);
+        let cursor: Option<Pos> = self
+            .history
+            .redo(&mut self.lines, &mut |at, removed, inserted| shift_positions(marks, anchors, at, removed, inserted));
         cursor.map(|p| self.cursor = p).is_some()
     }
 
@@ -253,8 +258,8 @@ impl Buffer {
     pub fn words(&mut self) -> &[String] {
         const WINDOW: usize = 5_000;
         if self.word_cache.0 != self.revision {
-            let lines = if self.lines.len() > 4 * WINDOW {
-                let from = self.cursor.line.saturating_sub(WINDOW);
+            let lines: &[String] = if self.lines.len() > 4 * WINDOW {
+                let from: usize = self.cursor.line.saturating_sub(WINDOW);
                 &self.lines[from..(self.cursor.line + WINDOW).min(self.lines.len())]
             } else {
                 &self.lines[..]
@@ -282,8 +287,8 @@ impl Buffer {
         self.syntax.invalidate(range.start);
         self.revision += 1;
         shift_positions(&mut self.marks, &mut self.anchors, range.start, range.len(), new.len());
-        let new_len = new.len();
-        let old = self.lines.splice(range.clone(), new).collect();
+        let new_len: usize = new.len();
+        let old: Vec<String> = self.lines.splice(range.clone(), new).collect();
         self.history.record(Change { at: range.start, old, new_len, cursor: self.cursor });
         if self.lines.is_empty() {
             self.splice(0..0, vec![String::new()]);
@@ -296,11 +301,11 @@ impl Buffer {
 
     /// Text from `start` to `end` (exclusive), lines joined by '\n'.
     pub fn text(&self, start: Pos, end: Pos) -> String {
-        let (from, to) = (self.byte(start), self.byte(end));
+        let (from, to): (usize, usize) = (self.byte(start), self.byte(end));
         if start.line == end.line {
             return self.lines[start.line][from..to].to_owned();
         }
-        let mut s = self.lines[start.line][from..].to_owned();
+        let mut s: String = self.lines[start.line][from..].to_owned();
         for line in &self.lines[start.line + 1..end.line] {
             s.push('\n');
             s.push_str(line);
@@ -311,22 +316,19 @@ impl Buffer {
     }
 
     pub fn remove(&mut self, start: Pos, end: Pos) -> String {
-        let removed = self.text(start, end);
-        let joined = format!(
-            "{}{}",
-            &self.lines[start.line][..self.byte(start)],
-            &self.lines[end.line][self.byte(end)..]
-        );
+        let removed: String = self.text(start, end);
+        let joined: String =
+            format!("{}{}", &self.lines[start.line][..self.byte(start)], &self.lines[end.line][self.byte(end)..]);
         self.splice(start.line..end.line + 1, vec![joined]);
         removed
     }
 
     /// Inserts `s` (which may hold '\n') at `at`; returns the position right after it.
     pub fn insert(&mut self, at: Pos, s: &str) -> Pos {
-        let (head, tail) = self.lines[at.line].split_at(self.byte(at));
+        let (head, tail): (&str, &str) = self.lines[at.line].split_at(self.byte(at));
         let mut parts: Vec<String> = s.split('\n').map(str::to_owned).collect();
-        let last = parts.len() - 1;
-        let end_col = if last == 0 { at.col } else { 0 } + text::char_len(&parts[last]);
+        let last: usize = parts.len() - 1;
+        let end_col: usize = if last == 0 { at.col } else { 0 } + text::char_len(&parts[last]);
         parts[0].insert_str(0, head);
         parts[last].push_str(tail);
         self.splice(at.line..at.line + 1, parts);
@@ -342,13 +344,13 @@ impl Buffer {
 
     /// gitsigns for every line, recomputed only when the text changed.
     pub fn git_signs(&mut self) -> &[Option<git::Sign>] {
-        let version = self.version();
+        let version: u64 = self.version();
         self.git.signs(&self.lines, version)
     }
 
     /// `]g` / `[g`: first line of the next (or previous) hunk, wrapping around.
     pub fn next_hunk(&mut self, from: usize, forward: bool) -> Option<usize> {
-        let signs = self.git_signs();
+        let signs: &[Option<git::Sign>] = self.git_signs();
         let starts: Vec<usize> =
             (0..signs.len()).filter(|&y| signs[y].is_some() && (y == 0 || signs[y - 1].is_none())).collect();
         if forward {
@@ -372,8 +374,8 @@ impl Buffer {
 /// Lines below shift; positions on lines that went away land on the last new line, and a
 /// letter mark whose line was deleted outright is dropped, as in Vim.
 fn shift_positions(
-    marks: &mut std::collections::HashMap<char, Pos>,
-    anchors: &mut std::collections::HashMap<u64, Pos>,
+    marks: &mut HashMap<char, Pos>,
+    anchors: &mut HashMap<u64, Pos>,
     at: usize,
     removed: usize,
     inserted: usize,
@@ -396,18 +398,31 @@ fn shift_positions(
         true
     };
     marks.retain(|name, p| moved(p) || !name.is_ascii_lowercase());
-    anchors.values_mut().for_each(|p| {
+    for p in anchors.values_mut() {
         moved(p);
-    });
+    }
+}
+
+/// The absolute path with symlinks resolved, or `path` itself when that fails. On Windows the `\\?\` prefix
+/// `canonicalize` adds is dropped, so paths compare equal to and read like the ones the user typed.
+pub fn canonical(path: &Path) -> PathBuf {
+    let resolved: PathBuf = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if cfg!(windows)
+        && let Some(plain) = resolved.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
+        && !plain.starts_with(r"UNC\")
+    {
+        return PathBuf::from(plain);
+    }
+    resolved
 }
 
 /// Writes through a temp file + rename, so a crash or full disk never leaves a truncated file.
 /// Follows symlinks and keeps permissions; falls back to an in-place write when the directory is read-only.
 fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
-    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let Some(name) = target.file_name() else { return fs::write(&target, data) };
-    let tmp = target.with_file_name(format!(".{}.lim-{}.tmp", name.to_string_lossy(), std::process::id()));
-    let staged = File::create(&tmp).and_then(|mut f| {
+    let target: PathBuf = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let Some(name): Option<&OsStr> = target.file_name() else { return fs::write(&target, data) };
+    let tmp: PathBuf = target.with_file_name(format!(".{}.lim-{}.tmp", name.to_string_lossy(), std::process::id()));
+    let staged: Result<(), io::Error> = File::create(&tmp).and_then(|mut f| {
         f.write_all(data)?;
         f.sync_all()?;
         if let Ok(meta) = fs::metadata(&target) {
@@ -415,12 +430,11 @@ fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
         }
         Ok(())
     });
-    match staged.and_then(|()| fs::rename(&tmp, &target)) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            let _ = fs::remove_file(&tmp);
-            fs::write(&target, data)
-        }
+    if let Ok(()) = staged.and_then(|()| fs::rename(&tmp, &target)) {
+        Ok(())
+    } else {
+        let _: Result<(), io::Error> = fs::remove_file(&tmp);
+        fs::write(&target, data)
     }
 }
 
@@ -434,8 +448,8 @@ mod tests {
 
     #[test]
     fn edit_undo_redo() {
-        let mut b = Buffer::from_text(None, "héllo\nworld\n");
-        let end = b.insert(Pos::new(0, 1), "X\nY");
+        let mut b: Buffer = Buffer::from_text(None, "héllo\nworld\n");
+        let end: Pos = b.insert(Pos::new(0, 1), "X\nY");
         assert_eq!((joined(&b), end), ("hX\nYéllo\nworld".into(), Pos::new(1, 1)));
         b.seal();
         assert_eq!(b.remove(Pos::new(0, 1), Pos::new(2, 2)), "X\nYéllo\nwo");
@@ -451,8 +465,8 @@ mod tests {
 
     #[test]
     fn save_round_trip_keeps_crlf() {
-        let path = std::env::temp_dir().join(format!("lim-test-{}.txt", std::process::id()));
-        let mut b = Buffer::from_text(Some(path.clone()), "a\r\nb\r\n");
+        let path: PathBuf = std::env::temp_dir().join(format!("lim-test-{}.txt", std::process::id()));
+        let mut b: Buffer = Buffer::from_text(Some(path.clone()), "a\r\nb\r\n");
         b.insert(Pos::new(0, 1), "!");
         assert!(b.is_dirty());
         b.save(None, false).unwrap();

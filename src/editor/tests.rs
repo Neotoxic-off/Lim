@@ -1,9 +1,11 @@
 //! Key-sequence tests: type like a user, check the text.
 
+use std::path::PathBuf;
+
 use super::*;
 
 fn editor(text: &str) -> Editor {
-    let mut ed = Editor::new(&[]);
+    let mut ed: Editor = Editor::new(&[]);
     ed.dashboard = false;
     ed.buffers[0] = Buffer::from_text(None, text);
     ed
@@ -26,7 +28,7 @@ fn text(ed: &Editor) -> String {
 
 #[test]
 fn operators_undo_and_paste() {
-    let mut ed = editor("foo bar baz\nqux");
+    let mut ed: Editor = editor("foo bar baz\nqux");
     keys(&mut ed, "dw");
     assert_eq!(text(&ed), "bar baz\nqux");
     keys(&mut ed, "wcwX\x1b");
@@ -46,7 +48,7 @@ fn operators_undo_and_paste() {
 
 #[test]
 fn counts_finds_and_visual() {
-    let mut ed = editor("a b c d e");
+    let mut ed: Editor = editor("a b c d e");
     keys(&mut ed, "2dw");
     assert_eq!(text(&ed), "c d e");
     keys(&mut ed, "dt ");
@@ -61,7 +63,7 @@ fn counts_finds_and_visual() {
 
 #[test]
 fn insert_autopairs_and_indent() {
-    let mut ed = editor("");
+    let mut ed: Editor = editor("");
     keys(&mut ed, "ifn(\x1b");
     assert_eq!(text(&ed), "fn()");
     keys(&mut ed, "A {\nx\x1b");
@@ -78,7 +80,7 @@ fn insert_autopairs_and_indent() {
 
 #[test]
 fn search_and_commands() {
-    let mut ed = editor("alpha beta\nBeta\nbeta");
+    let mut ed: Editor = editor("alpha beta\nBeta\nbeta");
     keys(&mut ed, "/beta\n");
     assert_eq!(ed.buf().cursor, Pos::new(0, 6));
     keys(&mut ed, "n");
@@ -97,7 +99,7 @@ fn search_and_commands() {
 
 #[test]
 fn vertical_motion_keeps_column() {
-    let mut ed = editor("long line here\nab\nanother long one");
+    let mut ed: Editor = editor("long line here\nab\nanother long one");
     keys(&mut ed, "$jj");
     assert_eq!(ed.buf().cursor, Pos::new(2, 15));
     keys(&mut ed, "0wk");
@@ -108,12 +110,12 @@ fn vertical_motion_keeps_column() {
 
 #[test]
 fn dot_repeat_and_macros() {
-    let mut ed = editor("a1\na2\na3\na4");
+    let mut ed: Editor = editor("a1\na2\na3\na4");
     keys(&mut ed, "A;\x1bj.");
     assert_eq!(text(&ed), "a1;\na2;\na3\na4");
     keys(&mut ed, "jddj.");
     assert_eq!(text(&ed), "a1;\na2;");
-    let mut ed = editor("x\ny\nz");
+    let mut ed: Editor = editor("x\ny\nz");
     keys(&mut ed, "qaI- \x1bjq2@a");
     assert_eq!(text(&ed), "- x\n- y\n- z");
     assert_eq!(ed.recording(), None);
@@ -121,7 +123,7 @@ fn dot_repeat_and_macros() {
 
 #[test]
 fn text_objects_star_and_percent() {
-    let mut ed = editor("call(one, \"two\") end");
+    let mut ed: Editor = editor("call(one, \"two\") end");
     keys(&mut ed, "fodi(");
     assert_eq!(text(&ed), "call() end");
     keys(&mut ed, "u0f\"ci\"X\x1b");
@@ -130,7 +132,7 @@ fn text_objects_star_and_percent() {
     assert_eq!(ed.buf().cursor.col, 13);
     keys(&mut ed, "$daw"); // no trailing blank: `aw` takes the leading one
     assert_eq!(text(&ed), "call(one, \"X\")");
-    let mut ed = editor("foo food\nfoo");
+    let mut ed: Editor = editor("foo food\nfoo");
     keys(&mut ed, "*");
     assert_eq!(ed.buf().cursor, Pos::new(1, 0));
     keys(&mut ed, "viwy$p");
@@ -139,7 +141,7 @@ fn text_objects_star_and_percent() {
 
 #[test]
 fn comment_toggle() {
-    let mut ed = editor("");
+    let mut ed: Editor = editor("");
     ed.buffers[0] = Buffer::from_text(Some("x.rs".into()), "fn a() {\n    b();\n\n    c();\n}");
     keys(&mut ed, "jgcj");
     assert_eq!(text(&ed), "fn a() {\n    // b();\n\n    c();\n}");
@@ -153,7 +155,7 @@ fn comment_toggle() {
 
 #[test]
 fn dot_repeats_replace_and_recover_repairs() {
-    let mut ed = editor("ab\ncd");
+    let mut ed: Editor = editor("ab\ncd");
     keys(&mut ed, "r.j.");
     assert_eq!(text(&ed), ".b\n.d");
     keys(&mut ed, "..uuu"); // each `.` is its own undo step
@@ -164,14 +166,14 @@ fn dot_repeats_replace_and_recover_repairs() {
     ed.recover("test");
     assert_eq!((ed.buf().cursor, ed.buf().top, ed.mode), (Pos::new(1, 1), 1, Mode::Normal));
     assert!(ed.message_text().starts_with("internal error recovered (test); unsaved buffers copied to "));
-    let backup = ed.message_text().rsplit(' ').next().map(std::path::PathBuf::from).unwrap();
+    let backup: PathBuf = ed.message_text().rsplit(' ').next().map(PathBuf::from).unwrap();
     assert_eq!(std::fs::read_to_string(&backup).unwrap(), ".b\ncd\n");
     std::fs::remove_file(backup).unwrap();
 }
 
 #[test]
 fn buffers_and_windows() {
-    let mut ed = editor("one");
+    let mut ed: Editor = editor("one");
     ed.buffers.push(Buffer::from_text(Some("beta.rs".into()), "two"));
     ed.buffers.push(Buffer::from_text(Some("gamma.rs".into()), "three"));
     keys(&mut ed, "]b");
@@ -201,12 +203,12 @@ fn buffers_and_windows() {
 
 #[test]
 fn user_keymaps_and_leader() {
-    let (config, warnings) = crate::config::Config::from_str(
+    let (config, warnings): (Config, Vec<String>) = Config::from_str(
         r#"{ "options": { "mapleader": "," },
              "keymaps": { "i": { "jk": "<Esc>" }, "n": { "<Leader>d": "dd", "Q": false, "H": "^" } } }"#,
     );
     assert!(warnings.is_empty());
-    let mut ed = editor("  abc\nxyz");
+    let mut ed: Editor = editor("  abc\nxyz");
     ed.configure(&config);
     keys(&mut ed, "$H");
     assert_eq!(ed.buf().cursor.col, 2);
@@ -214,7 +216,7 @@ fn user_keymaps_and_leader() {
     assert_eq!((ed.mode, text(&ed).as_str()), (Mode::Normal, "  abc\nxyz"));
     keys(&mut ed, "Aj");
     assert_eq!(text(&ed), "  abc\nxyz"); // `j` waits for a possible `k`
-    ed.typeahead_at -= std::time::Duration::from_secs(1);
+    ed.typeahead_at -= Duration::from_secs(1);
     ed.tick();
     assert_eq!(text(&ed), "  abcj\nxyz");
     keys(&mut ed, "x\x1b,d");
@@ -227,7 +229,7 @@ fn user_keymaps_and_leader() {
 
 #[test]
 fn picker_explorer_and_dashboard() {
-    let mut ed = editor("alpha\nbeta\ngamma");
+    let mut ed: Editor = editor("alpha\nbeta\ngamma");
     ed.buffers.push(Buffer::from_text(Some("other.rs".into()), "x"));
     keys(&mut ed, " fl");
     assert_eq!(ed.mode, Mode::Picker);
@@ -241,20 +243,21 @@ fn picker_explorer_and_dashboard() {
     assert_eq!(ed.picker.as_ref().map(|p| p.query.as_str()), Some("othe"));
     ed.handle(Key::Esc);
 
-    let dir = std::env::temp_dir().join(format!("lim-tree-{}", std::process::id()));
+    let dir: PathBuf = std::env::temp_dir().join(format!("lim-tree-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     std::fs::write(dir.join("sub/inner.txt"), "inside").unwrap();
     std::fs::write(dir.join("top.txt"), "top").unwrap();
     ed.explorer = Some(Explorer::new(dir.clone()));
     ed.mode = Mode::Explorer;
-    let names = |ed: &Editor| ed.explorer.as_ref().map(|e| e.entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
+    let names =
+        |ed: &Editor| ed.explorer.as_ref().map(|e| e.entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
     assert_eq!(names(&ed), Some(vec!["sub".to_owned(), "top.txt".to_owned()]));
     keys(&mut ed, "ljl");
     assert_eq!(names(&ed), Some(vec!["sub".to_owned(), "inner.txt".to_owned(), "top.txt".to_owned()]));
     assert_eq!((ed.mode, ed.buf().name()), (Mode::Normal, "inner.txt".to_owned()));
     std::fs::remove_dir_all(dir).unwrap();
 
-    let mut ed = Editor::new(&[]);
+    let mut ed: Editor = Editor::new(&[]);
     assert!(ed.dashboard);
     keys(&mut ed, "ix");
     assert_eq!(text(&ed), "");
@@ -264,7 +267,7 @@ fn picker_explorer_and_dashboard() {
 
 #[test]
 fn recursive_macro_is_bounded() {
-    let mut ed = editor("x\ny");
+    let mut ed: Editor = editor("x\ny");
     keys(&mut ed, "qaj99@aq@a");
     assert_eq!(ed.buf().cursor.line, 1);
     assert_eq!(ed.message_text(), "Replay stopped: too many keys");
@@ -272,7 +275,7 @@ fn recursive_macro_is_bounded() {
 
 #[test]
 fn registers_marks_and_search_back() {
-    let mut ed = editor("one\ntwo\nthree");
+    let mut ed: Editor = editor("one\ntwo\nthree");
     keys(&mut ed, "\"ayyj\"byy\"_ddgg\"bp");
     assert_eq!(text(&ed), "one\ntwo\nthree");
     keys(&mut ed, "\"ap");
@@ -292,7 +295,7 @@ fn registers_marks_and_search_back() {
 
 #[test]
 fn more_motions_and_case() {
-    let mut ed = editor("a.b c-d e,f\nx = 41;");
+    let mut ed: Editor = editor("a.b c-d e,f\nx = 41;");
     keys(&mut ed, "W");
     assert_eq!(ed.buf().cursor.col, 4);
     keys(&mut ed, "E");
@@ -317,14 +320,14 @@ fn more_motions_and_case() {
 
 #[test]
 fn ex_ranges_and_substitute() {
-    let mut ed = editor("foo bar foo\nfoo\nbaz");
+    let mut ed: Editor = editor("foo bar foo\nfoo\nbaz");
     keys(&mut ed, ":s/foo/X/\n");
     assert_eq!(text(&ed), "X bar foo\nfoo\nbaz");
     keys(&mut ed, ":%s/foo/<&>/g\n");
     assert_eq!(text(&ed), "X bar <foo>\n<foo>\nbaz");
     keys(&mut ed, ":2,3d\n");
     assert_eq!(text(&ed), "X bar <foo>");
-    let mut ed = editor("a\nb\nc\nd");
+    let mut ed: Editor = editor("a\nb\nc\nd");
     keys(&mut ed, "jVj:>\n");
     assert_eq!(text(&ed), "a\n  b\n  c\nd");
     keys(&mut ed, ":$\n");
@@ -336,7 +339,7 @@ fn ex_ranges_and_substitute() {
 
 #[test]
 fn visual_block() {
-    let mut ed = editor("abcd\nefgh\nijkl");
+    let mut ed: Editor = editor("abcd\nefgh\nijkl");
     ed.handle(Key::Char('l'));
     ed.handle(Key::Ctrl('v'));
     keys(&mut ed, "jld");
@@ -351,7 +354,7 @@ fn visual_block() {
 
 #[test]
 fn insert_extras_and_astro_keys() {
-    let mut ed = editor("");
+    let mut ed: Editor = editor("");
     ed.buffers[0] = Buffer::from_text(Some("x.rs".into()), "let foo = 1;\nfoo + foo");
     keys(&mut ed, "yiwo");
     ed.handle(Key::Ctrl('r'));
@@ -373,7 +376,7 @@ fn insert_extras_and_astro_keys() {
 
 #[test]
 fn themes_cheatsheet_prompt_and_layout() {
-    let mut ed = editor("a");
+    let mut ed: Editor = editor("a");
     keys(&mut ed, ":colorscheme dracula\n");
     assert_eq!(ed.colorscheme, "dracula");
     keys(&mut ed, " ub");
@@ -389,13 +392,17 @@ fn themes_cheatsheet_prompt_and_layout() {
     ed.handle(Key::F(1));
     assert_eq!(ed.mode, Mode::Cheatsheet);
     keys(&mut ed, "macro");
-    let cards = ed.cheatsheet_cards();
-    assert!(cards.iter().all(|c| c.rows.iter().all(|(k, d)| (k.clone() + d).to_lowercase().contains("macro") || c.title.to_lowercase().contains("macro"))));
+    let cards: Vec<Card> = ed.cheatsheet_cards();
+    assert!(cards.iter().all(|c| {
+        c.rows
+            .iter()
+            .all(|(k, d)| (k.clone() + d).to_lowercase().contains("macro") || c.title.to_lowercase().contains("macro"))
+    }));
     assert!(!cards.is_empty());
     ed.handle(Key::Esc);
 
-    let path = std::env::temp_dir().join(format!("lim-rename-{}.txt", std::process::id()));
-    let target = path.with_extension("md");
+    let path: PathBuf = std::env::temp_dir().join(format!("lim-rename-{}.txt", std::process::id()));
+    let target: PathBuf = path.with_extension("md");
     std::fs::write(&path, "x").unwrap();
     ed.buffers[0] = Buffer::open(&path).unwrap();
     keys(&mut ed, " R");
@@ -415,7 +422,7 @@ fn themes_cheatsheet_prompt_and_layout() {
 
 #[test]
 fn marks_and_jumps_follow_edits() {
-    let mut ed = editor("a\nb\nc\nd\ne");
+    let mut ed: Editor = editor("a\nb\nc\nd\ne");
     keys(&mut ed, "3Gmagg");
     keys(&mut ed, "OX\x1bOY\x1b");
     keys(&mut ed, "'a");
@@ -438,9 +445,9 @@ fn marks_and_jumps_follow_edits() {
 
 #[test]
 fn buffer_word_completion() {
-    let mut ed = editor("restock result\n");
+    let mut ed: Editor = editor("restock result\n");
     keys(&mut ed, "Gores");
-    let items = ed.completion.as_ref().map(|c| c.items.clone());
+    let items: Option<Vec<String>> = ed.completion.as_ref().map(|c| c.items.clone());
     assert_eq!(items, Some(vec!["result".to_owned(), "restock".to_owned()]));
     ed.handle(Key::Tab);
     ed.handle(Key::Tab);
@@ -462,7 +469,7 @@ fn buffer_word_completion() {
 
 #[test]
 fn ctrl_w_w_cycles_windows() {
-    let mut ed = editor("a");
+    let mut ed: Editor = editor("a");
     keys(&mut ed, "|");
     assert_eq!(ed.active, 1);
     ed.handle(Key::Ctrl('w'));
@@ -483,7 +490,7 @@ fn ctrl_w_w_cycles_windows() {
 
 #[test]
 fn command_line_completion() {
-    let mut ed = editor("a");
+    let mut ed: Editor = editor("a");
     keys(&mut ed, ":colo");
     assert!(ed.cmd_completion.is_some());
     ed.handle(Key::Tab);
@@ -500,4 +507,301 @@ fn command_line_completion() {
     assert_eq!(ed.cmdline, "colorscheme catppuccin-mocha");
     ed.handle(Key::Esc);
     assert!(ed.cmd_completion.is_none());
+}
+
+#[test]
+fn leader_u_toggles() {
+    type Flag = fn(&Options) -> bool;
+    let mut ed: Editor = editor("a");
+    let flips: [(&str, Flag); 13] = [
+        ("a", |o| o.autopairs),
+        ("g", |o| o.signcolumn),
+        ("l", |o| o.laststatus),
+        ("N", |o| o.notifications),
+        ("t", |o| o.showtabline),
+        ("u", |o| o.highlighturl),
+        ("y", |o| o.syntax),
+        ("r", |o| o.wordhighlight),
+        ("c", |o| o.completion),
+        ("C", |o| o.completion),
+        ("z", |o| o.colorhighlight),
+        (">", |o| o.foldcolumn),
+        ("|", |o| o.indentguides),
+    ];
+    for (key, get) in flips {
+        let before: bool = get(&ed.options);
+        keys(&mut ed, &format!(" u{key}"));
+        assert_ne!(get(&ed.options), before, "<Leader>u{key}");
+        assert!(ed.message_text().ends_with(if before { "disabled" } else { "enabled" }), "<Leader>u{key}");
+    }
+    keys(&mut ed, " uD");
+    assert_eq!(ed.message_text(), "");
+
+    ed.options.autopairs = true;
+    keys(&mut ed, " up");
+    assert!(!ed.options.autopairs && !ed.options.autoindent);
+    keys(&mut ed, " up");
+    assert!(ed.options.autopairs && ed.options.autoindent);
+
+    let start: (bool, bool) = (ed.options.number, ed.options.relativenumber);
+    let mut seen: Vec<(bool, bool)> = Vec::new();
+    for _ in 0..4 {
+        keys(&mut ed, " un");
+        seen.push((ed.options.number, ed.options.relativenumber));
+    }
+    assert_eq!(seen.last(), Some(&start), "four presses cycle back");
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 4);
+}
+
+#[test]
+fn leader_ui_sets_indent() {
+    let mut ed: Editor = editor("a");
+    ed.options.expandtab = true;
+    keys(&mut ed, " ui");
+    assert_eq!(ed.prompt.as_ref().map(|p| p.text.clone()), Some(ed.options.indent_width().to_string()));
+    ed.handle(Key::Ctrl('u'));
+    keys(&mut ed, "-8\n");
+    assert_eq!((ed.options.expandtab, ed.options.tabstop, ed.options.shiftwidth), (false, 8, 8));
+    keys(&mut ed, " ui");
+    assert_eq!(ed.prompt.as_ref().map(|p| p.text.as_str()), Some("-8"));
+    ed.handle(Key::Ctrl('u'));
+    keys(&mut ed, "99\n");
+    assert_eq!((ed.options.expandtab, ed.options.tabstop), (true, 16), "clamped to 16");
+    keys(&mut ed, " ui");
+    ed.handle(Key::Ctrl('u'));
+    keys(&mut ed, "wide\n");
+    assert_eq!(ed.message_text(), "Invalid indent: wide");
+}
+
+#[test]
+fn sort_buffers_keeps_focus() {
+    let mut ed: Editor = editor("");
+    ed.buffers = ["b.rs", "a.txt", "c.md"].map(|n| Buffer::from_text(Some(n.into()), n)).into();
+    ed.current = 0;
+    let names = |ed: &Editor| ed.buffers.iter().map(Buffer::name).collect::<Vec<_>>();
+    keys(&mut ed, " bse");
+    assert_eq!(names(&ed), ["c.md", "b.rs", "a.txt"]);
+    assert_eq!(ed.buf().name(), "b.rs");
+    assert_eq!(ed.windows[0].buffer, ed.current);
+    keys(&mut ed, " bsp");
+    assert_eq!(names(&ed), ["a.txt", "b.rs", "c.md"]);
+    keys(&mut ed, " bsr");
+    assert_eq!(names(&ed), ["a.txt", "b.rs", "c.md"]);
+    keys(&mut ed, " bsi");
+    assert_eq!(names(&ed), ["a.txt", "b.rs", "c.md"]);
+    keys(&mut ed, " bsm");
+    assert_eq!(names(&ed), ["a.txt", "b.rs", "c.md"], "unsaved files tie and keep their order");
+    assert_eq!(ed.buf().name(), "b.rs");
+}
+
+#[test]
+fn buffer_cycling_wraps_with_counts() {
+    let mut ed: Editor = editor("");
+    ed.buffers = ["0", "1", "2"].map(|n| Buffer::from_text(Some(n.into()), n)).into();
+    keys(&mut ed, "2]b");
+    assert_eq!(ed.current, 2);
+    keys(&mut ed, "]b");
+    assert_eq!(ed.current, 0);
+    keys(&mut ed, "[b");
+    assert_eq!(ed.current, 2);
+    ed.handle(Key::Tab);
+    assert_eq!(ed.current, 0);
+    keys(&mut ed, "2");
+    ed.handle(Key::BackTab);
+    assert_eq!(ed.current, 1);
+    keys(&mut ed, "7]b");
+    assert_eq!(ed.current, 2, "counts larger than the list wrap");
+    keys(&mut ed, ":bn\n");
+    assert_eq!(ed.current, 0);
+    keys(&mut ed, ":bp\n");
+    assert_eq!(ed.current, 2);
+}
+
+#[test]
+fn scrolling_moves_view_and_cursor() {
+    let lines: Vec<String> = (0..100).map(|i| i.to_string()).collect();
+    let mut ed: Editor = editor(&lines.join("\n"));
+    ed.view_height = 10;
+    keys(&mut ed, "5");
+    ed.handle(Key::Ctrl('e'));
+    assert_eq!((ed.buf().top, ed.buf().cursor.line), (5, 5), "the cursor is dragged into view");
+    keys(&mut ed, "2");
+    ed.handle(Key::Ctrl('y'));
+    assert_eq!((ed.buf().top, ed.buf().cursor.line), (3, 5));
+    keys(&mut ed, "9");
+    ed.handle(Key::Ctrl('y'));
+    assert_eq!(ed.buf().top, 0);
+    keys(&mut ed, "500");
+    ed.handle(Key::Ctrl('e'));
+    assert_eq!((ed.buf().top, ed.buf().cursor.line), (99, 99));
+    keys(&mut ed, "51Gzt");
+    assert_eq!(ed.buf().top, 50);
+    keys(&mut ed, "zb");
+    assert_eq!(ed.buf().top, 41);
+    keys(&mut ed, "zz");
+    assert_eq!(ed.buf().top, 45);
+}
+
+#[test]
+fn ctrl_a_and_ctrl_x_count() {
+    let mut ed: Editor = editor("x 41 y");
+    ed.handle(Key::Ctrl('a'));
+    assert_eq!(text(&ed), "x 42 y");
+    keys(&mut ed, "05");
+    ed.handle(Key::Ctrl('x'));
+    assert_eq!(text(&ed), "x 37 y");
+    keys(&mut ed, "50");
+    ed.handle(Key::Ctrl('x'));
+    assert_eq!(text(&ed), "x -13 y");
+}
+
+#[test]
+fn prompt_line_editing() {
+    let mut ed: Editor = editor("a");
+    keys(&mut ed, " R");
+    ed.handle(Key::Ctrl('u'));
+    keys(&mut ed, "abc");
+    ed.handle(Key::Left);
+    ed.handle(Key::Left);
+    keys(&mut ed, "X");
+    let prompt = |ed: &Editor| ed.prompt.as_ref().map(|p| (p.text.clone(), p.cursor));
+    assert_eq!(prompt(&ed), Some(("aXbc".into(), 2)));
+    for key in [Key::Home, Key::Delete, Key::End, Key::Backspace, Key::Right, Key::Ctrl('a'), Key::Ctrl('e')] {
+        ed.handle(key);
+    }
+    assert_eq!(prompt(&ed), Some(("Xb".into(), 2)));
+    ed.handle(Key::Esc);
+    assert_eq!((ed.mode, ed.prompt.is_none(), ed.buf().path.is_none()), (Mode::Normal, true, true));
+    keys(&mut ed, " R");
+    ed.handle(Key::Ctrl('u'));
+    keys(&mut ed, "  \n");
+    assert!(ed.buf().path.is_none(), "blank input does nothing");
+    keys(&mut ed, " R");
+    keys(&mut ed, "named.rs\n");
+    assert_eq!(ed.buf().path.as_deref(), Some(Path::new("named.rs")));
+}
+
+#[test]
+fn tree_prompts_change_files() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("lim-tree-ops-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("f.txt"), "f").unwrap();
+    let mut ed: Editor = editor("");
+    ed.explorer = Some(Explorer::new(dir.clone()));
+    ed.mode = Mode::Explorer;
+    let select = |ed: &mut Editor, name: &str| {
+        let tree: &mut Explorer = ed.explorer.as_mut().unwrap();
+        tree.cursor = tree.entries.iter().position(|e| e.name == name).unwrap();
+    };
+    let answer = |ed: &mut Editor, key: &str, input: &str| {
+        keys(ed, key);
+        ed.handle(Key::Ctrl('u'));
+        keys(ed, &format!("{input}\n"));
+        assert_eq!(ed.mode, Mode::Explorer, "{}", ed.message_text());
+    };
+
+    answer(&mut ed, "a", "new.txt");
+    assert!(dir.join("new.txt").is_file());
+    answer(&mut ed, "A", "sub");
+    assert!(dir.join("sub").is_dir());
+    select(&mut ed, "f.txt");
+    answer(&mut ed, "r", "g.txt");
+    assert!(dir.join("g.txt").is_file() && !dir.join("f.txt").exists());
+    select(&mut ed, "g.txt");
+    answer(&mut ed, "c", "sub/copy.txt");
+    assert_eq!(std::fs::read_to_string(dir.join("sub/copy.txt")).unwrap(), "f");
+    select(&mut ed, "g.txt");
+    answer(&mut ed, "m", "moved.txt");
+    assert!(dir.join("moved.txt").is_file() && !dir.join("g.txt").exists());
+    select(&mut ed, "moved.txt");
+    answer(&mut ed, "r", "new.txt");
+    assert!(ed.message_text().contains("E13"), "renaming over a file is refused");
+    select(&mut ed, "moved.txt");
+    answer(&mut ed, "d", "n");
+    assert!(dir.join("moved.txt").exists(), "only y deletes");
+    answer(&mut ed, "d", "y");
+    assert!(!dir.join("moved.txt").exists());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn named_registers_append_and_black_hole() {
+    let mut ed: Editor = editor("one\ntwo\nthree");
+    keys(&mut ed, "\"ayyj\"Ayy");
+    keys(&mut ed, "yy\"_ddG\"ap");
+    assert_eq!(text(&ed), "one\nthree\none\ntwo");
+    keys(&mut ed, "p");
+    assert_eq!(text(&ed), "one\nthree\none\ntwo\ntwo", "\"_ left the unnamed register alone");
+}
+
+#[test]
+fn command_and_search_history() {
+    let mut ed: Editor = editor("foo bar foo");
+    keys(&mut ed, ":bn\n:bp\n:bnext\n/bar\n");
+    keys(&mut ed, ":");
+    ed.handle(Key::Up);
+    assert_eq!(ed.cmdline, "bnext");
+    ed.handle(Key::Up);
+    assert_eq!(ed.cmdline, "bp");
+    ed.handle(Key::Down);
+    assert_eq!(ed.cmdline, "bnext");
+    ed.handle(Key::Down);
+    assert_eq!(ed.cmdline, "", "past the newest: back to what was typed");
+    ed.handle(Key::Esc);
+
+    keys(&mut ed, ":bn");
+    ed.handle(Key::ShiftUp);
+    assert_eq!(ed.cmdline, "bnext", "the typed prefix filters");
+    ed.handle(Key::Up);
+    assert_eq!(ed.cmdline, "bn");
+    keys(&mut ed, "e");
+    ed.handle(Key::Up);
+    assert_eq!(ed.cmdline, "bnext", "typing restarts the search from the new text");
+    ed.handle(Key::Esc);
+
+    keys(&mut ed, "0/foo\n0/");
+    ed.handle(Key::Up);
+    assert_eq!(ed.cmdline, "foo", "searches have their own history");
+    ed.handle(Key::Up);
+    assert_eq!(ed.cmdline, "bar");
+    ed.handle(Key::Enter);
+    assert_eq!((ed.search.as_str(), ed.buf().cursor.col), ("bar", 4));
+}
+
+#[test]
+fn shift_arrows_move_by_word_and_page() {
+    let lines: Vec<String> =
+        std::iter::once("one two three".to_owned()).chain((1..50).map(|i| i.to_string())).collect();
+    let mut ed: Editor = editor(&lines.join("\n"));
+    ed.view_height = 10;
+    ed.handle(Key::ShiftRight);
+    assert_eq!(ed.buf().cursor.col, 4);
+    ed.handle(Key::ShiftLeft);
+    assert_eq!(ed.buf().cursor.col, 0);
+    ed.handle(Key::ShiftDown);
+    assert_eq!(ed.buf().cursor.line, 10);
+    ed.handle(Key::ShiftUp);
+    assert_eq!(ed.buf().cursor.line, 0);
+
+    keys(&mut ed, "d");
+    ed.handle(Key::ShiftRight);
+    assert_eq!(ed.buf().line(0), "two three", "an operator takes it as w");
+    keys(&mut ed, "v");
+    ed.handle(Key::ShiftRight);
+    keys(&mut ed, "d");
+    assert_eq!(ed.buf().line(0), "hree", "visual selection grows a word at a time");
+
+    keys(&mut ed, "uui");
+    ed.handle(Key::ShiftRight);
+    keys(&mut ed, "X");
+    assert_eq!(ed.buf().line(0), "one Xtwo three");
+    ed.handle(Key::ShiftDown);
+    assert_eq!(ed.buf().cursor.line, 10);
+    ed.handle(Key::ShiftUp);
+    assert_eq!(ed.buf().cursor.line, 0);
+    ed.handle(Key::End);
+    ed.handle(Key::ShiftLeft);
+    assert_eq!(ed.buf().cursor, Pos::new(0, 9), "back to the start of the last word");
 }

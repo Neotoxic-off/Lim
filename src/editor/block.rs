@@ -5,7 +5,7 @@
 use super::registers::Register;
 use super::vim::{Case, convert};
 use super::{Editor, Mode};
-use crate::buffer::Pos;
+use crate::buffer::{Buffer, Pos};
 
 /// Text typed into the first line of a block insert, copied to the others on `<Esc>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,18 +19,18 @@ pub struct BlockInsert {
 
 impl Editor {
     fn block_bounds(&self) -> (usize, usize, usize, usize) {
-        let (a, b) = (self.anchor, self.buf().cursor);
+        let (a, b): (Pos, Pos) = (self.anchor, self.buf().cursor);
         (a.line.min(b.line), a.line.max(b.line), a.col.min(b.col), a.col.max(b.col))
     }
 
     /// `d`, `x`, `y`, `c` on the block; the register keeps it as a column.
     pub(super) fn block_cut(&mut self, delete: bool, change: bool) {
-        let (top, bottom, left, right) = self.block_bounds();
-        let buf = self.buf_mut();
-        let mut pieces = Vec::with_capacity(bottom - top + 1);
+        let (top, bottom, left, right): (usize, usize, usize, usize) = self.block_bounds();
+        let buf: &mut Buffer = self.buf_mut();
+        let mut pieces: Vec<String> = Vec::with_capacity(bottom - top + 1);
         for y in top..=bottom {
-            let len = buf.line_len(y);
-            let (start, end) = (Pos::new(y, left.min(len)), Pos::new(y, (right + 1).min(len)));
+            let len: usize = buf.line_len(y);
+            let (start, end): (Pos, Pos) = (Pos::new(y, left.min(len)), Pos::new(y, (right + 1).min(len)));
             pieces.push(buf.text(start, end));
             if delete && start != end {
                 buf.remove(start, end);
@@ -47,10 +47,10 @@ impl Editor {
 
     /// `I` / `A` in block mode.
     pub(super) fn block_insert_start(&mut self, append: bool) {
-        let (top, bottom, left, right) = self.block_bounds();
-        let col = if append { right + 1 } else { left };
-        let buf = self.buf_mut();
-        let len = buf.line_len(top);
+        let (top, bottom, left, right): (usize, usize, usize, usize) = self.block_bounds();
+        let col: usize = if append { right + 1 } else { left };
+        let buf: &mut Buffer = self.buf_mut();
+        let len: usize = buf.line_len(top);
         if col > len {
             buf.insert(Pos::new(top, len), &" ".repeat(col - len));
         }
@@ -61,15 +61,15 @@ impl Editor {
 
     /// On leaving insert mode: repeat what was typed on the block's first line on the others.
     pub(super) fn finish_block_insert(&mut self) {
-        let Some(block) = self.block_insert.take() else { return };
-        let buf = self.buf_mut();
-        let cursor = buf.cursor;
+        let Some(block): Option<BlockInsert> = self.block_insert.take() else { return };
+        let buf: &mut Buffer = self.buf_mut();
+        let cursor: Pos = buf.cursor;
         if cursor.line != block.top || cursor.col <= block.col {
             return;
         }
-        let typed = buf.text(Pos::new(block.top, block.col), cursor);
+        let typed: String = buf.text(Pos::new(block.top, block.col), cursor);
         for y in block.top + 1..=block.bottom.min(buf.last_line()) {
-            let len = buf.line_len(y);
+            let len: usize = buf.line_len(y);
             if len < block.col {
                 if !block.pad {
                     continue;
@@ -82,14 +82,14 @@ impl Editor {
 
     /// `r{c}` in block mode.
     pub(super) fn block_replace(&mut self, ch: char) {
-        let (top, bottom, left, right) = self.block_bounds();
-        let buf = self.buf_mut();
+        let (top, bottom, left, right): (usize, usize, usize, usize) = self.block_bounds();
+        let buf: &mut Buffer = self.buf_mut();
         for y in top..=bottom {
-            let len = buf.line_len(y);
+            let len: usize = buf.line_len(y);
             if left >= len {
                 continue;
             }
-            let end = (right + 1).min(len);
+            let end: usize = (right + 1).min(len);
             buf.remove(Pos::new(y, left), Pos::new(y, end));
             buf.insert(Pos::new(y, left), &ch.to_string().repeat(end - left));
         }
@@ -99,12 +99,12 @@ impl Editor {
 
     /// `~`, `u`, `U` in block mode.
     pub(super) fn block_case(&mut self, case: Case) {
-        let (top, bottom, left, right) = self.block_bounds();
-        let buf = self.buf_mut();
+        let (top, bottom, left, right): (usize, usize, usize, usize) = self.block_bounds();
+        let buf: &mut Buffer = self.buf_mut();
         for y in top..=bottom {
-            let len = buf.line_len(y);
-            let (start, end) = (Pos::new(y, left.min(len)), Pos::new(y, (right + 1).min(len)));
-            let converted = convert(&buf.text(start, end), case);
+            let len: usize = buf.line_len(y);
+            let (start, end): (Pos, Pos) = (Pos::new(y, left.min(len)), Pos::new(y, (right + 1).min(len)));
+            let converted: String = convert(&buf.text(start, end), case);
             buf.remove(start, end);
             buf.insert(start, &converted);
         }
@@ -114,16 +114,16 @@ impl Editor {
 
     /// `p` / `P` of a block register: one piece per line, starting at the cursor column.
     pub(super) fn put_block(&mut self, reg: &Register, after: bool) {
-        let buf = self.buf_mut();
-        let here = buf.cursor;
-        let col = if after && buf.line_len(here.line) > 0 { here.col + 1 } else { here.col };
+        let buf: &mut Buffer = self.buf_mut();
+        let here: Pos = buf.cursor;
+        let col: usize = if after && buf.line_len(here.line) > 0 { here.col + 1 } else { here.col };
         for (i, piece) in reg.text.split('\n').enumerate() {
-            let y = here.line + i;
+            let y: usize = here.line + i;
             if y > buf.last_line() {
-                let end = buf.line_len(buf.last_line());
+                let end: usize = buf.line_len(buf.last_line());
                 buf.insert(Pos::new(buf.last_line(), end), "\n");
             }
-            let len = buf.line_len(y);
+            let len: usize = buf.line_len(y);
             if len < col {
                 buf.insert(Pos::new(y, len), &" ".repeat(col - len));
             }

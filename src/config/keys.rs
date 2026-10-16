@@ -1,5 +1,7 @@
 //! Vim key notation (`<C-s>`, `<Leader>w`, `jk`, `:w<CR>`) → keys.
 
+use std::str::Chars;
+
 use crate::term::Key;
 
 /// Internal stand-in for the leader key, so `mapleader` can be any key without clashing.
@@ -7,8 +9,8 @@ pub const LEADER: char = '\u{F8FF}';
 
 pub fn parse(notation: &str) -> Result<Vec<Key>, String> {
     let chars: Vec<char> = notation.chars().collect();
-    let mut keys = Vec::new();
-    let mut i = 0;
+    let mut keys: Vec<Key> = Vec::new();
+    let mut i: usize = 0;
     while i < chars.len() {
         if chars[i] == '<'
             && let Some(len) = chars[i..].iter().position(|&c| c == '>')
@@ -36,7 +38,7 @@ pub fn parse_one(notation: &str) -> Result<Key, String> {
 }
 
 fn special(name: &str) -> Option<Key> {
-    let lower = name.to_ascii_lowercase();
+    let lower: String = name.to_ascii_lowercase();
     Some(match lower.as_str() {
         "leader" => Key::Char(LEADER),
         "cr" | "enter" | "return" => Key::Enter,
@@ -61,15 +63,20 @@ fn special(name: &str) -> Option<Key> {
         "c-down" => Key::CtrlDown,
         "c-left" => Key::CtrlLeft,
         "c-right" => Key::CtrlRight,
+        "s-up" => Key::ShiftUp,
+        "s-down" => Key::ShiftDown,
+        "s-left" => Key::ShiftLeft,
+        "s-right" => Key::ShiftRight,
         _ => {
-            if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=12).contains(n)) {
+            if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).filter(|n| (1..=12).contains(n))
+            {
                 return Some(Key::F(n));
             }
             if lower == "c-space" {
                 return Some(Key::Ctrl(' '));
             }
-            let c = lower.strip_prefix("c-")?;
-            let mut it = c.chars();
+            let c: &str = lower.strip_prefix("c-")?;
+            let mut it: Chars<'_> = c.chars();
             match (it.next(), it.next()) {
                 (Some(c), None) if c.is_ascii_lowercase() => Key::Ctrl(c),
                 _ => return None,
@@ -106,6 +113,10 @@ pub fn display(keys: &[Key]) -> String {
             Key::CtrlDown => "<C-Down>".into(),
             Key::CtrlLeft => "<C-Left>".into(),
             Key::CtrlRight => "<C-Right>".into(),
+            Key::ShiftUp => "<S-Up>".into(),
+            Key::ShiftDown => "<S-Down>".into(),
+            Key::ShiftLeft => "<S-Left>".into(),
+            Key::ShiftRight => "<S-Right>".into(),
             Key::Unknown => "?".into(),
         })
         .collect()
@@ -119,7 +130,10 @@ mod tests {
     fn notation() {
         assert_eq!(parse(":w<CR>"), Ok(vec![Key::Char(':'), Key::Char('w'), Key::Enter]));
         assert_eq!(parse("<leader>fF7"), Ok(vec![Key::Char(LEADER), Key::Char('f'), Key::Char('F'), Key::Char('7')]));
-        assert_eq!(parse("<C-S><F7><lt>x>"), Ok(vec![Key::Ctrl('s'), Key::F(7), Key::Char('<'), Key::Char('x'), Key::Char('>')]));
+        assert_eq!(
+            parse("<C-S><F7><lt>x>"),
+            Ok(vec![Key::Ctrl('s'), Key::F(7), Key::Char('<'), Key::Char('x'), Key::Char('>')])
+        );
         assert_eq!(parse_one("<Space>"), Ok(Key::Char(' ')));
         assert!(parse_one("ab").is_err());
         assert_eq!(display(&parse("<Leader>b<C-w>").unwrap_or_default()), "<Leader>b<C-w>");

@@ -17,7 +17,7 @@ pub fn configure(tabstop: usize, ignorecase: bool, smartcase: bool) {
 
 /// Cells a tab spans at screen column `col`.
 pub fn tab_cells(col: usize) -> usize {
-    let stop = TAB_STOP.load(Relaxed).max(1);
+    let stop: usize = TAB_STOP.load(Relaxed).max(1);
     stop - col % stop
 }
 
@@ -49,30 +49,96 @@ pub fn str_width(s: &str) -> usize {
 // shortcut: compact range table (wcwidth + Unicode wide emoji), not the full EastAsianWidth data.
 pub fn char_width(c: char) -> usize {
     const ZERO: &[(u32, u32)] = &[
-        (0x0300, 0x036F), (0x0483, 0x0489), (0x0591, 0x05BD), (0x0610, 0x061A), (0x064B, 0x065F),
-        (0x1AB0, 0x1AFF), (0x1DC0, 0x1DFF), (0x200B, 0x200F), (0x20D0, 0x20FF), (0xFE00, 0xFE0F),
-        (0xFE20, 0xFE2F), (0xE0100, 0xE01EF),
+        (0x0300, 0x036F),
+        (0x0483, 0x0489),
+        (0x0591, 0x05BD),
+        (0x0610, 0x061A),
+        (0x064B, 0x065F),
+        (0x1AB0, 0x1AFF),
+        (0x1DC0, 0x1DFF),
+        (0x200B, 0x200F),
+        (0x20D0, 0x20FF),
+        (0xFE00, 0xFE0F),
+        (0xFE20, 0xFE2F),
+        (0xE0100, 0xE01EF),
     ];
     const WIDE: &[(u32, u32)] = &[
-        (0x1100, 0x115F), (0x231A, 0x231B), (0x2329, 0x232A), (0x23E9, 0x23EC), (0x23F0, 0x23F0),
-        (0x23F3, 0x23F3), (0x25FD, 0x25FE), (0x2614, 0x2615), (0x2648, 0x2653), (0x267F, 0x267F),
-        (0x2693, 0x2693), (0x26A1, 0x26A1), (0x26AA, 0x26AB), (0x26BD, 0x26BE), (0x26C4, 0x26C5),
-        (0x26CE, 0x26CE), (0x26D4, 0x26D4), (0x26EA, 0x26EA), (0x26F2, 0x26F3), (0x26F5, 0x26F5),
-        (0x26FA, 0x26FA), (0x26FD, 0x26FD), (0x2705, 0x2705), (0x270A, 0x270B), (0x2728, 0x2728),
-        (0x274C, 0x274C), (0x274E, 0x274E), (0x2753, 0x2755), (0x2757, 0x2757), (0x2795, 0x2797),
-        (0x27B0, 0x27B0), (0x27BF, 0x27BF), (0x2B1B, 0x2B1C), (0x2B50, 0x2B50), (0x2B55, 0x2B55),
-        (0x2E80, 0x303E), (0x3040, 0xA4CF), (0xAC00, 0xD7A3), (0xF900, 0xFAFF), (0xFE10, 0xFE19),
-        (0xFE30, 0xFE6F), (0xFF00, 0xFF60), (0xFFE0, 0xFFE6), (0x1F004, 0x1F004), (0x1F0CF, 0x1F0CF),
-        (0x1F18E, 0x1F18E), (0x1F191, 0x1F19A), (0x1F200, 0x1F202), (0x1F210, 0x1F23B), (0x1F240, 0x1F248),
-        (0x1F250, 0x1F251), (0x1F260, 0x1F265), (0x1F300, 0x1F64F), (0x1F680, 0x1F6FF), (0x1F7E0, 0x1F7EB),
-        (0x1F90C, 0x1F9FF), (0x1FA70, 0x1FAFF), (0x20000, 0x2FFFD), (0x30000, 0x3FFFD),
+        (0x1100, 0x115F),
+        (0x231A, 0x231B),
+        (0x2329, 0x232A),
+        (0x23E9, 0x23EC),
+        (0x23F0, 0x23F0),
+        (0x23F3, 0x23F3),
+        (0x25FD, 0x25FE),
+        (0x2614, 0x2615),
+        (0x2648, 0x2653),
+        (0x267F, 0x267F),
+        (0x2693, 0x2693),
+        (0x26A1, 0x26A1),
+        (0x26AA, 0x26AB),
+        (0x26BD, 0x26BE),
+        (0x26C4, 0x26C5),
+        (0x26CE, 0x26CE),
+        (0x26D4, 0x26D4),
+        (0x26EA, 0x26EA),
+        (0x26F2, 0x26F3),
+        (0x26F5, 0x26F5),
+        (0x26FA, 0x26FA),
+        (0x26FD, 0x26FD),
+        (0x2705, 0x2705),
+        (0x270A, 0x270B),
+        (0x2728, 0x2728),
+        (0x274C, 0x274C),
+        (0x274E, 0x274E),
+        (0x2753, 0x2755),
+        (0x2757, 0x2757),
+        (0x2795, 0x2797),
+        (0x27B0, 0x27B0),
+        (0x27BF, 0x27BF),
+        (0x2B1B, 0x2B1C),
+        (0x2B50, 0x2B50),
+        (0x2B55, 0x2B55),
+        (0x2E80, 0x303E),
+        (0x3040, 0xA4CF),
+        (0xAC00, 0xD7A3),
+        (0xF900, 0xFAFF),
+        (0xFE10, 0xFE19),
+        (0xFE30, 0xFE6F),
+        (0xFF00, 0xFF60),
+        (0xFFE0, 0xFFE6),
+        (0x1F004, 0x1F004),
+        (0x1F0CF, 0x1F0CF),
+        (0x1F18E, 0x1F18E),
+        (0x1F191, 0x1F19A),
+        (0x1F200, 0x1F202),
+        (0x1F210, 0x1F23B),
+        (0x1F240, 0x1F248),
+        (0x1F250, 0x1F251),
+        (0x1F260, 0x1F265),
+        (0x1F300, 0x1F64F),
+        (0x1F680, 0x1F6FF),
+        (0x1F7E0, 0x1F7EB),
+        (0x1F90C, 0x1F9FF),
+        (0x1FA70, 0x1FAFF),
+        (0x20000, 0x2FFFD),
+        (0x30000, 0x3FFFD),
     ];
-    let u = u32::from(c);
+    let u: u32 = u32::from(c);
     if u < 0x300 {
         return 1;
     }
     let within = |table: &[(u32, u32)]| {
-        table.binary_search_by(|&(lo, hi)| if hi < u { Ordering::Less } else if lo > u { Ordering::Greater } else { Ordering::Equal }).is_ok()
+        table
+            .binary_search_by(|&(lo, hi)| {
+                if hi < u {
+                    Ordering::Less
+                } else if lo > u {
+                    Ordering::Greater
+                } else {
+                    Ordering::Equal
+                }
+            })
+            .is_ok()
     };
     if within(ZERO) {
         0
@@ -87,12 +153,12 @@ pub fn char_width(c: char) -> usize {
 /// Vim's `\<` and `\>` word boundaries are honored at the pattern's start and end.
 // shortcut: lowercasing that changes char counts (e.g. 'İ') shifts columns, fine for source code.
 pub fn find_all(line: &str, pattern: &str) -> Vec<Range<usize>> {
-    let (pattern, word_start) = pattern.strip_prefix("\\<").map_or((pattern, false), |p| (p, true));
-    let (pattern, word_end) = pattern.strip_suffix("\\>").map_or((pattern, false), |p| (p, true));
+    let (pattern, word_start): (&str, bool) = pattern.strip_prefix("\\<").map_or((pattern, false), |p| (p, true));
+    let (pattern, word_end): (&str, bool) = pattern.strip_suffix("\\>").map_or((pattern, false), |p| (p, true));
     if pattern.is_empty() {
         return Vec::new();
     }
-    let matches = find_plain(line, pattern);
+    let matches: Vec<Range<usize>> = find_plain(line, pattern);
     if !word_start && !word_end {
         return matches;
     }
@@ -110,9 +176,9 @@ pub fn find_word(line: &str, word: &str) -> Vec<Range<usize>> {
         return Vec::new();
     }
     let chars: Vec<char> = line.chars().collect();
-    let width = char_len(word);
+    let width: usize = char_len(word);
     let is_word = |i: usize| chars.get(i).is_some_and(|c| c.is_alphanumeric() || *c == '_');
-    let (mut byte, mut col) = (0, 0);
+    let (mut byte, mut col): (usize, usize) = (0, 0);
     line.match_indices(word)
         .map(|(b, _)| {
             col += char_len(&line[byte..b]);
@@ -126,12 +192,12 @@ pub fn find_word(line: &str, word: &str) -> Vec<Range<usize>> {
 /// URLs (`http://`, `https://`, `file://`) as char ranges, for `highlighturl`.
 pub fn find_urls(line: &str) -> Vec<Range<usize>> {
     let chars: Vec<char> = line.chars().collect();
-    let mut urls = Vec::new();
-    let mut i = 0;
+    let mut urls: Vec<Range<usize>> = Vec::new();
+    let mut i: usize = 0;
     while i < chars.len() {
         let rest: String = chars[i..chars.len().min(i + 8)].iter().collect();
         if ["https://", "http://", "file://"].iter().any(|p| rest.starts_with(p)) {
-            let start = i;
+            let start: usize = i;
             while i < chars.len() && !chars[i].is_whitespace() && !"\"'<>`".contains(chars[i]) {
                 i += 1;
             }
@@ -151,9 +217,9 @@ pub fn find_urls(line: &str) -> Vec<Range<usize>> {
 /// `#RRGGBB` color literals (highlight-colors) as char ranges with their value.
 pub fn find_hex_colors(line: &str) -> Vec<(Range<usize>, u32)> {
     let chars: Vec<char> = line.chars().collect();
-    let mut found = Vec::new();
+    let mut found: Vec<(Range<usize>, u32)> = Vec::new();
     for i in 0..chars.len() {
-        let digits = chars.get(i + 1..i + 7);
+        let digits: Option<&[char]> = chars.get(i + 1..i + 7);
         if chars[i] == '#'
             && let Some(digits) = digits
             && digits.iter().all(char::is_ascii_hexdigit)
@@ -167,17 +233,17 @@ pub fn find_hex_colors(line: &str) -> Vec<(Range<usize>, u32)> {
 }
 
 fn find_plain(line: &str, pattern: &str) -> Vec<Range<usize>> {
-    let smart_sensitive = SMART_CASE.load(Relaxed) && pattern.chars().any(char::is_uppercase);
+    let smart_sensitive: bool = SMART_CASE.load(Relaxed) && pattern.chars().any(char::is_uppercase);
     let (lowered_line, lowered_pattern);
-    let (hay, pattern) = if IGNORE_CASE.load(Relaxed) && !smart_sensitive {
+    let (hay, pattern): (&str, &str) = if IGNORE_CASE.load(Relaxed) && !smart_sensitive {
         lowered_line = line.to_lowercase();
         lowered_pattern = pattern.to_lowercase();
         (lowered_line.as_str(), lowered_pattern.as_str())
     } else {
         (line, pattern)
     };
-    let width = char_len(pattern);
-    let (mut byte, mut col) = (0, 0);
+    let width: usize = char_len(pattern);
+    let (mut byte, mut col): (usize, usize) = (0, 0);
     hay.match_indices(pattern)
         .map(|(b, _)| {
             col += char_len(&hay[byte..b]);

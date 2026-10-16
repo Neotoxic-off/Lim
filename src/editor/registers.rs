@@ -32,15 +32,15 @@ impl Registers {
 impl Editor {
     /// Records yanked (`yank`) or deleted text in the register chosen with `"x`, following Vim.
     pub(super) fn store_register(&mut self, value: Register, yank: bool) {
-        let name = self.register_name.take();
+        let name: Option<char> = self.register_name.take();
         if name == Some('_') {
             return;
         }
-        let slots = &mut self.registers.slots;
+        let slots: &mut HashMap<char, Register> = &mut self.registers.slots;
         match name {
             Some(c @ 'A'..='Z') => {
-                let slot = slots.entry(c.to_ascii_lowercase()).or_default();
-                let sep = if slot.linewise || value.linewise { "\n" } else { "" };
+                let slot: &mut Register = slots.entry(c.to_ascii_lowercase()).or_default();
+                let sep: &str = if slot.linewise || value.linewise { "\n" } else { "" };
                 slot.text = format!("{}{sep}{}", slot.text, value.text);
                 slot.linewise |= value.linewise;
             }
@@ -49,19 +49,27 @@ impl Editor {
             }
             _ => {}
         }
-        let numbered = if yank { '0' } else if value.linewise || value.text.contains('\n') { '1' } else { '-' };
+        let numbered: char = if yank {
+            '0'
+        } else if value.linewise || value.text.contains('\n') {
+            '1'
+        } else {
+            '-'
+        };
         slots.insert(numbered, value.clone());
-        slots.insert('"', value.clone());
         if matches!(name, Some('+' | '*')) || (name.is_none() && self.options.clipboard) {
             self.set_clipboard(&value);
         }
+        self.registers.slots.insert('"', value);
     }
 
     /// The register `"x` named, or the unnamed one (the clipboard with `clipboard=unnamedplus`).
     pub(super) fn fetch_register(&mut self) -> Option<Register> {
-        let name = self.register_name.take();
+        let name: Option<char> = self.register_name.take();
         match name {
-            Some('%') => self.buf().path.as_ref().map(|p| Register { text: p.display().to_string(), ..Register::default() }),
+            Some('%') => {
+                self.buf().path.as_ref().map(|p| Register { text: p.display().to_string(), ..Register::default() })
+            }
             Some('/') => Some(Register { text: self.search.clone(), ..Register::default() }),
             Some('+' | '*') => self.clipboard_register(),
             Some(c) if c != '"' => self.registers.slots.get(&c.to_ascii_lowercase()).cloned(),
@@ -71,11 +79,15 @@ impl Editor {
     }
 
     fn clipboard_register(&self) -> Option<Register> {
-        let unnamed = self.registers.slots.get(&'"').cloned();
+        let unnamed: Option<Register> = self.registers.slots.get(&'"').cloned();
         match clipboard::paste() {
             // Tools may add or drop a final newline: compare without it.
-            Some(text) if !text.is_empty() && Some(text.trim_end_matches('\n')) != self.registers.copied.as_deref().map(|c| c.trim_end_matches('\n')) => {
-                let linewise = text.ends_with('\n');
+            Some(text)
+                if !text.is_empty()
+                    && Some(text.trim_end_matches('\n'))
+                        != self.registers.copied.as_deref().map(|c| c.trim_end_matches('\n')) =>
+            {
+                let linewise: bool = text.ends_with('\n');
                 Some(Register { text: text.strip_suffix('\n').unwrap_or(&text).to_owned(), linewise, block: false })
             }
             _ => unnamed,
@@ -83,7 +95,7 @@ impl Editor {
     }
 
     fn set_clipboard(&mut self, value: &Register) {
-        let text = if value.linewise { format!("{}\n", value.text) } else { value.text.clone() };
+        let text: String = if value.linewise { format!("{}\n", value.text) } else { value.text.clone() };
         if !clipboard::copy(&text) && !cfg!(test) {
             self.osc52 = Some(clipboard::osc52(&text));
         }

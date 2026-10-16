@@ -1,6 +1,7 @@
 //! User configuration from JSON: Neovim-style options, astrotheme palette, highlight groups and keymaps.
 //!
-//! Looked up at `$LIM_CONFIG`, else `$XDG_CONFIG_HOME/lim/config.json`, else `~/.config/lim/config.json`.
+//! Looked up at `$LIM_CONFIG`, else `$XDG_CONFIG_HOME/lim/config.json`, else `~/.config/lim/config.json`
+//! (`%APPDATA%\lim\config.json` on Windows).
 //! Every problem becomes a warning and the default stays in place: a bad config never stops the editor.
 
 pub mod json;
@@ -20,13 +21,14 @@ pub struct Rgb(pub u32);
 
 impl Rgb {
     fn parse(s: &str) -> Option<Self> {
-        let hex = s.strip_prefix('#')?;
+        let hex: &str = s.strip_prefix('#')?;
         (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok().map(Self)).flatten()
     }
 }
 
-/// Mirrors the AstroNvim option of the same name; defaults are AstroNvim's.
+/// Mirrors the `AstroNvim` option of the same name; defaults are `AstroNvim`'s.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[expect(clippy::struct_excessive_bools, reason = "mirrors Neovim's boolean options one to one")]
 pub struct Options {
     pub number: bool,
     pub relativenumber: bool,
@@ -64,13 +66,13 @@ pub struct Options {
     pub syntax: bool,
     /// `clipboard=unnamedplus`: yank and put go through the system clipboard.
     pub clipboard: bool,
-    /// One blank column left of the numbers, as AstroNvim's statuscolumn.
+    /// One blank column left of the numbers, as `AstroNvim`'s statuscolumn.
     pub foldcolumn: bool,
     /// highlight-colors: `#RRGGBB` shown in its own color.
     pub colorhighlight: bool,
     /// todo-comments: `TODO:`, `FIX:`, `HACK:`… highlighted in comments.
     pub todocomments: bool,
-    /// Built-in theme name (see `:colorscheme`); unset, the last one picked (or astrodark).
+    /// Built-in theme name (see `:colorscheme`); unset, the last one picked (or nvchad).
     pub colorscheme: Option<String>,
     /// Icon set: "nerd", "unicode" or "ascii".
     pub iconset: String,
@@ -144,6 +146,9 @@ pub struct Keymap {
     pub desc: String,
 }
 
+/// A keymap's `lhs`, `rhs` and `desc` as read from JSON, before it is expanded per mode.
+type ParsedMapping = (Vec<Key>, Option<Vec<Key>>, String);
+
 /// One highlight group override; unset fields keep the theme's value.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HighlightSpec {
@@ -168,20 +173,31 @@ pub fn path() -> Option<PathBuf> {
     if let Some(p) = env::var_os("LIM_CONFIG") {
         return Some(PathBuf::from(p));
     }
-    let base = env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("lim").join("config.json"))
+    Some(user_dir("XDG_CONFIG_HOME", "APPDATA", &[".config"])?.join("config.json"))
+}
+
+/// Where sessions, recent files and the last colorscheme live: `$XDG_STATE_HOME/lim`, else `~/.local/state/lim`
+/// (`%LOCALAPPDATA%\lim` on Windows).
+pub fn state_dir() -> Option<PathBuf> {
+    user_dir("XDG_STATE_HOME", "LOCALAPPDATA", &[".local", "state"])
+}
+
+/// `$xdg/lim` when set to an absolute path, else the Windows folder `%windows%\lim`, else `~/<home…>/lim`.
+fn user_dir(xdg: &str, windows: &str, home: &[&str]) -> Option<PathBuf> {
+    let absolute = |var: &str| env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute());
+    let base: PathBuf = absolute(xdg)
+        .or_else(|| if cfg!(windows) { absolute(windows) } else { None })
+        .or_else(|| env::var_os("HOME").map(|h| home.iter().fold(PathBuf::from(h), |p, part| p.join(part))))?;
+    Some(base.join("lim"))
 }
 
 /// The config and every problem found in it. A missing file is not a problem.
 pub fn load() -> (Config, Vec<String>) {
-    let Some(path) = path() else { return (Config::default(), Vec::new()) };
+    let Some(path): Option<PathBuf> = path() else { return (Config::default(), Vec::new()) };
     match fs::read_to_string(&path) {
         Ok(text) => {
-            let (config, warnings) = Config::from_str(&text);
-            let warnings = warnings.into_iter().map(|w| format!("{}: {w}", path.display())).collect();
+            let (config, warnings): (Config, Vec<String>) = Config::from_str(&text);
+            let warnings: Vec<String> = warnings.into_iter().map(|w| format!("{}: {w}", path.display())).collect();
             (config, warnings)
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => (Config::default(), Vec::new()),
@@ -191,8 +207,8 @@ pub fn load() -> (Config, Vec<String>) {
 
 impl Config {
     pub fn from_str(text: &str) -> (Self, Vec<String>) {
-        let mut config = Self::default();
-        let mut warnings = Vec::new();
+        let mut config: Config = Self::default();
+        let mut warnings: Vec<String> = Vec::new();
         match json::parse(text) {
             Ok(Json::Object(sections)) => {
                 for (name, value) in sections {
@@ -213,10 +229,10 @@ impl Config {
     }
 
     fn read_options(&mut self, value: &Json, warnings: &mut Vec<String>) {
-        let Json::Object(fields) = value else { return warnings.push("\"options\" must be an object".into()) };
-        let o = &mut self.options;
+        let Json::Object(fields): &Json = value else { return warnings.push("\"options\" must be an object".into()) };
+        let o: &mut Options = &mut self.options;
         for (name, value) in fields {
-            let ok = match name.as_str() {
+            let ok: bool = match name.as_str() {
                 "number" => set_bool(&mut o.number, value),
                 "relativenumber" => set_bool(&mut o.relativenumber, value),
                 "signcolumn" => set_bool(&mut o.signcolumn, value),
@@ -232,8 +248,8 @@ impl Config {
                 "autopairs" => set_bool(&mut o.autopairs, value),
                 "autoindent" => set_bool(&mut o.autoindent, value),
                 "timeoutlen" => {
-                    let mut ms = 0;
-                    let ok = set_count(&mut ms, value, 0, 10_000);
+                    let mut ms: usize = 0;
+                    let ok: bool = set_count(&mut ms, value, 0, 10_000);
                     o.timeoutlen = ms as u64;
                     ok
                 }
@@ -270,7 +286,7 @@ impl Config {
                 },
                 "iconset" => match value {
                     Json::String(s) if ["nerd", "unicode", "ascii"].contains(&s.as_str()) => {
-                        o.iconset = s.clone();
+                        o.iconset.clone_from(s);
                         true
                     }
                     _ => false,
@@ -311,9 +327,9 @@ impl Config {
     }
 
     fn read_palette(&mut self, value: &Json, warnings: &mut Vec<String>) {
-        let Json::Object(sections) = value else { return warnings.push("\"palette\" must be an object".into()) };
+        let Json::Object(sections): &Json = value else { return warnings.push("\"palette\" must be an object".into()) };
         for (section, colors) in sections {
-            let Json::Object(colors) = colors else {
+            let Json::Object(colors): &Json = colors else {
                 warnings.push(format!("palette.{section} must be an object"));
                 continue;
             };
@@ -330,15 +346,17 @@ impl Config {
     }
 
     fn read_highlights(&mut self, value: &Json, warnings: &mut Vec<String>) {
-        let Json::Object(groups) = value else { return warnings.push("\"highlights\" must be an object".into()) };
+        let Json::Object(groups): &Json = value else {
+            return warnings.push("\"highlights\" must be an object".into());
+        };
         for (group, spec) in groups {
-            let Json::Object(fields) = spec else {
+            let Json::Object(fields): &Json = spec else {
                 warnings.push(format!("highlights.{group} must be an object"));
                 continue;
             };
-            let mut hl = HighlightSpec::default();
+            let mut hl: HighlightSpec = HighlightSpec::default();
             for (field, value) in fields {
-                let ok = match (field.as_str(), value) {
+                let ok: bool = match (field.as_str(), value) {
                     ("fg", Json::String(s)) => Rgb::parse(s).map(|c| hl.fg = Some(c)).is_some(),
                     ("bg", Json::String(s)) => Rgb::parse(s).map(|c| hl.bg = Some(c)).is_some(),
                     ("bold", Json::Bool(b)) => {
@@ -368,7 +386,7 @@ impl Config {
     }
 
     fn read_keymaps(&mut self, value: &Json, warnings: &mut Vec<String>) {
-        let Json::Object(modes) = value else { return warnings.push("\"keymaps\" must be an object".into()) };
+        let Json::Object(modes): &Json = value else { return warnings.push("\"keymaps\" must be an object".into()) };
         for (mode_name, maps) in modes {
             let modes: &[MapMode] = match mode_name.as_str() {
                 "n" => &[MapMode::Normal],
@@ -380,19 +398,21 @@ impl Config {
                     continue;
                 }
             };
-            let Json::Object(maps) = maps else {
+            let Json::Object(maps): &Json = maps else {
                 warnings.push(format!("keymaps.{mode_name} must be an object"));
                 continue;
             };
             for (lhs, rhs) in maps {
-                let parsed = keys::parse(lhs).and_then(|lhs| {
-                    let (rhs, desc) = match rhs {
+                let parsed: Result<ParsedMapping, String> = keys::parse(lhs).and_then(|lhs| {
+                    let (rhs, desc): (Option<Vec<Key>>, String) = match rhs {
                         Json::Bool(false) => (None, String::new()),
                         Json::String(s) => (Some(keys::parse(s)?), String::new()),
                         Json::Object(fields) => {
                             let field = |n: &str| fields.iter().find(|(k, _)| k == n).map(|(_, v)| v);
-                            let Some(Json::String(keys)) = field("rhs") else { return Err("missing \"rhs\"".into()) };
-                            let desc = match field("desc") {
+                            let Some(Json::String(keys)): Option<&Json> = field("rhs") else {
+                                return Err("missing \"rhs\"".into());
+                            };
+                            let desc: String = match field("desc") {
                                 Some(Json::String(d)) => d.clone(),
                                 _ => String::new(),
                             };
@@ -426,6 +446,12 @@ fn set_bool(slot: &mut bool, value: &Json) -> bool {
     }
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "bounds are small config limits and `n` is a whole number checked against them first"
+)]
 fn set_count(slot: &mut usize, value: &Json, min: usize, max: usize) -> bool {
     match value {
         Json::Number(n) if n.fract() == 0.0 && *n >= min as f64 && *n <= max as f64 => {
@@ -442,14 +468,14 @@ mod tests {
 
     #[test]
     fn example_matches_defaults() {
-        let (config, warnings) = Config::from_str(EXAMPLE);
+        let (config, warnings): (Config, Vec<String>) = Config::from_str(EXAMPLE);
         assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(config.options, Options::default());
     }
 
     #[test]
     fn reads_overrides_and_reports_problems() {
-        let (config, warnings) = Config::from_str(
+        let (config, warnings): (Config, Vec<String>) = Config::from_str(
             r##"{
                 "options": { "tabstop": 4, "mapleader": ",", "wrap": true, "number": "yes" },
                 "palette": { "ui": { "base": "#000000" }, "syntax": { "red": "red" } },
@@ -465,10 +491,13 @@ mod tests {
         assert_eq!(config.keymaps.len(), 3);
         assert_eq!(config.keymaps[1].desc, "Save");
         assert_eq!(config.keymaps[2].rhs, None);
-        assert_eq!(warnings, vec![
-            "unknown option \"wrap\"".to_owned(),
-            "options.number: invalid value (a string)".to_owned(),
-            "palette.syntax.red: expected \"#RRGGBB\"".to_owned(),
-        ]);
+        assert_eq!(
+            warnings,
+            vec![
+                "unknown option \"wrap\"".to_owned(),
+                "options.number: invalid value (a string)".to_owned(),
+                "palette.syntax.red: expected \"#RRGGBB\"".to_owned(),
+            ]
+        );
     }
 }

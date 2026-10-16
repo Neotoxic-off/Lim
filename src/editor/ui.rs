@@ -1,7 +1,9 @@
-//! which-key menus and AstroNvim's `<Leader>u` UI toggles.
+//! which-key menus and `AstroNvim`'s `<Leader>u` UI toggles.
 
-use super::{Editor, Message, Mode, bindings};
+use super::bindings::{self, Toggle};
+use super::{Editor, Message, Mode};
 use crate::config::keys::{self, LEADER};
+use crate::config::{MapMode, Options};
 use crate::term::Key;
 
 /// Internal prefix slots for leader sub-menus (`<Leader>b…`, `<Leader>f…`, …).
@@ -24,12 +26,14 @@ pub struct MenuEntry {
 }
 
 /// A menu's title and its (key, description, opens a group) entries.
-type Menu = (&'static str, Vec<(String, &'static str, bool)>);
+/// (key, description, opens a submenu)
+type MenuItem = (String, &'static str, bool);
+type Menu = (&'static str, Vec<MenuItem>);
 
 /// A built-in menu from the binding table.
 fn builtin(prefix: char) -> Option<Menu> {
-    let title = bindings::menu_title(prefix)?;
-    let entries = bindings::BINDINGS
+    let title: &str = bindings::menu_title(prefix)?;
+    let entries: Vec<(String, &str, bool)> = bindings::BINDINGS
         .iter()
         .filter(|b| b.prefix == prefix)
         .map(|b| (bindings::key_name(b.key), b.desc, matches!(b.action, bindings::Action::Group(_))))
@@ -42,7 +46,9 @@ pub fn builtin_maps() -> Vec<(&'static str, Vec<(String, &'static str)>)> {
     bindings::MENUS
         .iter()
         .filter_map(|&(prefix, _)| builtin(prefix))
-        .map(|(title, entries)| (title, entries.into_iter().filter(|(_, _, group)| !group).map(|(k, d, _)| (k, d)).collect()))
+        .map(|(title, entries)| {
+            (title, entries.into_iter().filter(|(_, _, group)| !group).map(|(k, d, _)| (k, d)).collect())
+        })
         .collect()
 }
 
@@ -64,18 +70,31 @@ fn prefix_keys(prefix: char) -> Vec<Key> {
 impl Editor {
     /// The which-key popup for the keys typed so far, if they open a menu.
     pub fn which_key(&self) -> Option<(String, Vec<MenuEntry>)> {
-        let (title, typed, builtins) = match self.pending.prefix.and_then(|p| builtin(p).map(|b| (p, b))) {
-            Some((p, (title, entries))) => (title.to_owned(), prefix_keys(p), entries),
-            None if !self.typeahead.is_empty() => (keys::display(&self.typeahead), self.typeahead.clone(), Vec::new()),
-            None => return None,
-        };
+        let (title, typed, builtins): (String, Vec<Key>, Vec<MenuItem>) =
+            match self.pending.prefix.and_then(|p| builtin(p).map(|b| (p, b))) {
+                Some((p, (title, entries))) => (title.to_owned(), prefix_keys(p), entries),
+                None if !self.typeahead.is_empty() => {
+                    (keys::display(&self.typeahead), self.typeahead.clone(), Vec::new())
+                }
+                None => return None,
+            };
         let mut entries: Vec<MenuEntry> =
             builtins.into_iter().map(|(key, desc, group)| MenuEntry { key, desc: desc.to_owned(), group }).collect();
-        let mode = self.map_mode_for_menu();
-        for map in self.keymaps.iter().filter(|m| Some(m.mode) == mode && m.lhs.len() > typed.len() && m.lhs.starts_with(&typed)) {
-            let key = keys::display(&map.lhs[typed.len()..=typed.len()]);
-            let group = map.lhs.len() > typed.len() + 1;
-            let desc = if group { "+Mappings".to_owned() } else if map.desc.is_empty() { keys::display(map.rhs.as_deref().unwrap_or_default()) } else { map.desc.clone() };
+        let mode: Option<MapMode> = self.map_mode_for_menu();
+        for map in self
+            .keymaps
+            .iter()
+            .filter(|m| Some(m.mode) == mode && m.lhs.len() > typed.len() && m.lhs.starts_with(&typed))
+        {
+            let key: String = keys::display(&map.lhs[typed.len()..=typed.len()]);
+            let group: bool = map.lhs.len() > typed.len() + 1;
+            let desc: String = if group {
+                "+Mappings".to_owned()
+            } else if map.desc.is_empty() {
+                keys::display(map.rhs.as_deref().unwrap_or_default())
+            } else {
+                map.desc.clone()
+            };
             entries.retain(|e| e.key != key);
             entries.push(MenuEntry { key, desc, group });
         }
@@ -86,48 +105,52 @@ impl Editor {
         Some((title, entries))
     }
 
-    fn map_mode_for_menu(&self) -> Option<crate::config::MapMode> {
+    fn map_mode_for_menu(&self) -> Option<MapMode> {
         match self.mode {
-            Mode::Normal => Some(crate::config::MapMode::Normal),
-            Mode::Visual | Mode::VisualLine => Some(crate::config::MapMode::Visual),
-            Mode::Insert => Some(crate::config::MapMode::Insert),
+            Mode::Normal => Some(MapMode::Normal),
+            Mode::Visual | Mode::VisualLine => Some(MapMode::Visual),
+            Mode::Insert => Some(MapMode::Insert),
             _ => None,
         }
     }
 
     /// `<Leader>u…`
-    pub(super) fn toggle(&mut self, key: char) {
-        let o = &mut self.options;
-        let (name, on) = match key {
-            'a' => ("autopairs", flip(&mut o.autopairs)),
-            'g' => ("signcolumn", flip(&mut o.signcolumn)),
-            'l' => ("statusline", flip(&mut o.laststatus)),
-            'N' => ("notifications", flip(&mut o.notifications)),
-            't' => ("tabline", flip(&mut o.showtabline)),
-            'u' => ("URL highlighting", flip(&mut o.highlighturl)),
-            'y' => ("syntax highlighting", flip(&mut o.syntax)),
-            'r' => ("reference highlighting", flip(&mut o.wordhighlight)),
-            'c' | 'C' => ("autocompletion", flip(&mut o.completion)),
-            'z' => ("color highlighting", flip(&mut o.colorhighlight)),
-            '>' => ("foldcolumn", flip(&mut o.foldcolumn)),
-            'p' => {
+    pub(super) fn toggle(&mut self, toggle: Toggle) {
+        let o: &mut Options = &mut self.options;
+        let (name, on): (&str, bool) = match toggle {
+            Toggle::Autopairs => ("autopairs", flip(&mut o.autopairs)),
+            Toggle::SignColumn => ("signcolumn", flip(&mut o.signcolumn)),
+            Toggle::StatusLine => ("statusline", flip(&mut o.laststatus)),
+            Toggle::Notifications => ("notifications", flip(&mut o.notifications)),
+            Toggle::TabLine => ("tabline", flip(&mut o.showtabline)),
+            Toggle::Urls => ("URL highlighting", flip(&mut o.highlighturl)),
+            Toggle::Syntax => ("syntax highlighting", flip(&mut o.syntax)),
+            Toggle::References => ("reference highlighting", flip(&mut o.wordhighlight)),
+            Toggle::Autocomplete => ("autocompletion", flip(&mut o.completion)),
+            Toggle::Colors => ("color highlighting", flip(&mut o.colorhighlight)),
+            Toggle::FoldColumn => ("foldcolumn", flip(&mut o.foldcolumn)),
+            Toggle::Paste => {
                 // Paste mode: no autopairs, no auto-indent, so pasted text arrives as typed.
-                let on = o.autopairs || o.autoindent;
+                let on: bool = o.autopairs || o.autoindent;
                 o.autopairs = !on;
                 o.autoindent = !on;
                 ("paste mode", on)
             }
-            'Z' => {
+            Toggle::Zen => {
                 self.zen = !self.zen;
                 ("zen mode", self.zen)
             }
-            'i' => {
-                let width = if o.expandtab { o.indent_width() as i64 } else { -(o.tabstop as i64) };
-                return self.open_prompt("Set indent value (>0 expandtab, <=0 noexpandtab)", &width.to_string(), super::prompt::PromptAction::IndentWidth);
+            Toggle::Indent => {
+                let width: String = if o.expandtab { o.indent_width().to_string() } else { format!("-{}", o.tabstop) };
+                return self.open_prompt(
+                    "Set indent value (>0 expandtab, <=0 noexpandtab)",
+                    &width,
+                    super::prompt::PromptAction::IndentWidth,
+                );
             }
-            'b' => return self.toggle_background(),
-            '|' => ("indent guides", flip(&mut o.indentguides)),
-            'n' => {
+            Toggle::Background => return self.toggle_background(),
+            Toggle::IndentGuides => ("indent guides", flip(&mut o.indentguides)),
+            Toggle::Numbering => {
                 // AstroNvim cycles: both → number → relativenumber → none → both.
                 (o.number, o.relativenumber) = match (o.number, o.relativenumber) {
                     (true, true) => (true, false),
@@ -135,14 +158,13 @@ impl Editor {
                     (false, true) => (false, false),
                     (false, false) => (true, true),
                 };
-                let state = format!("number={} relativenumber={}", o.number, o.relativenumber);
+                let state: String = format!("number={} relativenumber={}", o.number, o.relativenumber);
                 return self.set_message(Message::Info(state));
             }
-            'D' => {
+            Toggle::DismissNotifications => {
                 self.message = None;
                 return;
             }
-            _ => return,
         };
         self.set_message(Message::Info(format!("{name} {}", if on { "enabled" } else { "disabled" })));
     }
@@ -162,11 +184,23 @@ impl Editor {
             ("rose-pine", "rose-pine-dawn"),
             ("rose-pine-moon", "rose-pine-dawn"),
         ];
-        let current = self.colorscheme.clone();
-        let other = PAIRS
+        let current: String = self.colorscheme.clone();
+        let other: &str = PAIRS
             .iter()
-            .find_map(|&(dark, light)| if dark == current { Some(light) } else if light == current { Some(dark) } else { None })
-            .unwrap_or(if crate::render::palettes::THEMES.iter().any(|t| t.name == current && t.light) { "astrodark" } else { "astrolight" });
+            .find_map(|&(dark, light)| {
+                if dark == current {
+                    Some(light)
+                } else if light == current {
+                    Some(dark)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(if crate::render::palettes::THEMES.iter().any(|t| t.name == current && t.light) {
+                "astrodark"
+            } else {
+                "astrolight"
+            });
         self.set_colorscheme(other, true);
     }
 }

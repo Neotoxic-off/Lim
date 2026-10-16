@@ -1,4 +1,4 @@
-//! lim: a lightweight, dependency-free modal editor modelled on an AstroNvim setup.
+//! lim: a lightweight, dependency-free modal editor modelled on an `AstroNvim` setup.
 
 #![cfg_attr(
     not(test),
@@ -20,10 +20,14 @@ mod render;
 mod syntax;
 mod term;
 
+use std::any::Any;
+use std::env;
 use std::io::{self, Write};
 use std::panic::{self, AssertUnwindSafe};
+use std::path::{self, Path};
 use std::process::ExitCode;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use editor::Editor;
 use render::Screen;
@@ -33,10 +37,10 @@ use term::{ColorDepth, Event, Input, Terminal};
 static LAST_PANIC: Mutex<String> = Mutex::new(String::new());
 
 fn main() -> ExitCode {
-    let started = std::time::Instant::now();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let started: Instant = Instant::now();
+    let args: Vec<String> = env::args().skip(1).collect();
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("usage: lim [file...]");
+        println!("usage: lim [dir] [file...]");
         return ExitCode::SUCCESS;
     }
     if args.iter().any(|a| a == "-V" || a == "--version") {
@@ -51,22 +55,31 @@ fn main() -> ExitCode {
         println!("{}", config::path().map(|p| p.display().to_string()).unwrap_or_default());
         return ExitCode::SUCCESS;
     }
-    let (config, mut warnings) = config::load();
-    let colorscheme = render::initial_colorscheme(&config);
+    let (config, mut warnings): (config::Config, Vec<String>) = config::load();
+    let colorscheme: String = render::initial_colorscheme(&config);
     warnings.extend(render::apply_colorscheme(&colorscheme, &config));
-    let depth = match config.options.truecolor {
+    let depth: ColorDepth = match config.options.truecolor {
         Some(true) => ColorDepth::TrueColor,
         Some(false) => ColorDepth::Ansi256,
         None => term::color_depth(),
     };
-    let mut editor = Editor::new(&args);
+    // `lim some/dir` works inside that folder, as `cd some/dir && nvim .`; files keep their meaning.
+    let (dirs, mut files): (Vec<String>, Vec<String>) = args.into_iter().partition(|a| Path::new(a).is_dir());
+    if let Some(dir) = dirs.first() {
+        files =
+            files.iter().map(|f| path::absolute(f).map_or_else(|_| f.clone(), |p| p.display().to_string())).collect();
+        if let Err(e) = env::set_current_dir(dir) {
+            warnings.push(format!("{dir}: {e}"));
+        }
+    }
+    let mut editor: Editor = Editor::new(&files);
     editor.started = started;
     editor.configure(&config);
     editor.colorscheme = colorscheme;
     if !warnings.is_empty() {
         editor.set_message(editor::Message::Error(format!("config: {}", warnings.join("; "))));
     }
-    let result = run(&mut editor, depth);
+    let result: Result<(), io::Error> = run(&mut editor, depth);
     editor.autosave_session();
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -78,39 +91,39 @@ fn main() -> ExitCode {
 }
 
 fn run(editor: &mut Editor, depth: ColorDepth) -> io::Result<()> {
-    let terminal = Terminal::enter()?;
+    let terminal: Terminal = Terminal::enter()?;
     // A bug must never kill the session: record it quietly, recover, keep editing.
     panic::set_hook(Box::new(|info| {
-        let what = info
+        let what: String = info
             .payload()
             .downcast_ref::<&str>()
             .map(|s| (*s).to_owned())
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_default();
-        let place = info.location().map(|l| format!(" at {}:{}", l.file(), l.line())).unwrap_or_default();
+        let place: String = info.location().map(|l| format!(" at {}:{}", l.file(), l.line())).unwrap_or_default();
         if let Ok(mut last) = LAST_PANIC.lock() {
             *last = format!("{what}{place}");
         }
     }));
-    let mut input = Input::default();
-    let mut screen = Screen::new(depth);
-    let mut out = io::stdout().lock();
+    let mut input: Input = Input::default();
+    let mut screen: Screen = Screen::new(depth);
+    let mut out: io::StdoutLock<'_> = io::stdout().lock();
     while !editor.quit {
         // Skip frames while keys are still queued (pastes, key repeat).
         if !input.has_pending() {
-            let frame = match panic::catch_unwind(AssertUnwindSafe(|| screen.draw(editor, term::size()))) {
-                Ok(frame) => frame,
-                Err(_) => {
+            let frame: String =
+                if let Ok(frame) = panic::catch_unwind(AssertUnwindSafe(|| screen.draw(editor, term::size()))) {
+                    frame
+                } else {
                     recover(editor, &mut screen);
                     // Drawing itself failed: show the error plainly so `:w`/`:q` stay usable.
                     format!("\x1b[0m\x1b[2J\x1b[H{}", editor.message_text().replace(char::is_control, "?"))
-                }
-            };
+                };
             out.write_all(frame.as_bytes())?;
             out.flush()?;
         }
-        let event = input.read(editor.deadline())?;
-        let handled = panic::catch_unwind(AssertUnwindSafe(|| match event {
+        let event: Event = input.read(editor.deadline())?;
+        let handled: Result<(), Box<dyn Any + Send>> = panic::catch_unwind(AssertUnwindSafe(|| match event {
             Event::Key(key) => editor.handle(key),
             Event::Timeout => editor.tick(),
             Event::Resize => {}
@@ -120,7 +133,10 @@ fn run(editor: &mut Editor, depth: ColorDepth) -> io::Result<()> {
         }
         if let Some(command) = editor.shell_requested.take() {
             if let Err(e) = terminal.run(&command) {
-                editor.set_message(editor::Message::Error(format!("{}: {e}", command.first().map_or("shell", String::as_str))));
+                editor.set_message(editor::Message::Error(format!(
+                    "{}: {e}",
+                    command.first().map_or("shell", String::as_str)
+                )));
             }
             editor.reload_changed_buffers();
             screen.invalidate();
@@ -134,7 +150,7 @@ fn run(editor: &mut Editor, depth: ColorDepth) -> io::Result<()> {
 }
 
 fn recover(editor: &mut Editor, screen: &mut Screen) {
-    let detail = LAST_PANIC.lock().map(|m| m.clone()).unwrap_or_default();
+    let detail: String = LAST_PANIC.lock().map(|m| m.clone()).unwrap_or_default();
     editor.recover(&detail);
     screen.invalidate();
 }

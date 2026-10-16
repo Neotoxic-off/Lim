@@ -9,7 +9,53 @@ pub struct ThemeDef {
     pub colors: &'static [(&'static str, u32)],
 }
 
+/// The theme lim starts with until one is picked or configured.
+pub const DEFAULT: &str = "nvchad";
+
 pub const THEMES: &[ThemeDef] = &[
+    // NvChad's default: base46 "onedark" (base_30 for the UI, base_16 for syntax).
+    ThemeDef {
+        name: "nvchad",
+        light: false,
+        colors: &[
+            ("syntax.red", 0xE06C75),
+            ("syntax.orange", 0xD19A66),
+            ("syntax.yellow", 0xE5C07B),
+            ("syntax.green", 0x98C379),
+            ("syntax.cyan", 0x56B6C2),
+            ("syntax.blue", 0x61AFEF),
+            ("syntax.purple", 0xC678DD),
+            ("syntax.text", 0xABB2BF),
+            ("syntax.comment", 0x565C64),
+            ("syntax.mute", 0x42464E),
+            ("ui.red", 0xE06C75),
+            ("ui.orange", 0xD19A66),
+            ("ui.yellow", 0xE7C787),
+            ("ui.green", 0x98C379),
+            ("ui.cyan", 0x56B6C2),
+            ("ui.blue", 0x61AFEF),
+            ("ui.purple", 0xDE98FD),
+            ("ui.accent", 0x61AFEF),
+            ("ui.tabline", 0x1B1F27),
+            ("ui.winbar", 0x6F737B),
+            ("ui.tool", 0x1B1F27),
+            ("ui.base", 0x1E222A),
+            ("ui.inactive_base", 0x1E222A),
+            ("ui.statusline", 0x22262E),
+            ("ui.split", 0x31353D),
+            ("ui.float", 0x1B1F27),
+            ("ui.title", 0x61AFEF),
+            ("ui.border", 0x42464E),
+            ("ui.current_line", 0x252931),
+            ("ui.selection", 0x3E4451),
+            ("ui.highlight", 0x282C34),
+            ("ui.none_text", 0x42464E),
+            ("ui.text", 0xABB2BF),
+            ("ui.text_active", 0xC8CCD4),
+            ("ui.text_inactive", 0x565C64),
+            ("ui.prompt", 0x252931),
+        ],
+    },
     ThemeDef {
         name: "astrodark",
         light: false,
@@ -995,11 +1041,7 @@ mod tests {
     #[test]
     fn names_are_unique() {
         for (i, a) in THEMES.iter().enumerate() {
-            assert!(
-                THEMES[i + 1..].iter().all(|b| b.name != a.name),
-                "duplicate {}",
-                a.name
-            );
+            assert!(THEMES[i + 1..].iter().all(|b| b.name != a.name), "duplicate {}", a.name);
         }
     }
 }

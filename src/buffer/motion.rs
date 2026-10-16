@@ -1,5 +1,7 @@
 //! Text-object primitives behind Vim motions: words, paragraphs, char finds, search.
 
+use std::{iter::Skip, str::Chars};
+
 use super::{Buffer, Pos, text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,7 +55,7 @@ impl<'a> Walker<'a> {
     }
 
     fn class(&self) -> CharClass {
-        let c = self.chars.get(self.col).copied();
+        let c: Option<char> = self.chars.get(self.col).copied();
         if self.big { CharClass::of_big(c) } else { CharClass::of(c) }
     }
 
@@ -108,15 +110,15 @@ impl Buffer {
 
     /// True when the next char on the line starts another class (or there is none).
     pub fn at_word_end(&self, p: Pos) -> bool {
-        let mut chars = self.lines[p.line].chars().skip(p.col);
-        let here = CharClass::of(chars.next());
+        let mut chars: Skip<Chars<'_>> = self.lines[p.line].chars().skip(p.col);
+        let here: CharClass = CharClass::of(chars.next());
         chars.next().is_none_or(|c| CharClass::of(Some(c)) != here)
     }
 
     /// `w` / `W`: start of the next word; empty lines count as words.
     pub fn word_forward(&self, at: Pos, big: bool) -> Pos {
-        let mut w = Walker::big(self, at, big);
-        let start = w.class();
+        let mut w: Walker<'_> = Walker::big(self, at, big);
+        let start: CharClass = w.class();
         loop {
             match w.next() {
                 Step::End => return w.line_end(),
@@ -135,7 +137,7 @@ impl Buffer {
 
     /// `e` / `E`: end of the current or next word.
     pub fn word_end(&self, at: Pos, big: bool) -> Pos {
-        let mut w = Walker::big(self, at, big);
+        let mut w: Walker<'_> = Walker::big(self, at, big);
         if let Step::End = w.next() {
             return at;
         }
@@ -144,9 +146,9 @@ impl Buffer {
                 return w.pos();
             }
         }
-        let class = w.class();
+        let class: CharClass = w.class();
         loop {
-            let here = w.pos();
+            let here: Pos = w.pos();
             match w.next() {
                 Step::Same if w.class() == class => {}
                 _ => return here,
@@ -156,7 +158,7 @@ impl Buffer {
 
     /// `b` / `B`: start of the current or previous word.
     pub fn word_back(&self, at: Pos, big: bool) -> Pos {
-        let mut w = Walker::big(self, at, big);
+        let mut w: Walker<'_> = Walker::big(self, at, big);
         if let Step::End = w.prev() {
             return at;
         }
@@ -165,9 +167,9 @@ impl Buffer {
                 return w.pos();
             }
         }
-        let class = w.class();
+        let class: CharClass = w.class();
         loop {
-            let here = w.pos();
+            let here: Pos = w.pos();
             match w.prev() {
                 Step::Same if w.class() == class => {}
                 _ => return here,
@@ -177,8 +179,8 @@ impl Buffer {
 
     /// `ge` / `gE`: end of the previous word.
     pub fn word_end_back(&self, at: Pos, big: bool) -> Pos {
-        let mut w = Walker::big(self, at, big);
-        let start = w.class();
+        let mut w: Walker<'_> = Walker::big(self, at, big);
+        let start: CharClass = w.class();
         // Leave the word under the cursor, then skip blanks back to the previous word's last char.
         loop {
             match w.prev() {
@@ -200,19 +202,19 @@ impl Buffer {
     /// `<C-a>` / `<C-x>`: adds `delta` to the number at or after the cursor; returns its last column.
     pub fn number_at(&self, at: Pos) -> Option<(usize, usize, i64)> {
         let chars: Vec<char> = self.lines[at.line].chars().collect();
-        let mut start = (at.col..chars.len()).find(|&i| chars[i].is_ascii_digit())?;
+        let mut start: usize = (at.col..chars.len()).find(|&i| chars[i].is_ascii_digit())?;
         // The cursor may sit inside the number: walk back to its first digit.
         while start > 0 && chars[start - 1].is_ascii_digit() {
             start -= 1;
         }
-        let mut end = start;
+        let mut end: usize = start;
         while end < chars.len() && chars[end].is_ascii_digit() {
             end += 1;
         }
-        let negative = start > 0 && chars[start - 1] == '-';
+        let negative: bool = start > 0 && chars[start - 1] == '-';
         let digits: String = chars[start..end].iter().collect();
         let value: i64 = digits.parse().ok()?;
-        let start = if negative { start - 1 } else { start };
+        let start: usize = if negative { start - 1 } else { start };
         Some((start, end, if negative { -value } else { value }))
     }
 
@@ -236,13 +238,14 @@ impl Buffer {
 
     /// `%`: the partner of the first bracket at or after `at` on its line.
     pub fn matching_bracket(&self, at: Pos) -> Option<Pos> {
-        let (col, c) = self.lines[at.line].chars().enumerate().skip(at.col).find(|(_, c)| "()[]{}".contains(*c))?;
+        let (col, c): (usize, char) =
+            self.lines[at.line].chars().enumerate().skip(at.col).find(|(_, c)| "()[]{}".contains(*c))?;
         self.bracket_partner(Pos::new(at.line, col), c, usize::MAX)
     }
 
     /// Partner of bracket `c` at `at`, looking at most `max_lines` lines away.
     pub fn bracket_partner(&self, at: Pos, c: char, max_lines: usize) -> Option<Pos> {
-        let (me, other, forward) = match c {
+        let (me, other, forward): (char, char, bool) = match c {
             '(' => ('(', ')', true),
             '[' => ('[', ']', true),
             '{' => ('{', '}', true),
@@ -251,8 +254,8 @@ impl Buffer {
             '}' => ('}', '{', false),
             _ => return None,
         };
-        let mut w = Walker::new(self, at);
-        let mut depth = 0usize;
+        let mut w: Walker<'_> = Walker::new(self, at);
+        let mut depth: usize = 0usize;
         loop {
             match w.chars.get(w.col).copied() {
                 Some(ch) if ch == me => depth += 1,
@@ -264,7 +267,7 @@ impl Buffer {
                 }
                 _ => {}
             }
-            let step = if forward { w.next() } else { w.prev() };
+            let step: Step = if forward { w.next() } else { w.prev() };
             if matches!(step, Step::End) || w.line.abs_diff(at.line) > max_lines {
                 return None;
             }
@@ -274,19 +277,19 @@ impl Buffer {
     /// `iw` / `aw`: the run of same-class chars under `at`, plus trailing (or leading) blanks for `aw`.
     pub fn word_object(&self, at: Pos, around: bool) -> Option<(Pos, Pos)> {
         let chars: Vec<char> = self.lines[at.line].chars().collect();
-        let col = at.col.min(chars.len().checked_sub(1)?);
+        let col: usize = at.col.min(chars.len().checked_sub(1)?);
         let class = |i: usize| CharClass::of(chars.get(i).copied());
-        let here = class(col);
-        let mut start = col;
+        let here: CharClass = class(col);
+        let mut start: usize = col;
         while start > 0 && class(start - 1) == here {
             start -= 1;
         }
-        let mut end = col + 1;
+        let mut end: usize = col + 1;
         while end < chars.len() && class(end) == here {
             end += 1;
         }
         if around && here != CharClass::Blank {
-            let word_end = end;
+            let word_end: usize = end;
             while end < chars.len() && class(end) == CharClass::Blank {
                 end += 1;
             }
@@ -301,9 +304,9 @@ impl Buffer {
 
     /// `i(` / `a(` and friends: inside (or including) the brackets enclosing `at`.
     pub fn pair_object(&self, at: Pos, open: char, close: char, around: bool) -> Option<(Pos, Pos)> {
-        let mut w = Walker::new(self, at);
-        let mut depth = 0usize;
-        let start = loop {
+        let mut w: Walker<'_> = Walker::new(self, at);
+        let mut depth: usize = 0usize;
+        let start: Pos = loop {
             match w.chars.get(w.col).copied() {
                 Some(c) if c == open && depth == 0 => break w.pos(),
                 Some(c) if c == open => depth -= 1,
@@ -314,18 +317,14 @@ impl Buffer {
                 return None;
             }
         };
-        let end = self.bracket_partner(start, open, usize::MAX)?;
-        Some(if around {
-            (start, Pos::new(end.line, end.col + 1))
-        } else {
-            (Pos::new(start.line, start.col + 1), end)
-        })
+        let end: Pos = self.bracket_partner(start, open, usize::MAX)?;
+        Some(if around { (start, Pos::new(end.line, end.col + 1)) } else { (Pos::new(start.line, start.col + 1), end) })
     }
 
     /// `i"` / `a"`: the quoted string around `at`, or the next one on the line.
     pub fn quote_object(&self, at: Pos, quote: char, around: bool) -> Option<(Pos, Pos)> {
-        let mut quotes = Vec::new();
-        let mut escaped = false;
+        let mut quotes: Vec<usize> = Vec::new();
+        let mut escaped: bool = false;
         for (i, c) in self.lines[at.line].chars().enumerate() {
             if c == quote && !escaped {
                 quotes.push(i);
@@ -333,7 +332,7 @@ impl Buffer {
             escaped = c == '\\' && !escaped;
         }
         let pairs: Vec<(usize, usize)> = quotes.chunks_exact(2).map(|p| (p[0], p[1])).collect();
-        let (s, e) = pairs
+        let (s, e): (usize, usize) = pairs
             .iter()
             .copied()
             .find(|&(s, e)| s <= at.col && at.col <= e)
@@ -347,7 +346,7 @@ impl Buffer {
 
     /// `f`/`F`: column of the `count`-th `ch` after (or before) `at` on its line.
     pub fn find_char(&self, at: Pos, ch: char, forward: bool, count: usize) -> Option<usize> {
-        let line = &self.lines[at.line];
+        let line: &String = &self.lines[at.line];
         let mut hits = line.chars().enumerate().filter(|&(_, c)| c == ch).map(|(i, _)| i);
         if forward {
             hits.filter(|&i| i > at.col).nth(count.max(1) - 1)
@@ -362,12 +361,12 @@ impl Buffer {
         if pattern.is_empty() {
             return None;
         }
-        let n = self.lines.len();
+        let n: usize = self.lines.len();
         for i in 0..=n {
-            let line = if forward { (from.line + i) % n } else { (from.line + 2 * n - i) % n };
+            let line: usize = if forward { (from.line + i) % n } else { (from.line + 2 * n - i) % n };
             let mut starts = text::find_all(&self.lines[line], pattern).into_iter().map(|r| r.start);
-            let wrapped = i > 0;
-            let hit = if forward {
+            let wrapped: bool = i > 0;
+            let hit: Option<usize> = if forward {
                 starts.find(|&c| wrapped || c > from.col)
             } else {
                 starts.rev().find(|&c| wrapped || c < from.col)
@@ -386,7 +385,7 @@ mod tests {
 
     #[test]
     fn word_motions() {
-        let b = Buffer::from_text(None, "foo.bar  baz\n\nqux");
+        let b: Buffer = Buffer::from_text(None, "foo.bar  baz\n\nqux");
         let w = |p| b.word_forward(p, false);
         assert_eq!(w(Pos::new(0, 0)), Pos::new(0, 3));
         assert_eq!(w(Pos::new(0, 3)), Pos::new(0, 4));
@@ -400,7 +399,7 @@ mod tests {
         assert_eq!(b.word_end(Pos::new(0, 0), true), Pos::new(0, 6));
         assert_eq!(b.word_end_back(Pos::new(0, 9), false), Pos::new(0, 6));
         assert_eq!(b.word_end_back(Pos::new(0, 9), true), Pos::new(0, 6));
-        let n = Buffer::from_text(None, "x = -12, y");
+        let n: Buffer = Buffer::from_text(None, "x = -12, y");
         assert_eq!(n.number_at(Pos::new(0, 0)), Some((4, 7, -12)));
         assert_eq!(n.number_at(Pos::new(0, 6)), Some((4, 7, -12)));
         assert_eq!(b.paragraph(0, true), 1);
@@ -408,7 +407,7 @@ mod tests {
 
     #[test]
     fn brackets_and_objects() {
-        let b = Buffer::from_text(None, "f(a, [b]) {\n  x\n}\nsay \"hi there\" now");
+        let b: Buffer = Buffer::from_text(None, "f(a, [b]) {\n  x\n}\nsay \"hi there\" now");
         assert_eq!(b.matching_bracket(Pos::new(0, 0)), Some(Pos::new(0, 8)));
         assert_eq!(b.matching_bracket(Pos::new(0, 9)), Some(Pos::new(2, 0)));
         assert_eq!(b.matching_bracket(Pos::new(2, 0)), Some(Pos::new(0, 10)));
@@ -421,7 +420,7 @@ mod tests {
 
     #[test]
     fn find_and_search() {
-        let b = Buffer::from_text(None, "a-b-c\nalpha Beta\nbeta");
+        let b: Buffer = Buffer::from_text(None, "a-b-c\nalpha Beta\nbeta");
         assert_eq!(b.find_char(Pos::new(0, 0), '-', true, 2), Some(3));
         assert_eq!(b.find_char(Pos::new(0, 4), '-', false, 1), Some(3));
         assert_eq!(b.search("beta", Pos::new(0, 0), true), Some(Pos::new(1, 6)));

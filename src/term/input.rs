@@ -16,6 +16,11 @@ pub enum Key {
     CtrlDown,
     CtrlLeft,
     CtrlRight,
+    /// Shift + arrow (word and page moves, as in Vim).
+    ShiftUp,
+    ShiftDown,
+    ShiftLeft,
+    ShiftRight,
     Esc,
     Enter,
     Backspace,
@@ -58,7 +63,7 @@ impl Input {
     pub fn read(&mut self, deadline: Option<Instant>) -> io::Result<Event> {
         loop {
             if !self.pending.is_empty() {
-                let (key, used) = match decode(&self.pending) {
+                let (key, used): (Key, usize) = match decode(&self.pending) {
                     Some(decoded) => decoded,
                     None if self.fill(Some(ESC_TIMEOUT_MS))? => continue,
                     None if self.pending[0] == 0x1b => (Key::Esc, 1),
@@ -70,7 +75,8 @@ impl Input {
             if sys::take_resized() {
                 return Ok(Event::Resize);
             }
-            let wait = deadline.map(|d| d.saturating_duration_since(Instant::now()).as_millis().min(u128::from(u32::MAX)) as u32);
+            let wait: Option<u32> = deadline
+                .map(|d| u32::try_from(d.saturating_duration_since(Instant::now()).as_millis()).unwrap_or(u32::MAX));
             if wait == Some(0) {
                 return Ok(Event::Timeout);
             }
@@ -85,8 +91,8 @@ impl Input {
         if !sys::wait_readable(timeout_ms)? {
             return Ok(false);
         }
-        let mut buf = [0u8; 4096];
-        let n = match sys::read_stdin(&mut buf) {
+        let mut buf: [u8; 4096] = [0u8; 4096];
+        let n: usize = match sys::read_stdin(&mut buf) {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => return Ok(false),
             r => r?,
         };
@@ -100,7 +106,7 @@ impl Input {
 
 /// One key and the bytes it used; None while a sequence may still be incomplete.
 fn decode(bytes: &[u8]) -> Option<(Key, usize)> {
-    let first = *bytes.first()?;
+    let first: u8 = *bytes.first()?;
     Some(match first {
         0x1b => return escape(bytes),
         // Raw mode leaves Enter as '\r'; 0x0a and 0x08 are Ctrl-j / Ctrl-h (window moves).
@@ -112,7 +118,7 @@ fn decode(bytes: &[u8]) -> Option<(Key, usize)> {
         0 => (Key::Ctrl(' '), 1),
         28..=31 => (Key::Unknown, 1),
         _ => {
-            let len = match first {
+            let len: usize = match first {
                 0xc0..=0xdf => 2,
                 0xe0..=0xef => 3,
                 0xf0..=0xf7 => 4,
@@ -132,8 +138,8 @@ fn decode(bytes: &[u8]) -> Option<(Key, usize)> {
 fn escape(bytes: &[u8]) -> Option<(Key, usize)> {
     match bytes.get(1)? {
         b'[' | b'O' => {
-            let end = 2 + bytes[2..].iter().position(|b| (0x40..=0x7e).contains(b))?;
-            let key = match &bytes[2..=end] {
+            let end: usize = 2 + bytes[2..].iter().position(|b| (0x40..=0x7e).contains(b))?;
+            let key: Key = match &bytes[2..=end] {
                 b"A" => Key::Up,
                 b"B" => Key::Down,
                 b"C" => Key::Right,
@@ -148,6 +154,10 @@ fn escape(bytes: &[u8]) -> Option<(Key, usize)> {
                 b"1;5B" => Key::CtrlDown,
                 b"1;5C" => Key::CtrlRight,
                 b"1;5D" => Key::CtrlLeft,
+                b"1;2A" => Key::ShiftUp,
+                b"1;2B" => Key::ShiftDown,
+                b"1;2C" => Key::ShiftRight,
+                b"1;2D" => Key::ShiftLeft,
                 b"P" => Key::F(1),
                 b"Q" => Key::F(2),
                 b"R" => Key::F(3),
@@ -186,5 +196,31 @@ mod tests {
         assert_eq!(decode(&"é".as_bytes()[..1]), None);
         assert_eq!(decode(b"\x13"), Some((Key::Ctrl('s'), 1)));
         assert_eq!(decode(b"\x1c"), Some((Key::Unknown, 1)));
+    }
+
+    #[test]
+    fn decodes_plain_and_modified_keys() {
+        let cases: [(&[u8], Key); 14] = [
+            (b"\x1b[1;2A", Key::ShiftUp),
+            (b"\x1b[1;2D", Key::ShiftLeft),
+            (b"\r", Key::Enter),
+            (b"\x7f", Key::Backspace),
+            (b"\t", Key::Tab),
+            (b"\0", Key::Ctrl(' ')),
+            (b"\x1b[1;5C", Key::CtrlRight),
+            (b"\x1bOP", Key::F(1)),
+            (b"\x1b[24~", Key::F(12)),
+            (b"\x1b[H", Key::Home),
+            (b"\x1b[4~", Key::End),
+            (b"\x1b[6~", Key::PageDown),
+            (b"\x1b[99~", Key::Unknown),
+            ("日".as_bytes(), Key::Char('日')),
+        ];
+        for (bytes, key) in cases {
+            assert_eq!(decode(bytes), Some((key, bytes.len())), "{bytes:?}");
+        }
+        assert_eq!(decode(b"\xc3("), Some((Key::Unknown, 1)), "invalid UTF-8");
+        assert_eq!(decode(b"\xff"), Some((Key::Unknown, 1)));
+        assert_eq!(decode(b""), None);
     }
 }

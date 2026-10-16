@@ -4,10 +4,11 @@ mod bindings;
 mod block;
 mod cheatsheet;
 mod clipboard;
+mod cmdhistory;
 mod command;
 mod complete;
-mod extras;
 mod explorer;
+mod extras;
 mod insert;
 mod keymap;
 mod manage;
@@ -16,11 +17,11 @@ mod normal;
 mod operator;
 mod picker;
 mod prompt;
-mod registers;
 mod recent;
+mod registers;
+mod repeat;
 mod session;
 mod sources;
-mod repeat;
 #[cfg(test)]
 mod tests;
 mod ui;
@@ -29,22 +30,25 @@ mod visual;
 mod wildmenu;
 mod window;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::buffer::{Buffer, Pos, text};
 use crate::config::{Config, Keymap, Options};
 use crate::error::Error;
+use crate::render::palettes;
 use crate::term::Key;
+pub use cheatsheet::{Card, Cheatsheet};
+use cmdhistory::CmdHistory;
+pub use complete::{Completion, MENU_HEIGHT, words_of};
+pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
 use motion::Motion;
 use operator::Operator;
-pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
-pub use cheatsheet::Card;
-pub use complete::{Completion, MENU_HEIGHT, words_of};
+pub use picker::{Item, Picker, Target};
+pub use prompt::Prompt;
+pub use ui::MenuEntry;
 pub use wildmenu::CmdCompletion;
-pub use picker::{Picker, Target};
-pub use window::{Layout, Rect, View, Window};
-
+pub use window::{Layout, Rect, Separator, View, Window, WindowId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -81,7 +85,9 @@ pub enum PickAction {
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Normal | Self::BufferPick(_) | Self::Picker | Self::Explorer | Self::Prompt | Self::Cheatsheet => "NORMAL",
+            Self::Normal | Self::BufferPick(_) | Self::Picker | Self::Explorer | Self::Prompt | Self::Cheatsheet => {
+                "NORMAL"
+            }
             Self::Insert => "INSERT",
             Self::Replace => "REPLACE",
             Self::Visual => "VISUAL",
@@ -103,7 +109,12 @@ pub enum Selection {
     Chars(Pos, Pos),
     Lines(usize, usize),
     /// Lines `top..=bottom`, char columns `left..=right`.
-    Block { top: usize, bottom: usize, left: usize, right: usize },
+    Block {
+        top: usize,
+        bottom: usize,
+        left: usize,
+        right: usize,
+    },
 }
 
 impl Selection {
@@ -111,7 +122,9 @@ impl Selection {
         match self {
             Self::Chars(start, end) => start <= p && p <= end,
             Self::Lines(first, last) => (first..=last).contains(&p.line),
-            Self::Block { top, bottom, left, right } => (top..=bottom).contains(&p.line) && (left..=right).contains(&p.col),
+            Self::Block { top, bottom, left, right } => {
+                (top..=bottom).contains(&p.line) && (left..=right).contains(&p.col)
+            }
         }
     }
 }
@@ -129,7 +142,6 @@ pub(crate) fn may_spawn() -> bool {
 /// snacks.notifier's default timeout.
 pub const NOTIFY_TIMEOUT: Duration = Duration::from_secs(3);
 
-
 /// Keys of a normal command typed so far, e.g. the `3d` of `3dw`.
 #[derive(Clone, Copy, Debug, Default)]
 struct Pending {
@@ -144,6 +156,7 @@ impl Pending {
     }
 }
 
+#[expect(clippy::struct_excessive_bools, reason = "independent UI flags, not a state machine")]
 pub struct Editor {
     pub buffers: Vec<Buffer>,
     pub current: usize,
@@ -182,7 +195,7 @@ pub struct Editor {
     /// Set by `<F7>` / `<Leader>t…`: the main loop suspends the editor and runs `$SHELL`.
     pub shell_requested: Option<Vec<String>>,
     last_picker: Option<Picker>,
-    recent: Vec<std::path::PathBuf>,
+    recent: Vec<PathBuf>,
     pub registers: registers::Registers,
     /// `"x` typed before the next yank, delete or put.
     register_name: Option<char>,
@@ -192,19 +205,22 @@ pub struct Editor {
     last_find: Option<(char, bool, bool)>,
     /// `<C-o>` history: file and position before each jump.
     /// File, anchor id in that file's buffer, and the position when recorded (if the buffer is gone).
-    jumps: Vec<(Option<std::path::PathBuf>, u64, Pos)>,
+    jumps: Vec<(Option<PathBuf>, u64, Pos)>,
     next_anchor: u64,
     /// For `gv`: the last visual selection and its mode.
     last_visual: Option<(Pos, Pos, Mode)>,
     /// `/` searches forward, `?` backward; `n` follows, `N` reverses.
     pub search_forward: bool,
     last_substitute: Option<(String, String, bool)>,
-    pub prompt: Option<prompt::Prompt>,
-    pub cheatsheet: Option<cheatsheet::Cheatsheet>,
+    pub prompt: Option<Prompt>,
+    pub cheatsheet: Option<Cheatsheet>,
     /// The insert-mode completion menu, when open.
     pub completion: Option<Completion>,
     /// The `:` completion menu, when open.
     pub cmd_completion: Option<CmdCompletion>,
+    /// `:` lines and `/` `?` patterns typed before, for `<Up>` / `<Down>`.
+    cmd_history: CmdHistory,
+    search_history: CmdHistory,
     /// `<C-o>` in insert mode: one normal command, then back to insert.
     insert_once: bool,
     /// Line as it was when `R` started, so backspace can restore it.
@@ -225,7 +241,7 @@ pub struct Editor {
 
 impl Editor {
     pub fn new(paths: &[String]) -> Self {
-        let mut editor = Self {
+        let mut editor: Editor = Self {
             buffers: Vec::new(),
             current: 0,
             mode: Mode::Normal,
@@ -234,7 +250,7 @@ impl Editor {
             message_at: Instant::now(),
             options: Options::default(),
             config: Config::default(),
-            colorscheme: "astrodark".into(),
+            colorscheme: palettes::DEFAULT.into(),
             keymaps: Vec::new(),
             typeahead: Vec::new(),
             typeahead_at: Instant::now(),
@@ -243,7 +259,7 @@ impl Editor {
             view_height: 1,
             quit: false,
             windows: vec![Window::new(0, 0, View::default())],
-            layout: Layout::Leaf(window::WindowId::first()),
+            layout: Layout::Leaf(WindowId::first()),
             active: 0,
             area: Rect { x: 0, y: 1, w: 80, h: 20 },
             next_window_id: 1,
@@ -268,6 +284,8 @@ impl Editor {
             cheatsheet: None,
             completion: None,
             cmd_completion: None,
+            cmd_history: CmdHistory::default(),
+            search_history: CmdHistory::default(),
             insert_once: false,
             replace_original: String::new(),
             history: Vec::new(),
@@ -299,8 +317,8 @@ impl Editor {
     }
 
     pub fn selection(&self) -> Option<Selection> {
-        let (a, b) = (self.anchor, self.buf().cursor);
-        let (start, end) = if a <= b { (a, b) } else { (b, a) };
+        let (a, b): (Pos, Pos) = (self.anchor, self.buf().cursor);
+        let (start, end): (Pos, Pos) = if a <= b { (a, b) } else { (b, a) };
         match self.mode {
             Mode::Visual => Some(Selection::Chars(start, end)),
             Mode::VisualLine => Some(Selection::Lines(start.line, end.line)),
@@ -316,9 +334,9 @@ impl Editor {
 
     /// Applies the config: options, keymaps and the text settings they drive.
     pub fn configure(&mut self, config: &Config) {
-        self.options = config.options.clone();
-        self.keymaps = config.keymaps.clone();
-        self.config = config.clone();
+        self.options.clone_from(&config.options);
+        self.keymaps.clone_from(&config.keymaps);
+        self.config.clone_from(config);
         self.dashboard &= self.options.dashboard;
         self.apply_options();
         if self.options.gitsigns {
@@ -329,13 +347,13 @@ impl Editor {
     }
 
     pub(super) fn apply_options(&mut self) {
-        let o = &self.options;
+        let o: &Options = &self.options;
         text::configure(o.tabstop, o.ignorecase, o.smartcase);
     }
 
     /// One key as typed: goes through user keymaps first, then the modes.
     pub fn handle(&mut self, key: Key) {
-        let key = self.translate_leader(key);
+        let key: Key = self.translate_leader(key);
         if self.map_key(key) {
             return;
         }
@@ -345,41 +363,41 @@ impl Editor {
     /// One key, after mappings.
     fn dispatch(&mut self, key: Key) {
         self.track_before(key);
-        let mode = self.mode;
-        let was_visual = matches!(mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock);
-        let insert_once = self.insert_once && mode == Mode::Normal;
-        let motion_key = matches!(mode, Mode::Normal | Mode::Visual | Mode::VisualLine | Mode::VisualBlock) && self.pending.prefix.is_none();
+        let mode: Mode = self.mode;
+        let was_visual: bool = matches!(mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock);
+        let insert_once: bool = self.insert_once && mode == Mode::Normal;
+        let motion_key: bool = matches!(mode, Mode::Normal | Mode::Visual | Mode::VisualLine | Mode::VisualBlock)
+            && self.pending.prefix.is_none();
         match mode {
             Mode::Normal => self.normal(key),
             Mode::Insert => self.insert(key),
-            Mode::Visual | Mode::VisualLine => self.visual(key),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock => self.visual(key),
             Mode::Command | Mode::Search => self.command_line(key),
             Mode::BufferPick(action) => self.pick(key, action),
             Mode::Picker => self.picker_key(key),
             Mode::Explorer => self.explorer_key(key),
             Mode::Replace => self.replace_key(key),
-            Mode::VisualBlock => self.visual(key),
             Mode::Prompt => self.prompt_key(key),
             Mode::Cheatsheet => self.cheatsheet_key(key),
         }
         if let Some(window) = self.windows.get_mut(self.active) {
             window.buffer = self.current;
         }
-        let motion = motion_key.then(|| Motion::from_key(key)).flatten();
-        let past_end = matches!(self.mode, Mode::Insert | Mode::Replace);
-        let buf = self.buf_mut();
+        let motion: Option<Motion> = motion_key.then(|| Motion::from_key(key)).flatten();
+        let past_end: bool = matches!(self.mode, Mode::Insert | Mode::Replace);
+        let buf: &mut Buffer = self.buf_mut();
         buf.clamp(past_end);
         // j/k keep aiming at the column they started from; anything else resets it.
-        let vertical = matches!(key, Key::Up | Key::Down | Key::PageUp | Key::PageDown)
-            || motion.is_some_and(Motion::is_vertical);
+        let vertical: bool =
+            matches!(key, Key::Up | Key::Down | Key::PageUp | Key::PageDown) || motion.is_some_and(Motion::is_vertical);
         if !vertical {
             buf.want_col = if motion == Some(Motion::LineEnd) { usize::MAX } else { buf.cursor.col };
         }
         // Leaving visual mode: remember the selection for `gv` and the `'<` / `'>` marks.
         if was_visual && !matches!(self.mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock) {
-            let (anchor, cursor) = (self.anchor, self.buf().cursor);
+            let (anchor, cursor): (Pos, Pos) = (self.anchor, self.buf().cursor);
             self.last_visual = Some((anchor, cursor, mode));
-            let buf = self.buf_mut();
+            let buf: &mut Buffer = self.buf_mut();
             buf.marks.insert('<', anchor.min(cursor));
             buf.marks.insert('>', anchor.max(cursor));
         }
@@ -409,18 +427,23 @@ impl Editor {
         }
         self.current = self.current.min(self.buffers.len() - 1);
         self.repair_windows();
-        let mut backups = Vec::new();
+        let mut backups: Vec<String> = Vec::new();
         for (i, buf) in self.buffers.iter_mut().enumerate() {
             buf.repair();
             if buf.is_dirty() {
-                let name: String = buf.name().chars().map(|c| if c.is_alphanumeric() || c == '.' { c } else { '_' }).collect();
-                let path = std::env::temp_dir().join(format!("lim-recover-{}-{i}-{name}", std::process::id()));
+                let name: String =
+                    buf.name().chars().map(|c| if c.is_alphanumeric() || c == '.' { c } else { '_' }).collect();
+                let path: PathBuf = std::env::temp_dir().join(format!("lim-recover-{}-{i}-{name}", std::process::id()));
                 if buf.write_copy(&path).is_ok() {
                     backups.push(path.display().to_string());
                 }
             }
         }
-        let saved = if backups.is_empty() { String::new() } else { format!("; unsaved buffers copied to {}", backups.join(", ")) };
+        let saved: String = if backups.is_empty() {
+            String::new()
+        } else {
+            format!("; unsaved buffers copied to {}", backups.join(", "))
+        };
         self.typeahead.clear();
         self.set_message(Message::Error(format!("internal error recovered ({detail}){saved}")));
     }
@@ -443,8 +466,10 @@ impl Editor {
 
     /// When the screen must be redrawn without a key: a notification fading or a mapping timing out.
     pub fn deadline(&self) -> Option<Instant> {
-        let notify = (self.message.is_some() && self.options.cmdheight == 0).then(|| self.message_at + NOTIFY_TIMEOUT);
-        let mapping = (!self.typeahead.is_empty()).then(|| self.typeahead_at + Duration::from_millis(self.options.timeoutlen));
+        let notify: Option<Instant> =
+            (self.message.is_some() && self.options.cmdheight == 0).then(|| self.message_at + NOTIFY_TIMEOUT);
+        let mapping: Option<Instant> =
+            (!self.typeahead.is_empty()).then(|| self.typeahead_at + Duration::from_millis(self.options.timeoutlen));
         notify.into_iter().chain(mapping).min()
     }
 
@@ -466,7 +491,7 @@ impl Editor {
         self.set_message(Message::Info(message.into()));
     }
 
-    fn error(&mut self, error: Error) {
+    fn error(&mut self, error: &Error) {
         self.set_message(Message::Error(error.to_string()));
     }
 }

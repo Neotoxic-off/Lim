@@ -1,4 +1,4 @@
-//! Icon sets: Nerd Font glyphs (AstroNvim's), plain Unicode for any font, or ASCII.
+//! Icon sets: Nerd Font glyphs (`AstroNvim`'s), plain Unicode for any font, or ASCII.
 //! Picked with the `iconset` option, `:iconset` or `<Leader>fI`.
 
 use crate::config::Options;

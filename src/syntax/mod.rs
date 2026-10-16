@@ -4,6 +4,7 @@
 mod lang;
 mod todo;
 
+use lang::Kind;
 pub use lang::{Lang, lang_for};
 pub use todo::{Todo, todo};
 
@@ -50,9 +51,9 @@ impl Cache {
     /// Groups for line `y`, scanning forward from the last known state.
     pub fn line(&mut self, lines: &[String], lang: &Lang, y: usize) -> Vec<Hl> {
         while self.starts.len() <= y {
-            let i = self.starts.len() - 1;
+            let i: usize = self.starts.len() - 1;
             let chars: Vec<char> = lines[i].chars().collect();
-            let end = highlight(&chars, lang, self.starts[i]).1;
+            let end: State = highlight(&chars, lang, self.starts[i]).1;
             self.starts.push(end);
         }
         let chars: Vec<char> = lines[y].chars().collect();
@@ -67,7 +68,7 @@ fn at(line: &[char], i: usize, pat: &str) -> bool {
 
 /// Index just past the region closer, honoring backslash escapes in strings.
 fn close_of(line: &[char], from: usize, close: &str, escapes: bool) -> Option<usize> {
-    let mut i = from;
+    let mut i: usize = from;
     while i < line.len() {
         if escapes && line[i] == '\\' {
             i += 2;
@@ -82,40 +83,41 @@ fn close_of(line: &[char], from: usize, close: &str, escapes: bool) -> Option<us
 
 /// One group per char of `line`, and the state the next line starts in.
 pub fn highlight(line: &[char], lang: &Lang, state: State) -> (Vec<Hl>, State) {
-    let mut hl = vec![Hl::Text; line.len()];
-    let mut region = state.region;
-    let mut i = 0;
+    if lang.kind == Kind::Markdown && state.region.is_none() && line.first() == Some(&'#') {
+        return (vec![Hl::Keyword; line.len()], state);
+    }
+    let mut hl: Vec<Hl> = vec![Hl::Text; line.len()];
+    let mut region: Option<usize> = state.region;
+    let mut i: usize = 0;
     while i < line.len() || region.is_some() {
         if let Some(r) = region {
-            let (_, close, group) = lang.regions[r];
-            match close_of(line, i, close, group == Hl::Str) {
-                Some(end) => {
-                    hl[i..end].fill(group);
-                    i = end;
-                    region = None;
-                }
-                None => {
-                    hl[i..].fill(group);
-                    return (hl, State { region });
-                }
+            let (_, close, group): (&str, &str, Hl) = lang.regions[r];
+            if let Some(end) = close_of(line, i, close, group == Hl::Str) {
+                hl[i..end].fill(group);
+                i = end;
+                region = None;
+            } else {
+                hl[i..].fill(group);
+                return (hl, State { region });
             }
             continue;
         }
         if let Some(r) = lang.regions.iter().position(|(open, ..)| at(line, i, open)) {
-            let (open, _, group) = lang.regions[r];
+            let (open, _, group): (&str, &str, Hl) = lang.regions[r];
             hl[i..i + open.len()].fill(group);
             i += open.len();
             region = Some(r);
             continue;
         }
-        let c = line[i];
-        let start = i;
-        if at(line, i, lang.comment) {
+        let c: char = line[i];
+        let start: usize = i;
+        if !lang.comment.is_empty() && at(line, i, lang.comment) {
             hl[i..].fill(Hl::Comment);
             break;
         } else if lang.quotes.contains(c) {
             i = close_of(line, i + 1, &c.to_string(), true).unwrap_or(line.len());
-            hl[start..i].fill(Hl::Str);
+            let key: bool = lang.kind == Kind::Config && line[i..].iter().find(|c| **c != ' ') == Some(&':');
+            hl[start..i].fill(if key { Hl::Property } else { Hl::Str });
         } else if c.is_ascii_digit() {
             while i < line.len() && (line[i].is_alphanumeric() || line[i] == '_' || line[i] == '.') {
                 i += 1;
@@ -126,8 +128,8 @@ pub fn highlight(line: &[char], lang: &Lang, state: State) -> (Vec<Hl>, State) {
                 i += 1;
             }
             let word: String = line[start..i].iter().collect();
-            let next = line[i..].iter().find(|c| **c != ' ').copied();
-            hl[start..i].fill(classify(&word, next, start.checked_sub(1).map(|p| line[p]), lang));
+            let next: Option<char> = line[i..].iter().find(|c| **c != ' ').copied();
+            hl[start..i].fill(classify(&word, next, &line[..start], lang));
         } else {
             i += 1;
         }
@@ -135,12 +137,23 @@ pub fn highlight(line: &[char], lang: &Lang, state: State) -> (Vec<Hl>, State) {
     (hl, State::default())
 }
 
-fn classify(word: &str, next: Option<char>, prev: Option<char>, lang: &Lang) -> Hl {
-    if lang.keywords.contains(&word) {
+/// The group of `word`, given the first non-blank char after it and the text before it.
+fn classify(word: &str, next: Option<char>, before: &[char], lang: &Lang) -> Hl {
+    let prev: Option<char> = before.last().copied();
+    match lang.kind {
+        Kind::Markup if prev == Some('<') || before.ends_with(&['<', '/']) => return Hl::Keyword,
+        Kind::Markup if next == Some('=') => return Hl::Property,
+        Kind::Config if matches!(next, Some(':' | '=')) => return Hl::Property,
+        Kind::Config if prev == Some('[') => return Hl::Type,
+        _ => {}
+    }
+    let key: String = if lang.ignore_case { word.to_ascii_lowercase() } else { word.to_owned() };
+    let key: &str = &key;
+    if lang.keywords.contains(&key) {
         Hl::Keyword
-    } else if lang.consts.contains(&word) {
+    } else if lang.consts.contains(&key) {
         Hl::Const
-    } else if lang.builtins.contains(&word) {
+    } else if lang.builtins.contains(&key) {
         Hl::Builtin
     } else if next == Some('!') && lang.macros {
         Hl::Macro
@@ -170,30 +183,44 @@ mod tests {
 
     #[test]
     fn tokens() {
-        let h = hl(r#"fn main() { let s = "a\"b"; // hi"#, "x.rs");
+        let h: Vec<Hl> = hl(r#"fn main() { let s = "a\"b"; // hi"#, "x.rs");
         assert_eq!(h[0], Hl::Keyword);
         assert_eq!(h[3], Hl::Func);
         assert_eq!(h[20], Hl::Str);
         assert_eq!(h[25], Hl::Str); // escaped quote stays inside the string
         assert_eq!(h[27], Hl::Text);
         assert_eq!(h.last(), Some(&Hl::Comment));
-        let h = hl("x = 42 -- c", "a.lua");
+        let h: Vec<Hl> = hl("x = 42 -- c", "a.lua");
         assert_eq!((h[4], h[8]), (Hl::Num, Hl::Comment));
     }
 
     #[test]
     fn multi_line_regions() {
-        let lines: Vec<String> = ["let a = 1; /* start", "still comment", "end */ let b", "--[[ lua"]
-            .map(String::from)
-            .into();
-        let rust = lang("x.rs");
-        let mut cache = Cache::default();
+        let lines: Vec<String> =
+            ["let a = 1; /* start", "still comment", "end */ let b", "--[[ lua"].map(String::from).into();
+        let rust: &Lang = lang("x.rs");
+        let mut cache: Cache = Cache::default();
         assert!(cache.line(&lines, rust, 1).iter().all(|h| *h == Hl::Comment));
-        let third = cache.line(&lines, rust, 2);
+        let third: Vec<Hl> = cache.line(&lines, rust, 2);
         assert_eq!((third[5], third[7]), (Hl::Comment, Hl::Keyword));
         cache.invalidate(0);
         assert_eq!(cache.line(&lines, rust, 2)[7], Hl::Keyword);
-        let lua = lang("x.lua");
+        let lua: &Lang = lang("x.lua");
         assert!(highlight(&lines[3].chars().collect::<Vec<_>>(), lua, State::default()).1 != State::default());
+    }
+
+    #[test]
+    fn non_code_rules() {
+        let h: Vec<Hl> = hl(r#"<a href="x">it's</a>"#, "x.html");
+        assert_eq!((h[1], h[3], h[8], h[14], h[18]), (Hl::Keyword, Hl::Property, Hl::Str, Hl::Text, Hl::Keyword));
+        let h: Vec<Hl> = hl("name: true # c", "x.yaml");
+        assert_eq!((h[0], h[6], h[13]), (Hl::Property, Hl::Const, Hl::Comment));
+        let h: Vec<Hl> = hl(r#"{"k": "v"}"#, "x.json");
+        assert_eq!((h[1], h[7]), (Hl::Property, Hl::Str));
+        assert_eq!(hl("[server]", "x.toml")[1], Hl::Type);
+        let h: Vec<Hl> = hl("SELECT x FROM t", "q.sql");
+        assert_eq!((h[0], h[7], h[9]), (Hl::Keyword, Hl::Text, Hl::Keyword));
+        assert!(hl("# Title", "a.md").iter().all(|h| *h == Hl::Keyword));
+        assert!(hl("a: b", "x.css").iter().all(|h| *h != Hl::Comment), "no line comment in CSS");
     }
 }

@@ -42,10 +42,10 @@ the start screen.
 | Area | What you get |
 |---|---|
 | Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`, `"-`, `"_`, `"+`) · marks and jump list that follow edits · `:s` and line ranges |
-| Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, page and line scrolling, `zz zt zb` |
+| Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, page and line scrolling, `<S-arrows>` (word / page), `zz zt zb` · `:` and `/` history |
 | Text objects | `iw` `aw` `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
-| AstroNvim look | 23 colorschemes (astrodark by default) · NvChad-style statusline · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
-| Code | keyword highlighting (Rust, Lua, Python, C/C++, JS/TS, Go, shell, TOML/YAML/JSON) with multi-line comments and strings · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
+| AstroNvim look | 24 colorschemes (NvChad's onedark by default) · NvChad-style statusline · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
+| Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) |
 | Git | signs against the index · hunk jumps · branches, log, file log, status and stash pickers · `git browse` · lazygit in one key · status colors in the file tree |
 | Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · sessions |
@@ -56,23 +56,24 @@ the start screen.
 
 ## Install
 
-Requirements: Rust 1.88+, Linux or macOS. A [Nerd Font](https://www.nerdfonts.com) for the default icons
+Requirements: Rust 1.88+, Linux, macOS or Windows 10+ (Windows Terminal or the console, not mintty). A [Nerd Font](https://www.nerdfonts.com) for the default icons
 (or `"iconset": "unicode"` / `"ascii"`). Truecolor is detected; other terminals get the 256-color palette.
 
 ```sh
 git clone <this repo> lim && cd lim
 cargo build --release
-install -m 755 target/release/lim ~/.local/bin/lim
+install -m 755 target/release/lim ~/.local/bin/lim   # Windows: copy target\release\lim.exe onto your PATH
 ```
 
-Optional, picked up when installed: `wl-copy`/`xclip`/`xsel`/`pbcopy` (clipboard), `lazygit`, `node`,
-`python3`, `btm`, `gdu`, `xdg-open`/`open` (`gx`, `<Leader>go`).
+Optional, picked up when installed: `wl-copy`/`xclip`/`xsel`/`pbcopy` (clipboard; Windows uses its own),
+`lazygit`, `node`, `python3`, `btm`, `gdu`, `xdg-open`/`open` (`gx`, `<Leader>go`; Windows uses `explorer`).
 
 ## Usage
 
 ```sh
 lim                    # start screen
 lim src/main.rs a.lua  # open files
+lim ../project         # work in that folder (explorer, finder, git, sessions)
 lim --print-config     # the documented default config
 lim --config-path      # where lim looks for config.json
 lim --help | --version
@@ -165,7 +166,7 @@ Inside a picker: type to filter, `<C-n>`/`<C-p>` (or arrows, `<C-j>`/`<C-k>`) to
 
 ### Terminal and tools
 
-`<F7>`, `<Leader>tf`, `<Leader>th`, `<Leader>tv` suspend lim and open your `$SHELL` (`exit` comes back);
+`<F7>`, `<Leader>tf`, `<Leader>th`, `<Leader>tv` suspend lim and open your `$SHELL` (`%COMSPEC%` on Windows; `exit` comes back);
 `<Leader>tl` lazygit, `<Leader>tn` node, `<Leader>tp` python, `<Leader>tt` btm, `<Leader>tu` gdu.
 Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
 
@@ -191,6 +192,9 @@ Everything usual, including: `R` replace mode, `<C-a>`/`<C-x>`, `gu`/`gU`/`g~`, 
 `gx`, `ge`, `g_`, `H`/`M`/`L`, `zz`/`zt`/`zb`, `<C-e>`/`<C-y>`, `m{a-z}` with `'`/`` ` ``, `''`, `<C-o>`,
 `"{register}`, `q{r}`/`@{r}`/`@@`, `?`, `;`/`,`, `&`. Visual block: `I`, `A`, `d`, `c`, `y`, `r`, `~`/`u`/`U`, `o`/`O`,
 blockwise put. Insert mode: `<C-r>{r}`, `<C-o>`, `<C-t>`/`<C-d>`, `<C-w>`, `<C-u>`.
+`<S-Left>`/`<S-Right>` move a word and `<S-Up>`/`<S-Down>` a page, in normal, visual (to grow the selection fast),
+insert and after an operator. On the `:` and `/` lines, `<Up>`/`<Down>` recall older / newer entries that start with
+what is typed (separate histories for commands and searches).
 Marks, `''` and `<C-o>` stay on their text when lines above are added or removed (and after undo);
 a letter mark goes away with its line, as in Vim.
 
@@ -204,7 +208,7 @@ Commands: `:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:enew` `:bn` `:bp` 
 
 ## Themes and icons
 
-**Colorschemes**: astrodark (default), astrolight, astromars, astrojupiter, catppuccin-mocha,
+**Colorschemes**: nvchad (default: NvChad's base46 onedark), astrodark, astrolight, astromars, astrojupiter, catppuccin-mocha,
 catppuccin-macchiato, catppuccin-frappe, catppuccin-latte, tokyonight-night, tokyonight-storm,
 tokyonight-moon, tokyonight-day, dracula, onedark, gruvbox, nord, nordic, night-owl, sonokai, kanagawa,
 rose-pine, rose-pine-moon, rose-pine-dawn. Colors come from each theme's own repository, mapped onto the
@@ -219,7 +223,9 @@ Switch with `<Leader>ft` (the editor recolors as you move through the list; `<Es
 
 ## Configuration
 
-lim reads `$LIM_CONFIG`, else `$XDG_CONFIG_HOME/lim/config.json`, else `~/.config/lim/config.json`.
+lim reads `$LIM_CONFIG`, else `$XDG_CONFIG_HOME/lim/config.json`, else `~/.config/lim/config.json`
+(`%APPDATA%\lim\config.json` on Windows; `lim --config-path` prints it). Sessions, recent files and the last
+colorscheme go to `$XDG_STATE_HOME/lim`, `~/.local/state/lim` or `%LOCALAPPDATA%\lim`.
 JSON with `//` comments and trailing commas. Every section is optional; anything invalid is reported in a
 notification and the default stays, so a broken config never stops the editor.
 
@@ -264,7 +270,7 @@ Names and defaults follow AstroNvim.
 | `showtabline` / `laststatus` / `winbar` | `true` | Tabline · statusline · per-window path bar |
 | `cmdheight` | `0` | `0`: notifications and an on-demand command line; `1`: permanent command line |
 | `clipboard` | `"unnamedplus"` | `""` keeps yanks inside lim |
-| `colorscheme` | unset | A theme name; unset uses the last one picked (astrodark at first) |
+| `colorscheme` | unset | A theme name; unset uses the last one picked (nvchad at first) |
 | `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"` or `"ascii"` |
 | `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |
@@ -308,13 +314,14 @@ Key notation: plain characters, `<Leader>`, `<CR>`, `<Esc>`, `<BS>`, `<Tab>`, `<
 ## How it is built
 
 No crates: the terminal is driven through a handful of libc calls (`tcsetattr`, `ioctl`, `select`, `read`,
-`signal`), and everything else is the standard library.
+`signal`) or, on Windows, kernel32 console calls with VT input and output, so both send the same escape
+sequences to one key decoder. The Windows clipboard is user32. Everything else is the standard library.
 
 ```
 src/
 ├── main.rs        startup, event loop, panic recovery
 ├── error.rs       Vim-worded errors (E32, E37, E492…)
-├── term/          raw mode, window size, SIGWINCH, key decoding
+├── term/          raw mode, window size, resize events, key decoding (sys/unix.rs, sys/windows.rs)
 ├── buffer/        lines, undo history, motions, text objects, git signs, file I/O
 ├── editor/        modes, operators, registers, keymaps, the built-in binding table, windows, picker,
 │                  file tree, which-key, cheat sheet, completion, sessions, prompts, clipboard, macros
@@ -342,14 +349,15 @@ src/
 
 Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics), completion, debugger, treesitter (a keyword
 highlighter stands in), plugins, an embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
-line wrapping, mouse, folds, spell checking, persistent undo, Windows. `:s` patterns are literal (plus
+line wrapping, mouse, folds, spell checking, persistent undo. `:s` patterns are literal (plus
 `\<`/`\>`), not regexes. Visual-block columns count characters, so tabs and wide characters select unevenly.
 
 ## Development
 
 ```sh
-cargo test                     # 51 tests, including a random-key fuzz over every mode and screen size
-cargo clippy --all-targets     # clean; unwrap/expect/panic are denied
+cargo test                     # 69 tests, including a random-key fuzz over every mode and screen size
+cargo clippy --all-targets     # pedantic, zero warnings; unwrap/expect/panic are denied
+cargo fmt --check              # rustfmt.toml, 120 columns
 ```
 
 Screenshots are real lim frames captured in a pseudo-terminal and rasterised.

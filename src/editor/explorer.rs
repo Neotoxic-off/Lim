@@ -1,9 +1,11 @@
 //! neo-tree: a file tree on the left (`<Leader>e` toggles, `<Leader>o` focuses).
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 use super::prompt::PromptAction;
 use super::{Editor, Mode};
@@ -48,7 +50,7 @@ pub struct Explorer {
 
 impl Explorer {
     pub fn new(root: PathBuf) -> Self {
-        let mut explorer = Self {
+        let mut explorer: Explorer = Self {
             root,
             entries: Vec::new(),
             cursor: 0,
@@ -64,32 +66,32 @@ impl Explorer {
 
     /// Re-reads the tree and git status, keeping the cursor on the same path when it still exists.
     pub fn refresh(&mut self) {
-        let selected = self.entries.get(self.cursor).map(|e| e.path.clone());
+        let selected: Option<PathBuf> = self.entries.get(self.cursor).map(|e| e.path.clone());
         self.git = git_status(&self.root);
         self.entries.clear();
-        let root = self.root.clone();
+        let root: PathBuf = self.root.clone();
         self.list(&root, 0);
         self.cursor = selected.and_then(|p| self.entries.iter().position(|e| e.path == p)).unwrap_or(0);
         self.cursor = self.cursor.min(self.entries.len().saturating_sub(1));
     }
 
     fn list(&mut self, dir: &Path, depth: usize) {
-        let Ok(read) = fs::read_dir(dir) else { return };
+        let Ok(read): io::Result<fs::ReadDir> = fs::read_dir(dir) else { return };
         let mut children: Vec<(String, PathBuf, bool)> = read
             .flatten()
             .take(MAX_ENTRIES)
             .map(|e| {
-                let path = e.path();
+                let path: PathBuf = e.path();
                 // Symlinked directories show as directories but are only listed when opened.
                 (e.file_name().to_string_lossy().into_owned(), path.clone(), path.is_dir())
             })
             .filter(|(name, _, _)| self.show_hidden || !name.starts_with('.'))
             .collect();
         children.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
-        let count = children.len();
+        let count: usize = children.len();
         for (i, (name, path, dir)) in children.into_iter().enumerate() {
-            let expanded = dir && self.expanded.contains(&path);
-            let git = self.status_of(&path, dir);
+            let expanded: bool = dir && self.expanded.contains(&path);
+            let git: Option<GitStatus> = self.status_of(&path, dir);
             self.entries.push(Entry { path: path.clone(), name, depth, dir, expanded, last: i + 1 == count, git });
             if expanded {
                 self.list(&path, depth + 1);
@@ -99,7 +101,7 @@ impl Explorer {
 
     /// A directory shows as modified when anything below it changed, like neo-tree.
     fn status_of(&self, path: &Path, dir: bool) -> Option<GitStatus> {
-        let rel = path.strip_prefix(&self.root).unwrap_or(path);
+        let rel: &Path = path.strip_prefix(&self.root).unwrap_or(path);
         if dir {
             self.git.keys().any(|p| p.starts_with(rel)).then_some(GitStatus::Modified)
         } else {
@@ -114,19 +116,19 @@ impl Explorer {
 
 /// `git status --porcelain` under `root`, by path relative to it.
 fn git_status(root: &Path) -> HashMap<PathBuf, GitStatus> {
-    let output = Command::new("git")
+    let output: io::Result<Output> = Command::new("git")
         .arg("-C")
         .arg(root)
         .args(["status", "--porcelain", "-z", "--untracked-files=all", "--relative"])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output();
-    let Ok(output) = output else { return HashMap::new() };
-    let text = String::from_utf8_lossy(&output.stdout);
+    let Ok(output): io::Result<Output> = output else { return HashMap::new() };
+    let text: Cow<'_, str> = String::from_utf8_lossy(&output.stdout);
     text.split('\0')
         .filter_map(|record| {
-            let (code, path) = (record.get(..2)?, record.get(3..)?);
-            let status = match code {
+            let (code, path): (&str, &str) = (record.get(..2)?, record.get(3..)?);
+            let status: GitStatus = match code {
                 "??" => GitStatus::Untracked,
                 c if c.contains('D') => GitStatus::Deleted,
                 c if c.starts_with('A') => GitStatus::Added,
@@ -141,7 +143,7 @@ impl Editor {
     /// `<Leader>e`
     pub(super) fn toggle_explorer(&mut self) {
         if self.explorer.take().is_none() {
-            let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let root: PathBuf = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             self.explorer = Some(Explorer::new(root));
             self.mode = Mode::Explorer;
         } else if self.mode == Mode::Explorer {
@@ -164,6 +166,7 @@ impl Editor {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "flat key dispatch: one arm per key")]
     pub(super) fn explorer_key(&mut self, key: Key) {
         // `<C-w>` window commands work from the tree too.
         if self.pending.prefix.take() == Some(super::ui::CTRL_W) {
@@ -181,11 +184,11 @@ impl Editor {
             self.pending.prefix = Some(super::ui::CTRL_W);
             return;
         }
-        let Some(explorer) = &mut self.explorer else {
+        let Some(explorer): &mut Option<Explorer> = &mut self.explorer else {
             self.mode = Mode::Normal;
             return;
         };
-        let last = explorer.entries.len().saturating_sub(1);
+        let last: usize = explorer.entries.len().saturating_sub(1);
         match key {
             Key::Char('j') | Key::Down => explorer.cursor = (explorer.cursor + 1).min(last),
             Key::Char('k') | Key::Up => explorer.cursor = explorer.cursor.saturating_sub(1),
@@ -199,16 +202,18 @@ impl Editor {
             }
             Key::Char('R') => explorer.refresh(),
             Key::Char('h') | Key::Left => {
-                let Some(entry) = explorer.selected().cloned() else { return };
+                let Some(entry): Option<Entry> = explorer.selected().cloned() else { return };
                 if entry.dir && entry.expanded {
                     explorer.expanded.remove(&entry.path);
                     explorer.refresh();
-                } else if let Some(parent) = explorer.entries[..explorer.cursor].iter().rposition(|e| e.depth < entry.depth) {
+                } else if let Some(parent) =
+                    explorer.entries[..explorer.cursor].iter().rposition(|e| e.depth < entry.depth)
+                {
                     explorer.cursor = parent;
                 }
             }
             Key::Enter | Key::Char('l' | 'o') | Key::Right => {
-                let Some(entry) = explorer.selected().cloned() else { return };
+                let Some(entry): Option<Entry> = explorer.selected().cloned() else { return };
                 if entry.dir {
                     if !explorer.expanded.remove(&entry.path) {
                         explorer.expanded.insert(entry.path);
@@ -227,24 +232,36 @@ impl Editor {
             }
             // neo-tree's file operations.
             Key::Char('a' | 'A') => {
-                let dir = explorer.selected().map_or_else(|| explorer.root.clone(), |e| {
-                    if e.dir { e.path.clone() } else { e.path.parent().map_or_else(|| explorer.root.clone(), Path::to_path_buf) }
-                });
-                let directory = key == Key::Char('A');
-                let title = if directory { "Add a directory" } else { "Add a file (end with / for a directory)" };
+                let dir: PathBuf = explorer.selected().map_or_else(
+                    || explorer.root.clone(),
+                    |e| {
+                        if e.dir {
+                            e.path.clone()
+                        } else {
+                            e.path.parent().map_or_else(|| explorer.root.clone(), Path::to_path_buf)
+                        }
+                    },
+                );
+                let directory: bool = key == Key::Char('A');
+                let title: &str = if directory { "Add a directory" } else { "Add a file (end with / for a directory)" };
                 self.open_prompt(title, "", PromptAction::TreeAdd { dir, directory });
             }
             Key::Char('r') => {
-                let Some(entry) = explorer.selected().cloned() else { return };
+                let Some(entry): Option<Entry> = explorer.selected().cloned() else { return };
                 self.open_prompt("Rename", &entry.name, PromptAction::TreeRename { from: entry.path });
             }
             Key::Char('d') => {
-                let Some(entry) = explorer.selected().cloned() else { return };
-                self.open_prompt(&format!("Delete {}? (y/N)", entry.name), "", PromptAction::TreeDelete { path: entry.path });
+                let Some(entry): Option<Entry> = explorer.selected().cloned() else { return };
+                self.open_prompt(
+                    &format!("Delete {}? (y/N)", entry.name),
+                    "",
+                    PromptAction::TreeDelete { path: entry.path },
+                );
             }
             Key::Char('c' | 'm') => {
-                let Some(entry) = explorer.selected().cloned() else { return };
-                let shown = entry.path.strip_prefix(&explorer.root).unwrap_or(&entry.path).display().to_string();
+                let Some(entry): Option<Entry> = explorer.selected().cloned() else { return };
+                let shown: String =
+                    entry.path.strip_prefix(&explorer.root).unwrap_or(&entry.path).display().to_string();
                 if key == Key::Char('c') {
                     self.open_prompt("Copy to", &shown, PromptAction::TreeCopy { from: entry.path });
                 } else {
@@ -252,13 +269,16 @@ impl Editor {
                 }
             }
             Key::Char('y' | 'Y') => {
-                let Some(entry) = explorer.selected().cloned() else { return };
-                let text = if key == Key::Char('Y') { entry.path.display().to_string() } else { entry.name };
-                self.store_register(super::registers::Register { text: text.clone(), linewise: false, block: false }, true);
+                let Some(entry): Option<Entry> = explorer.selected().cloned() else { return };
+                let text: String = if key == Key::Char('Y') { entry.path.display().to_string() } else { entry.name };
+                self.store_register(
+                    super::registers::Register { text: text.clone(), linewise: false, block: false },
+                    true,
+                );
                 self.info(format!("Copied {text}"));
             }
             Key::Char('s' | 'S') => {
-                let Some(entry) = explorer.selected().cloned().filter(|e| !e.dir) else { return };
+                let Some(entry): Option<Entry> = explorer.selected().cloned().filter(|e| !e.dir) else { return };
                 explorer.focused = false;
                 self.mode = Mode::Normal;
                 self.dashboard = false;
@@ -267,16 +287,16 @@ impl Editor {
             }
             Key::Char('P') => {
                 // Preview: open the file but keep the focus in the tree.
-                let Some(entry) = explorer.selected().cloned().filter(|e| !e.dir) else { return };
+                let Some(entry): Option<Entry> = explorer.selected().cloned().filter(|e| !e.dir) else { return };
                 self.dashboard = false;
                 self.open(&entry.path);
             }
             Key::Char('O') => {
-                let Some(entry) = explorer.selected().cloned() else { return };
+                let Some(entry): Option<Entry> = explorer.selected().cloned() else { return };
                 super::extras::open_external(&entry.path.display().to_string());
             }
             Key::Char('.') => {
-                let Some(entry) = explorer.selected().cloned().filter(|e| e.dir) else { return };
+                let Some(entry): Option<Entry> = explorer.selected().cloned().filter(|e| e.dir) else { return };
                 explorer.root = entry.path;
                 explorer.cursor = 0;
                 explorer.refresh();

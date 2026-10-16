@@ -24,12 +24,18 @@ pub enum Motion {
     PageDown,
     PageUp,
     MatchPair,
-    Find { ch: char, forward: bool, till: bool },
+    Find {
+        ch: char,
+        forward: bool,
+        till: bool,
+    },
     WordForwardBig,
     WordBackBig,
     WordEndBig,
     /// `ge` / `gE`
-    WordEndBack { big: bool },
+    WordEndBack {
+        big: bool,
+    },
     /// `H`, `M`, `L`
     ScreenTop,
     ScreenMiddle,
@@ -37,8 +43,13 @@ pub enum Motion {
     /// `g_`
     LastNonBlank,
     /// `'x` (line) and `` `x `` (exact position)
-    Mark { name: char, exact: bool },
-    SearchNext { forward: bool },
+    Mark {
+        name: char,
+        exact: bool,
+    },
+    SearchNext {
+        forward: bool,
+    },
 }
 
 /// How an operator treats the text up to the motion target.
@@ -60,8 +71,8 @@ impl Motion {
             Key::Char('0') | Key::Home => Self::LineStart,
             Key::Char('^') => Self::FirstNonBlank,
             Key::Char('$') | Key::End => Self::LineEnd,
-            Key::Char('w') => Self::WordForward,
-            Key::Char('b') => Self::WordBack,
+            Key::Char('w') | Key::ShiftRight => Self::WordForward,
+            Key::Char('b') | Key::ShiftLeft => Self::WordBack,
             Key::Char('e') => Self::WordEnd,
             Key::Char('W') => Self::WordForwardBig,
             Key::Char('B') => Self::WordBackBig,
@@ -75,8 +86,8 @@ impl Motion {
             Key::Char('%') => Self::MatchPair,
             Key::Ctrl('d') => Self::HalfPageDown,
             Key::Ctrl('u') => Self::HalfPageUp,
-            Key::Ctrl('f') | Key::PageDown => Self::PageDown,
-            Key::Ctrl('b') | Key::PageUp => Self::PageUp,
+            Key::Ctrl('f') | Key::PageDown | Key::ShiftDown => Self::PageDown,
+            Key::Ctrl('b') | Key::PageUp | Key::ShiftUp => Self::PageUp,
             Key::Char('n') => Self::SearchNext { forward: true },
             Key::Char('N') => Self::SearchNext { forward: false },
             _ => return None,
@@ -84,10 +95,7 @@ impl Motion {
     }
 
     pub fn is_vertical(self) -> bool {
-        matches!(
-            self,
-            Self::Up | Self::Down | Self::HalfPageDown | Self::HalfPageUp | Self::PageDown | Self::PageUp
-        )
+        matches!(self, Self::Up | Self::Down | Self::HalfPageDown | Self::HalfPageUp | Self::PageDown | Self::PageUp)
     }
 
     /// Motions that record a jump (`<C-o>`, `''`), as in Vim.
@@ -109,21 +117,33 @@ impl Motion {
 
     pub fn span(self) -> Span {
         match self {
-            Self::FileStart | Self::FileEnd | Self::ScreenTop | Self::ScreenMiddle | Self::ScreenBottom => Span::Linewise,
-            Self::Mark { exact, .. } => if exact { Span::Exclusive } else { Span::Linewise },
-            _ if self.is_vertical() => Span::Linewise,
-            Self::LineEnd | Self::WordEnd | Self::WordEndBig | Self::WordEndBack { .. } | Self::LastNonBlank | Self::MatchPair | Self::Find { forward: true, .. } => {
-                Span::Inclusive
+            Self::FileStart | Self::FileEnd | Self::ScreenTop | Self::ScreenMiddle | Self::ScreenBottom => {
+                Span::Linewise
             }
+            Self::Mark { exact, .. } => {
+                if exact {
+                    Span::Exclusive
+                } else {
+                    Span::Linewise
+                }
+            }
+            _ if self.is_vertical() => Span::Linewise,
+            Self::LineEnd
+            | Self::WordEnd
+            | Self::WordEndBig
+            | Self::WordEndBack { .. }
+            | Self::LastNonBlank
+            | Self::MatchPair
+            | Self::Find { forward: true, .. } => Span::Inclusive,
             _ => Span::Exclusive,
         }
     }
 
     /// Where `count` repetitions land; None when the motion fails (no match).
     pub fn target(self, buf: &Buffer, count: Option<usize>, view_height: usize, pattern: &str) -> Option<Pos> {
-        let n = count.unwrap_or(1);
-        let Pos { line, col } = buf.cursor;
-        let last = buf.last_line();
+        let n: usize = count.unwrap_or(1);
+        let Pos { line, col }: Pos = buf.cursor;
+        let last: usize = buf.last_line();
         let vertical = |l: usize| Pos::new(l, buf.want_col);
         let repeat = |step: &dyn Fn(Pos) -> Pos| (0..n).fold(buf.cursor, |p, _| step(p));
         Some(match self {
@@ -138,7 +158,7 @@ impl Motion {
             Self::LineStart => Pos::new(line, 0),
             Self::FirstNonBlank => Pos::new(line, buf.first_non_blank(line)),
             Self::LineEnd => {
-                let l = (line + n - 1).min(last);
+                let l: usize = (line + n - 1).min(last);
                 Pos::new(l, buf.line_len(l).saturating_sub(1))
             }
             Self::WordForward => repeat(&|p| buf.word_forward(p, false)),
@@ -147,13 +167,22 @@ impl Motion {
             Self::ParagraphForward => Pos::new((0..n).fold(line, |l, _| buf.paragraph(l, true)), 0),
             Self::ParagraphBack => Pos::new((0..n).fold(line, |l, _| buf.paragraph(l, false)), 0),
             Self::FileStart | Self::FileEnd => {
-                let default = if self == Self::FileStart { 0 } else { last };
-                let l = count.map_or(default, |c| c.saturating_sub(1)).min(last);
+                let default: usize = if self == Self::FileStart { 0 } else { last };
+                let l: usize = count.map_or(default, |c| c.saturating_sub(1)).min(last);
                 Pos::new(l, buf.first_non_blank(l))
             }
             Self::Find { ch, forward, till } => {
-                let i = buf.find_char(buf.cursor, ch, forward, n)?;
-                Pos::new(line, if !till { i } else if forward { i - 1 } else { i + 1 })
+                let i: usize = buf.find_char(buf.cursor, ch, forward, n)?;
+                Pos::new(
+                    line,
+                    if !till {
+                        i
+                    } else if forward {
+                        i - 1
+                    } else {
+                        i + 1
+                    },
+                )
             }
             Self::MatchPair => buf.matching_bracket(buf.cursor)?,
             Self::WordForwardBig => repeat(&|p| buf.word_forward(p, true)),
@@ -161,9 +190,9 @@ impl Motion {
             Self::WordEndBig => repeat(&|p| buf.word_end(p, true)),
             Self::WordEndBack { big } => repeat(&|p| buf.word_end_back(p, big)),
             Self::ScreenTop | Self::ScreenMiddle | Self::ScreenBottom => {
-                let top = buf.top.min(last);
-                let bottom = (buf.top + view_height.max(1) - 1).min(last);
-                let l = match self {
+                let top: usize = buf.top.min(last);
+                let bottom: usize = (buf.top + view_height.max(1) - 1).min(last);
+                let l: usize = match self {
                     Self::ScreenTop => (top + n - 1).min(bottom),
                     Self::ScreenBottom => bottom.saturating_sub(n - 1).max(top),
                     _ => top + (bottom - top) / 2,
@@ -171,13 +200,13 @@ impl Motion {
                 Pos::new(l, buf.first_non_blank(l))
             }
             Self::LastNonBlank => {
-                let l = (line + n - 1).min(last);
-                let trimmed = buf.line(l).trim_end();
+                let l: usize = (line + n - 1).min(last);
+                let trimmed: &str = buf.line(l).trim_end();
                 Pos::new(l, crate::buffer::text::char_len(trimmed).saturating_sub(1))
             }
             Self::Mark { name, exact } => {
-                let at = *buf.marks.get(&name)?;
-                let l = at.line.min(last);
+                let at: Pos = *buf.marks.get(&name)?;
+                let l: usize = at.line.min(last);
                 if exact { Pos::new(l, at.col) } else { Pos::new(l, buf.first_non_blank(l)) }
             }
             Self::SearchNext { forward } => buf.search(pattern, buf.cursor, forward)?,

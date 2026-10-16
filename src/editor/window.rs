@@ -1,4 +1,4 @@
-//! Windows and their split layout. AstroNvim sets `splitright` and `splitbelow`, so new windows
+//! Windows and their split layout. `AstroNvim` sets `splitright` and `splitbelow`, so new windows
 //! open right of / below the current one and take the focus.
 
 use crate::buffer::{Buffer, Pos};
@@ -53,7 +53,11 @@ pub enum Layout {
     Leaf(WindowId),
     /// `vertical`: children side by side (`:vsplit`), else stacked (`:split`).
     /// `adjust` holds each child's size change from `<C-arrows>`, in cells.
-    Split { vertical: bool, children: Vec<Layout>, adjust: Vec<i32> },
+    Split {
+        vertical: bool,
+        children: Vec<Layout>,
+        adjust: Vec<i32>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -84,12 +88,12 @@ pub enum Direction {
 /// Sizes of `n` children sharing `total` cells with one-cell separators between them,
 /// equal shares moved by `adjust` (each child keeps at least one cell).
 fn split_sizes(total: usize, n: usize, adjust: &[i32]) -> Vec<usize> {
-    let avail = total.saturating_sub(n.saturating_sub(1));
-    let (base, extra) = (avail / n.max(1), avail % n.max(1));
+    let avail: usize = total.saturating_sub(n.saturating_sub(1));
+    let (base, extra): (usize, usize) = (avail / n.max(1), avail % n.max(1));
     let mut sizes: Vec<usize> = (0..n)
         .map(|i| {
-            let size = (base + usize::from(i < extra)) as i64 + i64::from(adjust.get(i).copied().unwrap_or(0));
-            size.clamp(1, avail.max(1) as i64) as usize
+            let shift: isize = adjust.get(i).and_then(|&a| isize::try_from(a).ok()).unwrap_or(0);
+            (base + usize::from(i < extra)).saturating_add_signed(shift).clamp(1, avail.max(1))
         })
         .collect();
     // Clamping may break the total: give or take the difference from the largest children.
@@ -112,7 +116,8 @@ impl Layout {
     pub fn insert_beside(&mut self, target: WindowId, new: WindowId, vertical: bool) -> bool {
         match self {
             Self::Leaf(id) if *id == target => {
-                *self = Self::Split { vertical, children: vec![Self::Leaf(target), Self::Leaf(new)], adjust: vec![0, 0] };
+                *self =
+                    Self::Split { vertical, children: vec![Self::Leaf(target), Self::Leaf(new)], adjust: vec![0, 0] };
                 true
             }
             Self::Leaf(_) => false,
@@ -131,7 +136,7 @@ impl Layout {
 
     /// Removes leaf `id`, collapsing splits left with a single child.
     pub fn remove(&mut self, id: WindowId) -> bool {
-        let Self::Split { children, adjust, .. } = self else { return false };
+        let Self::Split { children, adjust, .. }: &mut Layout = self else { return false };
         if let Some(i) = children.iter().position(|c| *c == Self::Leaf(id)) {
             children.remove(i);
             adjust.clear();
@@ -149,15 +154,15 @@ impl Layout {
 
     /// Grows window `target` by `delta` cells along the nearest split of that orientation.
     pub fn resize(&mut self, target: WindowId, horizontal: bool, delta: i32) -> bool {
-        let Self::Split { vertical, children, adjust } = self else { return false };
-        let Some(i) = children.iter().position(|c| c.contains(target)) else { return false };
+        let Self::Split { vertical, children, adjust }: &mut Layout = self else { return false };
+        let Some(i): Option<usize> = children.iter().position(|c| c.contains(target)) else { return false };
         if children[i].resize(target, horizontal, delta) {
             return true;
         }
         if *vertical != horizontal || children.len() < 2 {
             return false;
         }
-        let neighbour = if i + 1 < children.len() { i + 1 } else { i - 1 };
+        let neighbour: usize = if i + 1 < children.len() { i + 1 } else { i - 1 };
         adjust[i] += delta;
         adjust[neighbour] -= delta;
         true
@@ -182,10 +187,10 @@ impl Layout {
         match self {
             Self::Leaf(id) => leaf(*id, area),
             Self::Split { vertical, children, adjust } => {
-                let total = if *vertical { area.w } else { area.h };
-                let mut offset = 0;
+                let total: usize = if *vertical { area.w } else { area.h };
+                let mut offset: usize = 0;
                 for (i, (child, size)) in children.iter().zip(split_sizes(total, children.len(), adjust)).enumerate() {
-                    let rect = if *vertical {
+                    let rect: Rect = if *vertical {
                         Rect { x: area.x + offset, w: size, ..area }
                     } else {
                         Rect { y: area.y + offset, h: size, ..area }
@@ -230,32 +235,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn split_sizes_share_and_clamp() {
+        assert_eq!(split_sizes(21, 2, &[]), [10, 10]);
+        assert_eq!(split_sizes(22, 2, &[]), [11, 10], "the remainder goes first");
+        assert_eq!(split_sizes(21, 2, &[-2, 2]), [8, 12]);
+        assert_eq!(split_sizes(21, 2, &[-50, 50]), [1, 19], "each child keeps a cell");
+        assert_eq!(split_sizes(3, 3, &[]), [1, 1, 1]);
+        assert!(split_sizes(10, 0, &[]).is_empty());
+    }
+
+    #[test]
     fn layout_rects_and_neighbors() {
-        let (a, b, c) = (WindowId(0), WindowId(1), WindowId(2));
-        let mut layout = Layout::Leaf(a);
+        let (a, b, c): (WindowId, WindowId, WindowId) = (WindowId(0), WindowId(1), WindowId(2));
+        let mut layout: Layout = Layout::Leaf(a);
         assert!(layout.insert_beside(a, b, true));
         assert!(layout.insert_beside(b, c, false));
-        let area = Rect { x: 0, y: 1, w: 21, h: 11 };
-        let mut rects = Vec::new();
+        let area: Rect = Rect { x: 0, y: 1, w: 21, h: 11 };
+        let mut rects: Vec<(WindowId, Rect)> = Vec::new();
         layout.rects(area, &mut rects);
-        assert_eq!(rects, vec![
-            (a, Rect { x: 0, y: 1, w: 10, h: 11 }),
-            (b, Rect { x: 11, y: 1, w: 10, h: 5 }),
-            (c, Rect { x: 11, y: 7, w: 10, h: 5 }),
-        ]);
-        let mut seps = Vec::new();
+        assert_eq!(
+            rects,
+            vec![
+                (a, Rect { x: 0, y: 1, w: 10, h: 11 }),
+                (b, Rect { x: 11, y: 1, w: 10, h: 5 }),
+                (c, Rect { x: 11, y: 7, w: 10, h: 5 }),
+            ]
+        );
+        let mut seps: Vec<Separator> = Vec::new();
         layout.separators(area, &mut seps);
-        assert_eq!(seps, vec![
-            Separator { x: 10, y: 1, len: 11, vertical: true },
-            Separator { x: 11, y: 6, len: 10, vertical: false },
-        ]);
+        assert_eq!(
+            seps,
+            vec![
+                Separator { x: 10, y: 1, len: 11, vertical: true },
+                Separator { x: 11, y: 6, len: 10, vertical: false },
+            ]
+        );
         assert_eq!(neighbor(&rects, rects[0].1, 8, 0, Direction::Right), Some(c));
         assert_eq!(neighbor(&rects, rects[2].1, 7, 11, Direction::Up), Some(b));
         assert_eq!(neighbor(&rects, rects[1].1, 1, 11, Direction::Right), None);
         assert!(layout.remove(b));
         assert!(layout.resize(c, true, 3));
-        assert_eq!(layout, Layout::Split { vertical: true, children: vec![Layout::Leaf(a), Layout::Leaf(c)], adjust: vec![-3, 3] });
-        let mut rects = Vec::new();
+        assert_eq!(
+            layout,
+            Layout::Split { vertical: true, children: vec![Layout::Leaf(a), Layout::Leaf(c)], adjust: vec![-3, 3] }
+        );
+        let mut rects: Vec<(WindowId, Rect)> = Vec::new();
         layout.rects(area, &mut rects);
         assert_eq!((rects[0].1.w, rects[1].1.w), (7, 13));
         assert!(layout.remove(c));

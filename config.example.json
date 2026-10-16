@@ -36,7 +36,7 @@
     "foldcolumn": true,
     "colorhighlight": true,       // #RRGGBB shown in its color
     "todocomments": true,         // TODO: FIX: HACK: NOTE: … highlighted
-    // "colorscheme": "catppuccin-mocha",  // unset: the last one picked with <Leader>ft (astrodark at first)
+    // "colorscheme": "catppuccin-mocha",  // unset: the last one picked with <Leader>ft (nvchad at first)
     "iconset": "nerd",            // "nerd", "unicode" or "ascii"
     "completion": true            // words from open buffers while typing
   },

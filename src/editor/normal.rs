@@ -1,5 +1,6 @@
 //! Normal mode: counts, operators, two-key prefixes and single-key commands.
 
+use super::bindings::{self, Action};
 use super::command::Command;
 use super::motion::{Motion, Span};
 use super::operator::Operator;
@@ -7,11 +8,10 @@ use super::picker::PickerKind;
 use super::prompt::PromptAction;
 use super::registers::Register;
 use super::session;
-use super::bindings::{self, Action};
 use super::ui::{CTRL_W, LEADER_F};
 use super::window::Direction;
 use super::{Editor, Mode, Pending};
-use crate::buffer::{CharClass, Pos, text};
+use crate::buffer::{Buffer, CharClass, Pos, text};
 use crate::config::keys::LEADER;
 use crate::error::Error;
 use crate::term::Key;
@@ -23,6 +23,7 @@ const PREFIXES: &str = "gfFtTrZq@[]\"m'`z\u{F8FF}";
 pub(super) const VISUAL_PREFIXES: &str = "gfFtTiar\"'`\u{F8FF}";
 
 impl Editor {
+    #[expect(clippy::too_many_lines, reason = "flat key dispatch: one arm per key")]
     pub(super) fn normal(&mut self, key: Key) {
         self.buf_mut().seal();
         // With a command line, a message stays until the next command; as a notification it fades.
@@ -41,7 +42,7 @@ impl Editor {
         }
         // snacks.dashboard: its own keys; everything that edits text is ignored while it shows.
         if self.dashboard && self.pending.is_empty() {
-            let picker = match key {
+            let picker: Option<PickerKind> = match key {
                 Key::Char('n') => {
                     self.dashboard = false;
                     return self.new_buffer();
@@ -63,7 +64,7 @@ impl Editor {
             return;
         }
         // `i`/`a` after an operator start a text object (`diw`, `ca(`), otherwise they insert.
-        let objects = if self.pending.op.is_some() { "ia" } else { "" };
+        let objects: &str = if self.pending.op.is_some() { "ia" } else { "" };
         if self.push_count(key) || self.push_prefix(key, PREFIXES) || self.push_prefix(key, objects) {
             return;
         }
@@ -84,8 +85,8 @@ impl Editor {
         if let Some(motion) = Motion::from_key(key) {
             return self.run_motion(motion);
         }
-        let count = self.pending.count.take();
-        let n = count.unwrap_or(1);
+        let count: Option<usize> = self.pending.count.take();
+        let n: usize = count.unwrap_or(1);
         if let Some(op) = self.pending.op.take() {
             if key == Key::Char(op.key()) {
                 self.apply_count_lines(op, n);
@@ -98,8 +99,8 @@ impl Editor {
             self.pending = Pending { count, op: Some(op), prefix: None };
             return;
         }
-        let here = self.buf().cursor;
-        let len = self.buf().line_len(here.line);
+        let here: Pos = self.buf().cursor;
+        let len: usize = self.buf().line_len(here.line);
         let at = |col: usize| Pos::new(here.line, col);
         match key {
             Key::Char('i') => self.start_insert(here.col),
@@ -137,11 +138,11 @@ impl Editor {
             }
             Key::Char('R') => self.start_replace(),
             Key::Char('&') => self.repeat_substitute(),
-            Key::Ctrl('a') => self.increment(n as i64),
-            Key::Ctrl('x') => self.increment(-(n as i64)),
+            Key::Ctrl('a') => self.increment(i64::try_from(n).unwrap_or(i64::MAX)),
+            Key::Ctrl('x') => self.increment(i64::try_from(n).map_or(i64::MIN, |n| -n)),
             Key::Ctrl('o') => self.jump_back(n),
-            Key::Ctrl('e') => self.scroll_view(1, n),
-            Key::Ctrl('y') => self.scroll_view(-1, n),
+            Key::Ctrl('e') => self.scroll_view(true, n),
+            Key::Ctrl('y') => self.scroll_view(false, n),
             Key::Ctrl('v') => self.start_visual(Mode::VisualBlock),
             Key::CtrlUp => self.resize_window(false, 2),
             Key::CtrlDown => self.resize_window(false, -2),
@@ -155,8 +156,8 @@ impl Editor {
             Key::Ctrl('k') => self.focus_direction(Direction::Up),
             Key::Ctrl('l') => self.focus_direction(Direction::Right),
             Key::Ctrl('w') => self.pending.prefix = Some(CTRL_W),
-            Key::Tab => self.cycle(n as isize),
-            Key::BackTab => self.cycle(-(n as isize)),
+            Key::Tab => self.cycle(true, n),
+            Key::BackTab => self.cycle(false, n),
             Key::Ctrl('s') => self.run(Command::Write { path: None, force: false }),
             Key::Ctrl('q') => self.run(Command::Quit { force: true }),
             _ => {}
@@ -164,11 +165,11 @@ impl Editor {
     }
 
     pub(super) fn push_count(&mut self, key: Key) -> bool {
-        let Key::Char(c @ '0'..='9') = key else { return false };
+        let Key::Char(c @ '0'..='9'): Key = key else { return false };
         if c == '0' && self.pending.count.is_none() {
             return false;
         }
-        let digit = c as usize - '0' as usize;
+        let digit: usize = c as usize - '0' as usize;
         self.pending.count = Some((self.pending.count.unwrap_or(0) * 10 + digit).min(99_999));
         true
     }
@@ -184,7 +185,7 @@ impl Editor {
     }
 
     pub(super) fn prefixed(&mut self, prefix: char, key: Key) {
-        let c = match key {
+        let c: char = match key {
             Key::Char(c) => c,
             Key::Ctrl(c) if prefix == CTRL_W => c,
             Key::Enter if prefix == LEADER_F => '\r',
@@ -193,11 +194,11 @@ impl Editor {
                 return;
             }
         };
-        let n = self.pending.count.unwrap_or(1);
+        let n: usize = self.pending.count.unwrap_or(1);
         // Keys that take an argument rather than naming a command.
         match (prefix, c) {
             ('f' | 'F' | 't' | 'T', ch) => {
-                let till = matches!(prefix, 't' | 'T');
+                let till: bool = matches!(prefix, 't' | 'T');
                 self.last_find = Some((ch, prefix.is_ascii_lowercase(), till));
                 return self.run_motion(Motion::Find { ch, forward: prefix.is_ascii_lowercase(), till });
             }
@@ -207,7 +208,7 @@ impl Editor {
             }
             ('m', name) => self.set_mark(name),
             ('\'' | '`', name) => {
-                let name = if matches!(name, '\'' | '`') { '\'' } else { name };
+                let name: char = if matches!(name, '\'' | '`') { '\'' } else { name };
                 return self.run_motion(Motion::Mark { name, exact: prefix == '`' });
             }
             ('r', ch) => self.replace_chars(ch, n),
@@ -227,7 +228,7 @@ impl Editor {
 
     /// Runs a binding from the table; true when it left a prefix or operator waiting.
     fn run_action(&mut self, action: Action, n: usize) -> bool {
-        let visual = matches!(self.mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock);
+        let visual: bool = matches!(self.mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock);
         match action {
             Action::Group(sub) => {
                 self.pending.prefix = Some(sub);
@@ -239,8 +240,8 @@ impl Editor {
             }
             // In visual mode an operator applies to the selection at once.
             Action::Operator(op) if visual => {
-                let span = if self.mode == Mode::Visual { Span::Inclusive } else { Span::Linewise };
-                let cursor = self.buf().cursor;
+                let span: Span = if self.mode == Mode::Visual { Span::Inclusive } else { Span::Linewise };
+                let cursor: Pos = self.buf().cursor;
                 self.mode = Mode::Normal;
                 self.buf_mut().seal();
                 self.apply(op, self.anchor, cursor, span);
@@ -259,7 +260,7 @@ impl Editor {
             Action::NewFile => self.run(Command::New),
             Action::CloseBuffer { force } => self.run(Command::BufferDelete { force }),
             Action::RenameFile => {
-                let current = self.buf().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+                let current: String = self.buf().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
                 self.open_prompt("New Filename", &current, PromptAction::RenameFile);
             }
             Action::ToggleExplorer => self.toggle_explorer(),
@@ -273,7 +274,7 @@ impl Editor {
             Action::CloseBuffers(set) => self.close_buffers(set),
             Action::PreviousBuffer => self.go_previous_buffer(),
             Action::SortBuffers(by) => self.sort_buffers(by),
-            Action::CycleBuffer(step) => self.cycle(step * n as isize),
+            Action::CycleBuffer { forward } => self.cycle(forward, n),
             Action::Shell => self.shell_requested = Some(Vec::new()),
             Action::Tool(argv) => self.run_tool(argv),
             Action::GitBrowse => self.git_browse(),
@@ -281,7 +282,7 @@ impl Editor {
             Action::HunkEdge { last } => self.jump_hunk_edge(last),
             Action::Reference { forward } => self.jump_reference(forward, n),
             Action::Todo { forward } => self.jump_todo(forward),
-            Action::Toggle(key) => self.toggle(key),
+            Action::Toggle(toggle) => self.toggle(toggle),
             Action::SessionLoadLast => self.load_session(session::LAST, false),
             Action::SessionSave => self.open_prompt("Session name", "", PromptAction::SessionSave),
             Action::SessionSaveDir => self.save_dirsession(),
@@ -291,10 +292,10 @@ impl Editor {
             Action::OnlyWindow => self.only_window(),
             Action::NextWindow => self.focus_next_window(),
             Action::Focus(direction) => self.focus_direction(direction),
-            Action::ScrollTo(place) => self.scroll_cursor_to(place),
+            Action::ScrollTo(align) => self.scroll_cursor_to(align),
             Action::Reselect => self.reselect(),
             Action::InsertLast => {
-                let at = self.buf().marks.get(&'^').copied();
+                let at: Option<Pos> = self.buf().marks.get(&'^').copied();
                 if let Some(at) = at {
                     self.buf_mut().cursor = at;
                 }
@@ -309,33 +310,34 @@ impl Editor {
 
     /// `;` and `,`: the last `f`/`t` again, same or opposite direction.
     pub(super) fn repeat_find_key(&mut self, key: Key) -> bool {
-        let (Key::Char(c @ (';' | ',')), Some((ch, forward, till))) = (key, self.last_find) else { return false };
+        let (Key::Char(c @ (';' | ',')), Some((ch, forward, till))): (Key, Option<(char, bool, bool)>) =
+            (key, self.last_find)
+        else {
+            return false;
+        };
         self.run_motion(Motion::Find { ch, forward: forward == (c == ';'), till });
         true
     }
 
     /// Moves the cursor, or applies the pending operator up to the motion target.
     pub(super) fn run_motion(&mut self, motion: Motion) {
-        let Pending { count, op, .. } = std::mem::take(&mut self.pending);
+        let Pending { count, op, .. }: Pending = std::mem::take(&mut self.pending);
         // `?` searches backward: `n` keeps that direction, `N` reverses it.
-        let motion = match motion {
+        let motion: Motion = match motion {
             Motion::SearchNext { forward } => Motion::SearchNext { forward: forward == self.search_forward },
             m => m,
         };
-        let buf = self.buf();
-        let from = buf.cursor;
-        let Some(mut target) = motion.target(buf, count, self.view_height, &self.search) else {
+        let buf: &Buffer = self.buf();
+        let from: Pos = buf.cursor;
+        let Some(mut target): Option<Pos> = motion.target(buf, count, self.view_height, &self.search) else {
             if let Motion::SearchNext { .. } = motion {
-                let error = if self.search.is_empty() {
-                    Error::NoPattern
-                } else {
-                    Error::PatternNotFound(self.search.clone())
-                };
-                self.error(error);
+                let error: Error =
+                    if self.search.is_empty() { Error::NoPattern } else { Error::PatternNotFound(self.search.clone()) };
+                self.error(&error);
             }
             return;
         };
-        let mut span = motion.span();
+        let mut span: Span = motion.span();
         // Vim quirks: `cw` on a word acts like `ce`; `dw` on a line's last word keeps the line break.
         if let Some(op) = op
             && motion == Motion::WordForward
@@ -363,9 +365,9 @@ impl Editor {
 
     /// Text object under the cursor: operated on when an operator waits, else selected (visual mode).
     fn select_object(&mut self, around: bool, obj: char) {
-        let buf = self.buf();
-        let at = buf.cursor;
-        let range = match obj {
+        let buf: &Buffer = self.buf();
+        let at: Pos = buf.cursor;
+        let range: Option<(Pos, Pos)> = match obj {
             'w' => buf.word_object(at, around),
             '(' | ')' | 'b' => buf.pair_object(at, '(', ')', around),
             '[' | ']' => buf.pair_object(at, '[', ']', around),
@@ -374,7 +376,7 @@ impl Editor {
             '"' | '\'' | '`' => buf.quote_object(at, obj, around),
             _ => None,
         };
-        let Some((start, end)) = range else { return };
+        let Some((start, end)): Option<(Pos, Pos)> = range else { return };
         match self.pending.op {
             Some(op) => self.apply(op, start, end, Span::Exclusive),
             None if self.mode != Mode::Normal && start != end => {
@@ -387,8 +389,8 @@ impl Editor {
 
     /// `*` / `#`: search the word under the cursor as a whole word.
     fn search_word(&mut self, forward: bool) {
-        let buf = self.buf();
-        let Some((start, end)) = buf.word_object(buf.cursor, false) else { return };
+        let buf: &Buffer = self.buf();
+        let Some((start, end)): Option<(Pos, Pos)> = buf.word_object(buf.cursor, false) else { return };
         if buf.class_at(start) != CharClass::Word {
             return;
         }
@@ -398,7 +400,7 @@ impl Editor {
     }
 
     fn jump_hunk(&mut self, forward: bool) {
-        let buf = self.buf_mut();
+        let buf: &mut Buffer = self.buf_mut();
         match buf.next_hunk(buf.cursor.line, forward) {
             Some(line) => buf.cursor = Pos::new(line, buf.first_non_blank(line)),
             None => self.info("No hunks"),
@@ -406,9 +408,9 @@ impl Editor {
     }
 
     fn apply_count_lines(&mut self, op: Operator, n: usize) {
-        let buf = self.buf();
-        let first = buf.cursor.line;
-        let last = (first + n - 1).min(buf.last_line());
+        let buf: &Buffer = self.buf();
+        let first: usize = buf.cursor.line;
+        let last: usize = (first + n - 1).min(buf.last_line());
         self.apply(op, Pos::new(first, 0), Pos::new(last, 0), Span::Linewise);
     }
 
@@ -425,14 +427,15 @@ impl Editor {
     pub(super) fn start_cmdline(&mut self, mode: Mode) {
         self.cmdline.clear();
         self.mode = mode;
+        self.cmdline_history().reset();
     }
 
     pub(super) fn open_line(&mut self, below: bool) {
-        let buf = self.buf_mut();
-        let line = buf.cursor.line;
-        let indent = text::indent(buf.line(line)).to_owned();
-        let col = text::char_len(&indent);
-        let at = line + usize::from(below);
+        let buf: &mut Buffer = self.buf_mut();
+        let line: usize = buf.cursor.line;
+        let indent: String = text::indent(buf.line(line)).to_owned();
+        let col: usize = text::char_len(&indent);
+        let at: usize = line + usize::from(below);
         buf.splice(at..at, vec![indent]);
         buf.cursor = Pos::new(at, col);
         self.auto_indent = (col > 0).then_some(at);
@@ -440,24 +443,24 @@ impl Editor {
     }
 
     fn paste(&mut self, after: bool, n: usize) {
-        let Some(reg) = self.fetch_register() else { return };
+        let Some(reg): Option<Register> = self.fetch_register() else { return };
         if reg.text.is_empty() && !reg.linewise {
             return;
         }
         if reg.block {
             return self.put_block(&reg, after);
         }
-        let Register { text, linewise, .. } = reg;
-        let buf = self.buf_mut();
-        let here = buf.cursor;
+        let Register { text, linewise, .. }: Register = reg;
+        let buf: &mut Buffer = self.buf_mut();
+        let here: Pos = buf.cursor;
         if linewise {
-            let at = here.line + usize::from(after);
-            let lines = (0..n).flat_map(|_| text.split('\n').map(str::to_owned)).collect();
+            let at: usize = here.line + usize::from(after);
+            let lines: Vec<String> = (0..n).flat_map(|_| text.split('\n').map(str::to_owned)).collect();
             buf.splice(at..at, lines);
             buf.cursor = Pos::new(at, buf.first_non_blank(at));
         } else {
-            let col = if after && buf.line_len(here.line) > 0 { here.col + 1 } else { here.col };
-            let end = buf.insert(Pos::new(here.line, col), &text.repeat(n));
+            let col: usize = if after && buf.line_len(here.line) > 0 { here.col + 1 } else { here.col };
+            let end: Pos = buf.insert(Pos::new(here.line, col), &text.repeat(n));
             buf.cursor = if text.contains('\n') { Pos::new(here.line, col) } else { Pos::new(end.line, end.col - 1) };
         }
     }
@@ -465,7 +468,7 @@ impl Editor {
     fn undo(&mut self, n: usize, redo: bool) {
         self.repeat.skip = true;
         for _ in 0..n {
-            let buf = self.buf_mut();
+            let buf: &mut Buffer = self.buf_mut();
             if !(if redo { buf.redo() } else { buf.undo() }) {
                 self.info(if redo { "Already at newest change" } else { "Already at oldest change" });
                 break;
@@ -475,33 +478,34 @@ impl Editor {
 
     /// `J` (one space between, trimmed) or `gJ` (`spaces = false`: lines glued as they are).
     pub(super) fn join(&mut self, n: usize, spaces: bool) {
-        let buf = self.buf_mut();
+        let buf: &mut Buffer = self.buf_mut();
         for _ in 0..n.max(2) - 1 {
-            let line = buf.cursor.line;
+            let line: usize = buf.cursor.line;
             if line >= buf.last_line() {
                 break;
             }
-            let (left, right) = if spaces {
+            let (left, right): (&str, &str) = if spaces {
                 (buf.line(line).trim_end(), buf.line(line + 1).trim_start())
             } else {
                 (buf.line(line), buf.line(line + 1))
             };
-            let sep = if !spaces || left.is_empty() || right.is_empty() || right.starts_with(')') { "" } else { " " };
-            let col = text::char_len(left);
-            let joined = format!("{left}{sep}{right}");
+            let sep: &str =
+                if !spaces || left.is_empty() || right.is_empty() || right.starts_with(')') { "" } else { " " };
+            let col: usize = text::char_len(left);
+            let joined: String = format!("{left}{sep}{right}");
             buf.splice(line..line + 2, vec![joined]);
             buf.cursor = Pos::new(line, col);
         }
     }
 
     fn toggle_case(&mut self, n: usize) {
-        let buf = self.buf_mut();
-        let Pos { line, col } = buf.cursor;
-        let end = (col + n).min(buf.line_len(line));
+        let buf: &mut Buffer = self.buf_mut();
+        let Pos { line, col }: Pos = buf.cursor;
+        let end: usize = (col + n).min(buf.line_len(line));
         if col >= end {
             return;
         }
-        let mut toggled = String::with_capacity(buf.line(line).len());
+        let mut toggled: String = String::with_capacity(buf.line(line).len());
         for (i, c) in buf.line(line).chars().enumerate() {
             match c {
                 c if !(col..end).contains(&i) => toggled.push(c),
@@ -514,17 +518,13 @@ impl Editor {
     }
 
     fn replace_chars(&mut self, ch: char, n: usize) {
-        let buf = self.buf_mut();
-        let Pos { line, col } = buf.cursor;
+        let buf: &mut Buffer = self.buf_mut();
+        let Pos { line, col }: Pos = buf.cursor;
         if col + n > buf.line_len(line) {
             return;
         }
-        let replaced = buf
-            .line(line)
-            .chars()
-            .enumerate()
-            .map(|(i, c)| if (col..col + n).contains(&i) { ch } else { c })
-            .collect();
+        let replaced: String =
+            buf.line(line).chars().enumerate().map(|(i, c)| if (col..col + n).contains(&i) { ch } else { c }).collect();
         buf.set_line(line, replaced);
         buf.cursor.col = col + n - 1;
     }

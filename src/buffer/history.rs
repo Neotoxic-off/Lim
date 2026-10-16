@@ -49,7 +49,7 @@ impl History {
             }
             self.sealed = false;
         }
-        let Some(group) = self.undo.last_mut() else { return };
+        let Some(group): Option<&mut Group> = self.undo.last_mut() else { return };
         // Typing on one line: the first snapshot of that line already reverts the whole run.
         if let Some(last) = group.changes.last()
             && last.at == change.at
@@ -81,13 +81,13 @@ fn swap(
     lines: &mut Vec<String>,
     edited: &mut dyn FnMut(usize, usize, usize),
 ) -> Option<Pos> {
-    let group = from.pop()?;
-    let mut inverse = Vec::with_capacity(group.changes.len());
-    let mut cursor = None;
+    let group: Group = from.pop()?;
+    let mut inverse: Vec<Change> = Vec::with_capacity(group.changes.len());
+    let mut cursor: Option<Pos> = None;
     for change in group.changes.into_iter().rev() {
-        let new_len = change.old.len();
+        let new_len: usize = change.old.len();
         edited(change.at, change.new_len, new_len);
-        let old = lines.splice(change.at..change.at + change.new_len, change.old).collect();
+        let old: Vec<String> = lines.splice(change.at..change.at + change.new_len, change.old).collect();
         inverse.push(Change { at: change.at, old, new_len, cursor: change.cursor });
         cursor = Some(change.cursor);
     }

@@ -1,13 +1,13 @@
 //! astrodark (AstroNvim/astrotheme) as a palette plus Neovim-named highlight groups.
 //! The config can override palette colors (`palette.ui.base`) and any group (`highlights.Comment`).
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
+use super::palettes::{self, THEMES, ThemeDef};
 pub use crate::config::Rgb;
 use crate::config::{Config, HighlightSpec};
 use crate::editor::Mode;
 use crate::syntax::Hl;
-use super::palettes::THEMES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Style {
@@ -140,13 +140,14 @@ static THEME: RwLock<Option<Arc<Theme>>> = RwLock::new(None);
 
 /// The theme in use; astrodark until `install` runs. Cheap: a shared pointer.
 pub fn theme() -> Arc<Theme> {
-    let current = THEME.read().map(|t| t.clone()).unwrap_or_else(|e| e.into_inner().clone());
-    current.unwrap_or_else(|| Arc::new(Theme::build(&Config::default(), "astrodark").0))
+    let current: Option<Arc<Theme>> = THEME.read().map_or_else(|e| e.into_inner().clone(), |t| t.clone());
+    current.unwrap_or_else(|| Arc::new(Theme::build(&Config::default(), palettes::DEFAULT).0))
 }
 
 /// Swaps the theme for every later frame (colorscheme switch).
 pub fn install(theme: Theme) {
-    let mut slot = THEME.write().unwrap_or_else(|e| e.into_inner());
+    let mut slot: RwLockWriteGuard<'_, Option<Arc<Theme>>> =
+        THEME.write().unwrap_or_else(std::sync::PoisonError::into_inner);
     *slot = Some(Arc::new(theme));
 }
 
@@ -157,9 +158,10 @@ fn hl(fg: Option<Rgb>, bg: Option<Rgb>) -> Highlight {
 impl Theme {
     /// The named built-in theme with the config's palette and highlight overrides, plus warnings for unknown names.
     pub fn build(config: &Config, colorscheme: &str) -> (Self, Vec<String>) {
-        let mut warnings = Vec::new();
-        let base = THEMES.iter().find(|t| t.name == colorscheme).or(THEMES.first());
-        let mut palette: Vec<(&str, Rgb)> = base.map(|t| t.colors.iter().map(|&(n, c)| (n, Rgb(c))).collect()).unwrap_or_default();
+        let mut warnings: Vec<String> = Vec::new();
+        let base: Option<&ThemeDef> = THEMES.iter().find(|t| t.name == colorscheme).or(THEMES.first());
+        let mut palette: Vec<(&str, Rgb)> =
+            base.map(|t| t.colors.iter().map(|&(n, c)| (n, Rgb(c))).collect()).unwrap_or_default();
         for (name, color) in &config.palette {
             match palette.iter_mut().find(|(n, _)| n == name) {
                 Some(slot) => slot.1 = *color,
@@ -169,15 +171,15 @@ impl Theme {
         let p = |name: &str| palette.iter().find(|(n, _)| *n == name).map(|(_, c)| *c);
         let mut groups: Vec<Highlight> = GROUP_NAMES.iter().map(|&(g, _)| default_group(g, &p)).collect();
         for (name, spec) in &config.highlights {
-            let Some(index) = GROUP_NAMES.iter().position(|(_, n)| n == name) else {
+            let Some(index): Option<usize> = GROUP_NAMES.iter().position(|(_, n)| n == name) else {
                 warnings.push(format!("unknown highlight group \"{name}\""));
                 continue;
             };
-            let linked = spec.link.as_ref().and_then(|l| GROUP_NAMES.iter().position(|(_, n)| n == l));
+            let linked: Option<usize> = spec.link.as_ref().and_then(|l| GROUP_NAMES.iter().position(|(_, n)| n == l));
             if spec.link.is_some() && linked.is_none() {
                 warnings.push(format!("highlights.{name}: unknown link target"));
             }
-            let base = linked.and_then(|i| groups.get(i).copied());
+            let base: Option<Highlight> = linked.and_then(|i| groups.get(i).copied());
             if let Some(slot) = groups.get_mut(index) {
                 *slot = merge(base.unwrap_or(*slot), spec);
             }
@@ -199,7 +201,7 @@ impl Theme {
 
     /// `group` drawn over `bg` when it has no background of its own.
     pub fn on(&self, group: Group, bg: Rgb) -> Style {
-        let h = self.get(group);
+        let h: Highlight = self.get(group);
         Style {
             fg: h.fg.unwrap_or_else(|| self.fg(Group::Normal)),
             bg: h.bg.unwrap_or(bg),
@@ -216,17 +218,18 @@ impl Theme {
     pub fn syntax(&self, hl: Hl, bg: Rgb) -> Style {
         self.on(syntax_group(hl), bg)
     }
+}
 
-    pub fn mode(&self, mode: Mode) -> Group {
-        match mode {
-            Mode::Normal | Mode::BufferPick(_) | Mode::Picker | Mode::Explorer | Mode::Prompt | Mode::Cheatsheet => {
-                Group::StatusModeNormal
-            }
-            Mode::Insert => Group::StatusModeInsert,
-            Mode::Replace => Group::StatusModeReplace,
-            Mode::Visual | Mode::VisualLine | Mode::VisualBlock => Group::StatusModeVisual,
-            Mode::Command | Mode::Search => Group::StatusModeCommand,
+/// The statusline group that colors the mode indicator.
+pub fn mode_group(mode: Mode) -> Group {
+    match mode {
+        Mode::Normal | Mode::BufferPick(_) | Mode::Picker | Mode::Explorer | Mode::Prompt | Mode::Cheatsheet => {
+            Group::StatusModeNormal
         }
+        Mode::Insert => Group::StatusModeInsert,
+        Mode::Replace => Group::StatusModeReplace,
+        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => Group::StatusModeVisual,
+        Mode::Command | Mode::Search => Group::StatusModeCommand,
     }
 }
 
@@ -255,7 +258,7 @@ fn merge(mut h: Highlight, spec: &HighlightSpec) -> Highlight {
     h
 }
 
-/// astrotheme's group definitions (groups/*.lua, default style options) and AstroNvim's heirline colors.
+/// astrotheme's group definitions (groups/*.lua, default style options) and `AstroNvim`'s heirline colors.
 fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
     let fg = |name| hl(p(name), None);
     let on = |f, b| hl(p(f), p(b));
@@ -346,11 +349,11 @@ mod tests {
 
     #[test]
     fn overrides_and_links() {
-        let (config, _) = Config::from_str(
+        let (config, _): (Config, Vec<String>) = Config::from_str(
             r##"{ "palette": { "ui": { "base": "#000001" } },
                   "highlights": { "@comment": { "italic": false }, "Visual": { "link": "CurSearch" }, "Nope": {} } }"##,
         );
-        let (theme, warnings) = Theme::build(&config, "astrodark");
+        let (theme, warnings): (Theme, Vec<String>) = Theme::build(&config, "astrodark");
         assert_eq!(theme.bg(Group::Normal), Rgb(1));
         assert!(!theme.get(Group::Comment).italic);
         assert_eq!(theme.get(Group::Visual), theme.get(Group::CurSearch));

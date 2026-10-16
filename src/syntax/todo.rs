@@ -38,10 +38,10 @@ const KEYWORDS: &[(&str, Todo)] = &[
 /// The first `KEYWORD:` on the line: (char column, keyword length, kind).
 pub fn todo(line: &str) -> Option<(usize, usize, Todo)> {
     let chars: Vec<char> = line.chars().collect();
-    let mut i = 0;
+    let mut i: usize = 0;
     while i < chars.len() {
         if chars[i].is_ascii_uppercase() && (i == 0 || !chars[i - 1].is_alphanumeric()) {
-            let end = i + chars[i..].iter().take_while(|c| c.is_ascii_uppercase()).count();
+            let end: usize = i + chars[i..].iter().take_while(|c| c.is_ascii_uppercase()).count();
             if chars.get(end) == Some(&':') {
                 let word: String = chars[i..end].iter().collect();
                 if let Some(&(_, kind)) = KEYWORDS.iter().find(|(k, _)| *k == word) {

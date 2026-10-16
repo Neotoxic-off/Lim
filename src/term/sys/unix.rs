@@ -6,9 +6,6 @@ use std::mem::MaybeUninit;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-compile_error!("lim supports Linux and macOS");
-
 #[cfg(target_os = "linux")]
 mod os {
     pub type Flag = u32;
@@ -74,8 +71,9 @@ mod os {
     pub const TIOCGWINSZ: u64 = 0x4008_7468;
 }
 
-pub use os::Termios;
-use os::*;
+pub use os::Termios as Mode;
+use os::Termios;
+use os::{BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, INPCK, ISIG, ISTRIP, IXON, OPOST, TIOCGWINSZ, VMIN, VTIME};
 
 const STDIN: i32 = 0;
 const STDOUT: i32 = 1;
@@ -113,7 +111,7 @@ unsafe extern "C" {
 }
 
 pub fn get_mode() -> io::Result<Termios> {
-    let mut t = MaybeUninit::<Termios>::uninit();
+    let mut t: MaybeUninit<Termios> = MaybeUninit::<Termios>::uninit();
     if unsafe { tcgetattr(STDIN, t.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error());
     }
@@ -138,18 +136,19 @@ pub fn raw_mode(mut t: Termios) -> Termios {
 }
 
 pub fn window_size() -> Option<(u16, u16)> {
-    let mut ws = WinSize::default();
-    let ok = unsafe { ioctl(STDOUT, TIOCGWINSZ, &mut ws as *mut WinSize) } == 0;
+    let mut ws: WinSize = WinSize::default();
+    let ok: bool = unsafe { ioctl(STDOUT, TIOCGWINSZ, &raw mut ws) } == 0;
     (ok && ws.cols > 0).then_some((ws.cols, ws.rows))
 }
 
 /// Ok(false) on timeout or when a signal (resize) interrupted the wait.
 pub fn wait_readable(timeout_ms: Option<u32>) -> io::Result<bool> {
-    let mut set = FdSet([0; 16]);
+    let mut set: FdSet = FdSet([0; 16]);
     set.0[0] = 1 << STDIN;
-    let mut tv = timeout_ms.map(|ms| TimeVal { sec: i64::from(ms / 1000), usec: i64::from(ms % 1000) * 1000 });
-    let tv_ptr = tv.as_mut().map_or(ptr::null_mut(), |t| t as *mut TimeVal);
-    match unsafe { select(STDIN + 1, &mut set, ptr::null_mut(), ptr::null_mut(), tv_ptr) } {
+    let mut tv: Option<TimeVal> =
+        timeout_ms.map(|ms| TimeVal { sec: i64::from(ms / 1000), usec: i64::from(ms % 1000) * 1000 });
+    let tv_ptr: *mut TimeVal = tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut::<TimeVal>);
+    match unsafe { select(STDIN + 1, &raw mut set, ptr::null_mut(), ptr::null_mut(), tv_ptr) } {
         n if n > 0 => Ok(true),
         0 => Ok(false),
         _ => interrupted_is(false),
@@ -157,14 +156,12 @@ pub fn wait_readable(timeout_ms: Option<u32>) -> io::Result<bool> {
 }
 
 pub fn read_stdin(buf: &mut [u8]) -> io::Result<usize> {
-    match unsafe { read(STDIN, buf.as_mut_ptr(), buf.len()) } {
-        n if n >= 0 => Ok(n as usize),
-        _ => Err(io::Error::last_os_error()),
-    }
+    // A negative count is read(2)'s error return.
+    usize::try_from(unsafe { read(STDIN, buf.as_mut_ptr(), buf.len()) }).map_err(|_| io::Error::last_os_error())
 }
 
 fn interrupted_is<T>(value: T) -> io::Result<T> {
-    let e = io::Error::last_os_error();
+    let e: io::Error = io::Error::last_os_error();
     if e.kind() == io::ErrorKind::Interrupted { Ok(value) } else { Err(e) }
 }
 

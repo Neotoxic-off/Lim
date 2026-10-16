@@ -1,9 +1,21 @@
-//! Terminal: raw mode, size, color depth and key input, through libc FFI only.
+//! Terminal: raw mode, size, color depth and key input, through libc / kernel32 FFI only.
 
 mod input;
+#[cfg(unix)]
+#[path = "sys/unix.rs"]
+mod sys;
+#[cfg(windows)]
+#[path = "sys/windows.rs"]
 mod sys;
 
-use std::io::{self, Write};
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+compile_error!("lim supports Linux, macOS and Windows");
+
+use std::{
+    ffi::OsString,
+    io::{self, Write},
+    process::ExitStatus,
+};
 
 pub use input::{Event, Input, Key};
 
@@ -21,15 +33,15 @@ pub enum ColorDepth {
 
 /// Raw mode on the alternate screen; restored on drop, including during a panic unwind.
 pub struct Terminal {
-    original: sys::Termios,
+    original: sys::Mode,
 }
 
 impl Terminal {
     pub fn enter() -> io::Result<Self> {
-        let original = sys::get_mode()?;
+        let original: sys::Mode = sys::get_mode()?;
         sys::set_mode(&sys::raw_mode(original))?;
         sys::watch_resize();
-        let mut out = io::stdout();
+        let mut out: io::Stdout = io::stdout();
         out.write_all(b"\x1b[?1049h")?;
         out.flush()?;
         Ok(Self { original })
@@ -37,14 +49,17 @@ impl Terminal {
 }
 
 impl Terminal {
-    /// Hands the terminal to `command` (`$SHELL` when empty) and takes it back when it exits.
+    /// Hands the terminal to `command` (`$SHELL`, or `%COMSPEC%` on Windows, when empty) and takes it back when it
+    /// exits.
     pub fn run(&self, command: &[String]) -> io::Result<()> {
-        let mut out = io::stdout();
+        let mut out: io::Stdout = io::stdout();
         out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l")?;
         out.flush()?;
         sys::set_mode(&self.original)?;
-        let shell = std::env::var_os("SHELL").filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
-        let status = match command.split_first() {
+        let (shell_var, fallback): (&str, &str) =
+            if cfg!(windows) { ("COMSPEC", "cmd.exe") } else { ("SHELL", "/bin/sh") };
+        let shell: OsString = std::env::var_os(shell_var).filter(|s| !s.is_empty()).unwrap_or_else(|| fallback.into());
+        let status: Result<ExitStatus, io::Error> = match command.split_first() {
             Some((program, args)) => std::process::Command::new(program).args(args).status(),
             None => std::process::Command::new(shell).status(),
         };
@@ -57,24 +72,23 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        let mut out = io::stdout();
-        let _ = out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l");
-        let _ = out.flush();
-        let _ = sys::set_mode(&self.original);
+        let mut out: io::Stdout = io::stdout();
+        let _: Result<(), io::Error> = out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l");
+        let _: Result<(), io::Error> = out.flush();
+        let _: Result<(), io::Error> = sys::set_mode(&self.original);
     }
 }
 
 pub fn size() -> Size {
-    sys::window_size().map_or(Size { cols: 80, rows: 24 }, |(cols, rows)| Size {
-        cols: cols.into(),
-        rows: rows.into(),
-    })
+    sys::window_size().map_or(Size { cols: 80, rows: 24 }, |(cols, rows)| Size { cols: cols.into(), rows: rows.into() })
 }
 
 pub fn color_depth() -> ColorDepth {
-    let colorterm = std::env::var("COLORTERM").unwrap_or_default();
-    let term = std::env::var("TERM").unwrap_or_default();
-    let truecolor = colorterm.contains("truecolor")
+    let colorterm: String = std::env::var("COLORTERM").unwrap_or_default();
+    let term: String = std::env::var("TERM").unwrap_or_default();
+    // Windows Terminal and conhost (since Windows 10 1703) render 24-bit color.
+    let truecolor: bool = cfg!(windows)
+        || colorterm.contains("truecolor")
         || colorterm.contains("24bit")
         || term.ends_with("-direct")
         || ["kitty", "alacritty", "wezterm", "ghostty", "foot"].iter().any(|t| term.contains(t));

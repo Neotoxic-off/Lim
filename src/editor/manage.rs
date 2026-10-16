@@ -1,10 +1,10 @@
-//! Buffer list and window management: AstroNvim's `<Leader>b…`, `]b`/`[b`, `>b`/`<b`,
+//! Buffer list and window management: `AstroNvim`'s `<Leader>b…`, `]b`/`[b`, `>b`/`<b`,
 //! `|`/`\` splits and `<C-h/j/k/l>` navigation.
 
 use std::path::Path;
 
 use super::window::{self, Direction, Layout, View, Window};
-use super::{Editor, Mode, PickAction};
+use super::{Editor, Mode, PickAction, Rect};
 use crate::buffer::Buffer;
 use crate::error::Error;
 use crate::term::Key;
@@ -43,7 +43,7 @@ impl Editor {
                 self.buffers.push(buf);
                 self.switch_to(self.buffers.len() - 1);
             }
-            Err(e) => self.error(e),
+            Err(e) => self.error(&e),
         }
     }
 
@@ -60,9 +60,11 @@ impl Editor {
         }
     }
 
-    pub(super) fn cycle(&mut self, delta: isize) {
-        let n = self.buffers.len() as isize;
-        self.switch_to((self.current as isize + delta).rem_euclid(n) as usize);
+    /// `]b` / `[b`, `<Tab>` / `<S-Tab>`: `count` buffers forward or back, wrapping around.
+    pub(super) fn cycle(&mut self, forward: bool, count: usize) {
+        let len: usize = self.buffers.len();
+        let step: usize = count % len;
+        self.switch_to(if forward { self.current + step } else { self.current + len - step } % len);
     }
 
     pub(super) fn go_previous_buffer(&mut self) {
@@ -77,18 +79,18 @@ impl Editor {
 
     /// Removes buffer `i`; windows showing it fall back to the previous buffer.
     fn remove_buffer(&mut self, i: usize, force: bool) -> Result<(), Error> {
-        let Some(buf) = self.buffers.get(i) else { return Ok(()) };
+        let Some(buf): Option<&Buffer> = self.buffers.get(i) else { return Ok(()) };
         if !force && buf.is_dirty() {
             return Err(Error::Unsaved(buf.name()));
         }
-        let fallback = self.previous_buffer.filter(|&p| p != i && p < self.buffers.len());
+        let fallback: Option<usize> = self.previous_buffer.filter(|&p| p != i && p < self.buffers.len());
         self.buffers.remove(i);
         if self.buffers.is_empty() {
             self.buffers.push(Buffer::scratch());
         }
-        let last = self.buffers.len() - 1;
+        let last: usize = self.buffers.len() - 1;
         let shift = |b: usize| if b > i { b - 1 } else { b.min(last) };
-        let replacement = fallback.map_or(i.min(last), shift);
+        let replacement: usize = fallback.map_or(i.min(last), shift);
         let fix = |b: usize| if b == i { replacement } else { shift(b) };
         self.current = fix(self.current);
         for window in &mut self.windows {
@@ -100,7 +102,7 @@ impl Editor {
 
     /// `<Leader>bc`, `bC`, `bl`, `br`: closes the matching unmodified buffers.
     pub(super) fn close_buffers(&mut self, set: CloseSet) {
-        let current = self.current;
+        let current: usize = self.current;
         let targets: Vec<usize> = (0..self.buffers.len())
             .filter(|&i| match set {
                 CloseSet::Others => i != current,
@@ -109,7 +111,7 @@ impl Editor {
                 CloseSet::Right => i > current,
             })
             .collect();
-        let mut kept = 0;
+        let mut kept: i32 = 0;
         for &i in targets.iter().rev() {
             if self.remove_buffer(i, false).is_err() {
                 kept += 1;
@@ -122,10 +124,20 @@ impl Editor {
 
     /// `>b` / `<b`: moves the current buffer along the tabline.
     pub(super) fn move_buffer(&mut self, delta: isize) {
-        let from = self.current;
-        let Some(to) = from.checked_add_signed(delta).filter(|&t| t < self.buffers.len()) else { return };
+        let from: usize = self.current;
+        let Some(to): Option<usize> = from.checked_add_signed(delta).filter(|&t| t < self.buffers.len()) else {
+            return;
+        };
         self.buffers.swap(from, to);
-        let swap = |b: usize| if b == from { to } else if b == to { from } else { b };
+        let swap = |b: usize| {
+            if b == from {
+                to
+            } else if b == to {
+                from
+            } else {
+                b
+            }
+        };
         for window in &mut self.windows {
             window.buffer = swap(window.buffer);
         }
@@ -137,8 +149,8 @@ impl Editor {
     pub fn pick_labels(&self) -> Vec<char> {
         let mut used: Vec<char> = Vec::with_capacity(self.buffers.len());
         for buf in &self.buffers {
-            let first = buf.name().chars().next().map(|c| c.to_ascii_lowercase());
-            let label = first
+            let first: Option<char> = buf.name().chars().next().map(|c| c.to_ascii_lowercase());
+            let label: char = first
                 .filter(|c| c.is_ascii_lowercase() && !used.contains(c))
                 .or_else(|| ('a'..='z').chain('0'..='9').find(|c| !used.contains(c)))
                 .unwrap_or(' ');
@@ -149,13 +161,13 @@ impl Editor {
 
     pub(super) fn pick(&mut self, key: Key, action: PickAction) {
         self.mode = Mode::Normal;
-        let Key::Char(c) = key else { return };
-        let Some(i) = self.pick_labels().iter().position(|&l| l == c && l != ' ') else { return };
+        let Key::Char(c): Key = key else { return };
+        let Some(i): Option<usize> = self.pick_labels().iter().position(|&l| l == c && l != ' ') else { return };
         match action {
             PickAction::Go => self.switch_to(i),
             PickAction::Close => {
                 if let Err(e) = self.remove_buffer(i, false) {
-                    self.error(e);
+                    self.error(&e);
                 }
             }
             PickAction::SplitBelow | PickAction::SplitRight => {
@@ -167,9 +179,9 @@ impl Editor {
 
     /// `|` / `\` / `:vsplit` / `:split`: opens a window on the same buffer and focuses it.
     pub(super) fn split(&mut self, vertical: bool) {
-        let Some(active_id) = self.windows.get(self.active).map(|w| w.id) else { return };
-        let view = View::of(self.buf());
-        let window = Window::new(self.next_window_id, self.current, view);
+        let Some(active_id): Option<window::WindowId> = self.windows.get(self.active).map(|w| w.id) else { return };
+        let view: View = View::of(self.buf());
+        let window: Window = Window::new(self.next_window_id, self.current, view);
         self.next_window_id += 1;
         if self.layout.insert_beside(active_id, window.id, vertical) {
             self.windows.push(window);
@@ -182,7 +194,7 @@ impl Editor {
         if self.windows.len() < 2 {
             return false;
         }
-        let Some(id) = self.windows.get(self.active).map(|w| w.id) else { return false };
+        let Some(id): Option<window::WindowId> = self.windows.get(self.active).map(|w| w.id) else { return false };
         self.layout.remove(id);
         self.windows.remove(self.active);
         self.active = self.active.saturating_sub(1).min(self.windows.len() - 1);
@@ -192,7 +204,7 @@ impl Editor {
 
     /// `<C-w>o` / `:only`.
     pub(super) fn only_window(&mut self) {
-        let Some(window) = self.windows.get(self.active).cloned() else { return };
+        let Some(window): Option<Window> = self.windows.get(self.active).cloned() else { return };
         self.layout = Layout::Leaf(window.id);
         self.windows = vec![window];
         self.active = 0;
@@ -202,7 +214,7 @@ impl Editor {
         if index == self.active || index >= self.windows.len() {
             return;
         }
-        let view = View::of(self.buf());
+        let view: View = View::of(self.buf());
         if let Some(window) = self.windows.get_mut(self.active) {
             window.view = view;
             window.buffer = self.current;
@@ -212,19 +224,21 @@ impl Editor {
     }
 
     fn load_active_view(&mut self) {
-        let Some(window) = self.windows.get(self.active).cloned() else { return };
+        let Some(window): Option<Window> = self.windows.get(self.active).cloned() else { return };
         self.current = window.buffer.min(self.buffers.len() - 1);
-        let buf = self.buf_mut();
+        let buf: &mut Buffer = self.buf_mut();
         window.view.apply(buf);
         buf.clamp(false);
     }
 
     /// `<C-h/j/k/l>`: focuses the window in `dir`, measured from the cursor's screen row.
     pub(super) fn focus_direction(&mut self, dir: Direction) {
-        let mut rects = Vec::new();
+        let mut rects: Vec<(window::WindowId, Rect)> = Vec::new();
         self.layout.rects(self.area, &mut rects);
-        let Some(id) = self.windows.get(self.active).map(|w| w.id) else { return };
-        let Some(&(_, from)) = rects.iter().find(|(i, _)| *i == id) else { return };
+        let Some(id): Option<window::WindowId> = self.windows.get(self.active).map(|w| w.id) else { return };
+        let Some(&(_, from)): Option<&(window::WindowId, Rect)> = rects.iter().find(|(i, _)| *i == id) else {
+            return;
+        };
         // `<C-h>` from the leftmost window goes into the open file tree.
         if dir == Direction::Left
             && let Some(explorer) = &mut self.explorer
@@ -234,9 +248,9 @@ impl Editor {
             self.mode = Mode::Explorer;
             return;
         }
-        let buf = self.buf();
-        let row = from.y + 1 + buf.cursor.line.saturating_sub(buf.top);
-        let row = row.min(from.y + from.h.saturating_sub(1));
+        let buf: &Buffer = self.buf();
+        let row: usize = from.y + 1 + buf.cursor.line.saturating_sub(buf.top);
+        let row: usize = row.min(from.y + from.h.saturating_sub(1));
         if let Some(target) = window::neighbor(&rects, from, row, from.x, dir)
             && let Some(index) = self.windows.iter().position(|w| w.id == target)
         {
@@ -250,7 +264,7 @@ impl Editor {
             explorer.focused = false;
         }
         self.mode = Mode::Normal;
-        let mut rects = Vec::new();
+        let mut rects: Vec<(window::WindowId, Rect)> = Vec::new();
         self.layout.rects(self.area, &mut rects);
         if let Some(index) = rects.first().and_then(|(id, _)| self.windows.iter().position(|w| w.id == *id)) {
             self.focus(index);
@@ -259,10 +273,10 @@ impl Editor {
 
     /// `<C-w>w`: next window in layout order.
     pub(super) fn focus_next_window(&mut self) {
-        let mut rects = Vec::new();
+        let mut rects: Vec<(window::WindowId, Rect)> = Vec::new();
         self.layout.rects(self.area, &mut rects);
-        let Some(id) = self.windows.get(self.active).map(|w| w.id) else { return };
-        let Some(pos) = rects.iter().position(|(i, _)| *i == id) else { return };
+        let Some(id): Option<window::WindowId> = self.windows.get(self.active).map(|w| w.id) else { return };
+        let Some(pos): Option<usize> = rects.iter().position(|(i, _)| *i == id) else { return };
         // As Vim with neo-tree: after the last window comes the file tree, when it is open.
         if pos + 1 == rects.len()
             && let Some(explorer) = &mut self.explorer
@@ -271,7 +285,7 @@ impl Editor {
             self.mode = Mode::Explorer;
             return;
         }
-        let (next, _) = rects[(pos + 1) % rects.len()];
+        let (next, _): (window::WindowId, Rect) = rects[(pos + 1) % rects.len()];
         if let Some(index) = self.windows.iter().position(|w| w.id == next) {
             self.focus(index);
         }
@@ -282,13 +296,13 @@ impl Editor {
         if index == self.active {
             return Some(f(self.buf_mut()));
         }
-        let window = self.windows.get(index)?.clone();
-        let buf = self.buffers.get_mut(window.buffer)?;
-        let saved = View::of(buf);
+        let window: Window = self.windows.get(index)?.clone();
+        let buf: &mut Buffer = self.buffers.get_mut(window.buffer)?;
+        let saved: View = View::of(buf);
         window.view.apply(buf);
         buf.clamp(false);
-        let result = f(buf);
-        let after = View::of(buf);
+        let result: R = f(buf);
+        let after: View = View::of(buf);
         saved.apply(buf);
         if let Some(w) = self.windows.get_mut(index) {
             w.view = after;
@@ -298,9 +312,9 @@ impl Editor {
 
     /// After an internal error: windows and layout agree and point at real buffers.
     pub(super) fn repair_windows(&mut self) {
-        let mut ids = Vec::new();
+        let mut ids: Vec<(window::WindowId, Rect)> = Vec::new();
         self.layout.rects(self.area, &mut ids);
-        let last = self.buffers.len() - 1;
+        let last: usize = self.buffers.len() - 1;
         self.windows.retain(|w| ids.iter().any(|(id, _)| *id == w.id));
         if self.windows.is_empty() {
             self.windows.push(Window::new(self.next_window_id, self.current, View::default()));

@@ -1,8 +1,13 @@
 //! More of Vim: replace mode (`R`), case operators, `<C-a>`/`<C-x>`, marks and the jump list,
 //! scrolling (`zz`, `<C-e>`…), `:s`, and reloading files changed outside lim.
 
+use std::ops::Range;
+use std::path::PathBuf;
+use std::str::Chars;
+
+use super::bindings::Align;
 use super::{Editor, Message, Mode};
-use crate::buffer::{Pos, text};
+use crate::buffer::{Buffer, Pos, text};
 use crate::term::Key;
 
 /// Jump list length, as Vim's.
@@ -16,7 +21,7 @@ pub enum Case {
 }
 
 pub fn convert(s: &str, case: Case) -> String {
-    let mut out = String::with_capacity(s.len());
+    let mut out: String = String::with_capacity(s.len());
     for c in s.chars() {
         match case {
             Case::Lower => out.extend(c.to_lowercase()),
@@ -37,30 +42,30 @@ pub struct LineRange {
 
 impl Editor {
     pub(super) fn start_replace(&mut self) {
-        let line = self.buf().cursor.line;
+        let line: usize = self.buf().cursor.line;
         self.replace_original = self.buf().line(line).to_owned();
         self.mode = Mode::Replace;
     }
 
     pub(super) fn replace_key(&mut self, key: Key) {
-        let buf = &mut self.buffers[self.current];
-        let here = buf.cursor;
-        let len = buf.line_len(here.line);
+        let buf: &mut Buffer = &mut self.buffers[self.current];
+        let here: Pos = buf.cursor;
+        let len: usize = buf.line_len(here.line);
         match key {
             Key::Esc | Key::Ctrl('c') => {
                 buf.cursor.col = here.col.saturating_sub(1);
                 self.mode = Mode::Normal;
             }
             Key::Char(c) => {
-                let end = Pos::new(here.line, (here.col + 1).min(len));
+                let end: Pos = Pos::new(here.line, (here.col + 1).min(len));
                 buf.remove(here, end);
                 buf.insert(here, &c.to_string());
                 buf.cursor.col += 1;
             }
             Key::Backspace | Key::Ctrl('h') if here.col > 0 => {
                 // Backspace restores what was overwritten.
-                let col = here.col - 1;
-                let original = self.replace_original.chars().nth(col);
+                let col: usize = here.col - 1;
+                let original: Option<char> = self.replace_original.chars().nth(col);
                 buf.remove(Pos::new(here.line, col), Pos::new(here.line, here.col));
                 if let Some(c) = original {
                     buf.insert(Pos::new(here.line, col), &c.to_string());
@@ -80,10 +85,10 @@ impl Editor {
 
     /// `gu`, `gU`, `g~` and visual `u`, `U`, `~` over a char range or whole lines.
     pub(super) fn change_case(&mut self, case: Case, start: Pos, end: Pos, linewise: bool) {
-        let buf = self.buf_mut();
+        let buf: &mut Buffer = self.buf_mut();
         if linewise {
             for y in start.line..=end.line.min(buf.last_line()) {
-                let converted = convert(buf.line(y), case);
+                let converted: String = convert(buf.line(y), case);
                 if converted != buf.line(y) {
                     buf.set_line(y, converted);
                 }
@@ -91,9 +96,9 @@ impl Editor {
             buf.cursor = Pos::new(start.line, buf.cursor.col);
             return;
         }
-        let end = Pos::new(end.line, end.col.min(buf.line_len(end.line)));
-        let original = buf.text(start, end);
-        let converted = convert(&original, case);
+        let end: Pos = Pos::new(end.line, end.col.min(buf.line_len(end.line)));
+        let original: String = buf.text(start, end);
+        let converted: String = convert(&original, case);
         if converted != original {
             buf.remove(start, end);
             buf.insert(start, &converted);
@@ -103,10 +108,10 @@ impl Editor {
 
     /// `<C-a>` / `<C-x>` on the number at or after the cursor.
     pub(super) fn increment(&mut self, delta: i64) {
-        let buf = self.buf_mut();
-        let here = buf.cursor;
-        let Some((start, end, value)) = buf.number_at(here) else { return };
-        let new = value.saturating_add(delta).to_string();
+        let buf: &mut Buffer = self.buf_mut();
+        let here: Pos = buf.cursor;
+        let Some((start, end, value)): Option<(usize, usize, i64)> = buf.number_at(here) else { return };
+        let new: String = value.saturating_add(delta).to_string();
         buf.remove(Pos::new(here.line, start), Pos::new(here.line, end));
         buf.insert(Pos::new(here.line, start), &new);
         buf.cursor = Pos::new(here.line, start + text::char_len(&new) - 1);
@@ -114,27 +119,27 @@ impl Editor {
 
     pub(super) fn set_mark(&mut self, name: char) {
         if name.is_ascii_lowercase() || name == '\'' {
-            let at = self.buf().cursor;
+            let at: Pos = self.buf().cursor;
             self.buf_mut().marks.insert(name, at);
         }
     }
 
     /// Records the cursor before a jump: `''` and `<C-o>` come back here.
     pub(super) fn push_jump(&mut self) {
-        let at = self.buf().cursor;
-        let path = self.buf().path.clone();
+        let at: Pos = self.buf().cursor;
+        let path: Option<PathBuf> = self.buf().path.clone();
         self.buf_mut().marks.insert('\'', at);
-        let same = self.jumps.last().is_some_and(|(p, id, _)| *p == path && self.buf().anchor(*id) == Some(at));
+        let same: bool = self.jumps.last().is_some_and(|(p, id, _)| *p == path && self.buf().anchor(*id) == Some(at));
         if same {
             return;
         }
         // An anchor in the buffer keeps the entry on the same text while lines come and go.
         self.next_anchor += 1;
-        let id = self.next_anchor;
+        let id: u64 = self.next_anchor;
         self.buf_mut().add_anchor(id, at);
         self.jumps.push((path, id, at));
         if self.jumps.len() > MAX_JUMPS {
-            let (old_path, old_id, _) = self.jumps.remove(0);
+            let (old_path, old_id, _): (Option<PathBuf>, u64, Pos) = self.jumps.remove(0);
             if let Some(buf) = self.buffers.iter_mut().find(|b| b.path == old_path) {
                 buf.remove_anchor(old_id);
             }
@@ -144,14 +149,16 @@ impl Editor {
     /// `<C-o>`
     pub(super) fn jump_back(&mut self, count: usize) {
         for _ in 0..count {
-            let Some((path, id, fallback)) = self.jumps.pop() else { return self.info("Jump list is empty") };
+            let Some((path, id, fallback)): Option<(Option<PathBuf>, u64, Pos)> = self.jumps.pop() else {
+                return self.info("Jump list is empty");
+            };
             if path != self.buf().path
                 && let Some(path) = &path
             {
                 self.open(path);
             }
-            let buf = self.buf_mut();
-            let at = buf.anchor(id).unwrap_or(fallback);
+            let buf: &mut Buffer = self.buf_mut();
+            let at: Pos = buf.anchor(id).unwrap_or(fallback);
             buf.remove_anchor(id);
             buf.cursor = at;
             buf.clamp(false);
@@ -159,23 +166,23 @@ impl Editor {
     }
 
     /// `zt`, `zz`, `zb`: put the cursor line at the top, middle or bottom of the window.
-    pub(super) fn scroll_cursor_to(&mut self, place: char) {
-        let height = self.view_height.max(1);
-        let buf = self.buf_mut();
-        let line = buf.cursor.line;
-        buf.top = match place {
-            't' => line,
-            'b' => (line + 1).saturating_sub(height),
-            _ => line.saturating_sub(height / 2),
+    pub(super) fn scroll_cursor_to(&mut self, align: Align) {
+        let height: usize = self.view_height.max(1);
+        let buf: &mut Buffer = self.buf_mut();
+        let line: usize = buf.cursor.line;
+        buf.top = match align {
+            Align::Top => line,
+            Align::Bottom => (line + 1).saturating_sub(height),
+            Align::Middle => line.saturating_sub(height / 2),
         };
     }
 
     /// `<C-e>` / `<C-y>`: scroll the view, dragging the cursor only when it would leave it.
-    pub(super) fn scroll_view(&mut self, delta: isize, count: usize) {
-        let height = self.view_height.max(1);
-        let buf = self.buf_mut();
-        let step = count as isize * delta;
-        buf.top = buf.top.saturating_add_signed(step).min(buf.last_line());
+    pub(super) fn scroll_view(&mut self, down: bool, count: usize) {
+        let height: usize = self.view_height.max(1);
+        let buf: &mut Buffer = self.buf_mut();
+        let top: usize = if down { buf.top.saturating_add(count) } else { buf.top.saturating_sub(count) };
+        buf.top = top.min(buf.last_line());
         if buf.cursor.line < buf.top {
             buf.cursor.line = buf.top;
         } else if buf.cursor.line >= buf.top + height {
@@ -189,12 +196,12 @@ impl Editor {
     // shortcut: patterns are literal, not Vim regexes; add a small regex engine if users need them.
     pub(super) fn substitute(&mut self, range: LineRange, pattern: &str, replacement: &str, global: bool) -> usize {
         self.last_substitute = Some((pattern.to_owned(), replacement.to_owned(), global));
-        let buf = self.buf_mut();
-        let mut changed = 0;
+        let buf: &mut Buffer = self.buf_mut();
+        let mut changed: usize = 0;
         // Bottom-up, since a `\n` in the replacement splits a line and shifts the ones below.
         for y in (range.first..=range.last.min(buf.last_line())).rev() {
-            let line = buf.line(y).to_owned();
-            let mut hits = text::find_all(&line, pattern);
+            let line: String = buf.line(y).to_owned();
+            let mut hits: Vec<Range<usize>> = text::find_all(&line, pattern);
             if !global {
                 hits.truncate(1);
             }
@@ -202,8 +209,8 @@ impl Editor {
                 continue;
             }
             let chars: Vec<char> = line.chars().collect();
-            let mut out = String::with_capacity(line.len());
-            let mut col = 0;
+            let mut out: String = String::with_capacity(line.len());
+            let mut col: usize = 0;
             for hit in hits {
                 out.extend(&chars[col..hit.start]);
                 let matched: String = chars[hit.clone()].iter().collect();
@@ -220,10 +227,10 @@ impl Editor {
 
     /// `&`: the last `:s` again on the current line.
     pub(super) fn repeat_substitute(&mut self) {
-        let Some((pattern, replacement, global)) = self.last_substitute.clone() else {
+        let Some((pattern, replacement, global)): Option<(String, String, bool)> = self.last_substitute.clone() else {
             return self.set_message(Message::Error("E35: No previous regular expression".into()));
         };
-        let line = self.buf().cursor.line;
+        let line: usize = self.buf().cursor.line;
         self.substitute(LineRange { first: line, last: line }, &pattern, &replacement, global);
     }
 
@@ -236,14 +243,14 @@ impl Editor {
 
     /// Parses `%`, `.`, `$`, `N`, `'x` and pairs of them joined by `,`.
     pub(super) fn parse_range(&self, spec: &str) -> Option<LineRange> {
-        let buf = self.buf();
-        let last = buf.last_line();
+        let buf: &Buffer = self.buf();
+        let last: usize = buf.last_line();
         let line = |s: &str| -> Option<usize> {
             match s {
                 "" | "." => Some(buf.cursor.line),
                 "$" => Some(last),
                 s if s.starts_with('\'') => {
-                    let mark = s.chars().nth(1)?;
+                    let mark: char = s.chars().nth(1)?;
                     buf.marks.get(&mark).map(|p| p.line)
                 }
                 s => s.parse::<usize>().ok().map(|n| n.saturating_sub(1).min(last)),
@@ -252,15 +259,15 @@ impl Editor {
         if spec == "%" {
             return Some(LineRange { first: 0, last });
         }
-        let (a, b) = spec.split_once(',').unwrap_or((spec, spec));
-        let (first, second) = (line(a)?, line(b)?);
+        let (a, b): (&str, &str) = spec.split_once(',').unwrap_or((spec, spec));
+        let (first, second): (usize, usize) = (line(a)?, line(b)?);
         Some(LineRange { first: first.min(second), last: first.max(second) })
     }
 }
 
 fn expand_replacement(replacement: &str, matched: &str) -> String {
-    let mut out = String::new();
-    let mut chars = replacement.chars();
+    let mut out: String = String::new();
+    let mut chars: Chars<'_> = replacement.chars();
     while let Some(c) = chars.next() {
         match c {
             '\\' => match chars.next() {

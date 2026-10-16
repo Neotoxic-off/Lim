@@ -49,10 +49,10 @@ impl Editor {
     }
 
     pub(super) fn track_after(&mut self) {
-        let (buffer, version) = self.repeat.origin;
-        let changed = buffer == self.current && version != self.buf().version();
+        let (buffer, version): (usize, u64) = self.repeat.origin;
+        let changed: bool = buffer == self.current && version != self.buf().version();
         // `.` itself never becomes the last change, or the next `.` would replay itself forever.
-        let skip = std::mem::take(&mut self.repeat.skip);
+        let skip: bool = std::mem::take(&mut self.repeat.skip);
         if !self.repeat.replaying && self.mode == Mode::Normal && self.pending.is_empty() && changed && !skip {
             self.repeat.last_change = std::mem::take(&mut self.repeat.current);
             self.repeat.origin.1 = self.buf().version();
@@ -69,7 +69,7 @@ impl Editor {
         if self.repeat.replaying {
             return;
         }
-        let keys = self.repeat.last_change.clone();
+        let keys: Vec<Key> = self.repeat.last_change.clone();
         self.repeat.replaying = true;
         if self.repeat.depth == 0 {
             self.repeat.budget = REPLAY_BUDGET;
@@ -100,8 +100,8 @@ impl Editor {
     }
 
     pub(super) fn play_macro(&mut self, reg: char, count: usize) {
-        let reg = if reg == '@' { self.repeat.last_macro } else { Some(reg) };
-        let Some(keys) = reg.and_then(|r| self.repeat.macros.get(&r)).cloned() else { return };
+        let reg: Option<char> = if reg == '@' { self.repeat.last_macro } else { Some(reg) };
+        let Some(keys): Option<Vec<Key>> = reg.and_then(|r| self.repeat.macros.get(&r)).cloned() else { return };
         if self.repeat.depth >= MAX_MACRO_DEPTH {
             return;
         }

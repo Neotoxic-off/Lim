@@ -1,9 +1,12 @@
 //! The `:` command line and `/` search prompt.
 
 use std::path::{Path, PathBuf};
+use std::str::Chars;
 
+use super::cmdhistory::CmdHistory;
 use super::motion::{Motion, Span};
 use super::operator::Operator;
+use super::vim::LineRange;
 use super::{Editor, Mode};
 use crate::buffer::{Buffer, Pos};
 use crate::error::Error;
@@ -35,29 +38,53 @@ pub const COMMANDS: &[(&str, &str)] = &[
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    Write { path: Option<PathBuf>, force: bool },
+    Write {
+        path: Option<PathBuf>,
+        force: bool,
+    },
     WriteAll,
     /// `:q`: closes the window, or quits when it is the last one.
-    Quit { force: bool },
-    QuitAll { force: bool },
+    Quit {
+        force: bool,
+    },
+    QuitAll {
+        force: bool,
+    },
     CloseWindow,
     Only,
-    Split { vertical: bool, path: Option<PathBuf> },
-    WriteQuit { path: Option<PathBuf>, force: bool, only_if_dirty: bool },
+    Split {
+        vertical: bool,
+        path: Option<PathBuf>,
+    },
+    WriteQuit {
+        path: Option<PathBuf>,
+        force: bool,
+        only_if_dirty: bool,
+    },
     WriteAllQuit,
     Edit(PathBuf),
     New,
     BufferNext,
     BufferPrev,
-    BufferDelete { force: bool },
+    BufferDelete {
+        force: bool,
+    },
     NoHighlight,
     Goto(usize),
     /// `:$`, `:'a`, `:.`: a single address other than a number.
     GotoAddress(String),
     /// `:[range]s/pattern/replacement/[g]`
-    Substitute { range: String, pattern: String, replacement: String, global: bool },
+    Substitute {
+        range: String,
+        pattern: String,
+        replacement: String,
+        global: bool,
+    },
     /// `:[range]d`, `y`, `>`, `<`, `j`
-    LineOp { range: String, op: LineOp },
+    LineOp {
+        range: String,
+        op: LineOp,
+    },
     Colorscheme(Option<String>),
     Iconset(Option<String>),
     Help,
@@ -74,7 +101,7 @@ pub enum LineOp {
 
 /// Splits a leading line range (`%`, `.`, `$`, `N`, `'x`, `a,b`) off an ex command.
 fn split_range(input: &str) -> (&str, &str) {
-    let bytes = input.as_bytes();
+    let bytes: &[u8] = input.as_bytes();
     if let Some(rest) = input.strip_prefix('%') {
         return ("%", rest);
     }
@@ -91,9 +118,9 @@ fn split_range(input: &str) -> (&str, &str) {
             _ => i,
         }
     };
-    let mut end = address(0);
+    let mut end: usize = address(0);
     if end > 0 && bytes.get(end) == Some(&b',') {
-        let second = address(end + 1);
+        let second: usize = address(end + 1);
         if second > end + 1 {
             end = second;
         }
@@ -103,10 +130,10 @@ fn split_range(input: &str) -> (&str, &str) {
 
 /// `s/pattern/replacement/flags` with any punctuation as the delimiter and `\` escaping it.
 fn parse_substitute(rest: &str) -> Option<(String, String, bool)> {
-    let mut chars = rest.strip_prefix('s')?.chars();
-    let delim = chars.next().filter(|c| !c.is_alphanumeric() && !c.is_whitespace())?;
-    let mut parts = vec![String::new()];
-    let mut escaped = false;
+    let mut chars: Chars<'_> = rest.strip_prefix('s')?.chars();
+    let delim: char = chars.next().filter(|c| !c.is_alphanumeric() && !c.is_whitespace())?;
+    let mut parts: Vec<String> = vec![String::new()];
+    let mut escaped: bool = false;
     for c in chars {
         match c {
             _ if escaped => {
@@ -121,29 +148,29 @@ fn parse_substitute(rest: &str) -> Option<(String, String, bool)> {
             c => parts.last_mut()?.push(c),
         }
     }
-    let flags = parts.get(2).cloned().unwrap_or_default();
+    let flags: String = parts.get(2).cloned().unwrap_or_default();
     Some((parts.first()?.clone(), parts.get(1).cloned().unwrap_or_default(), flags.contains('g')))
 }
 
 impl Command {
     /// Ok(None) for an empty line.
     pub fn parse(input: &str) -> Result<Option<Self>, Error> {
-        let input = input.trim();
+        let input: &str = input.trim();
         if input.is_empty() {
             return Ok(None);
         }
         if let Ok(line) = input.parse() {
             return Ok(Some(Self::Goto(line)));
         }
-        let (range, rest) = split_range(input);
-        let rest = rest.trim();
+        let (range, rest): (&str, &str) = split_range(input);
+        let rest: &str = rest.trim();
         if !range.is_empty() && rest.is_empty() {
             return Ok(Some(Self::GotoAddress(range.to_owned())));
         }
         if let Some((pattern, replacement, global)) = parse_substitute(rest) {
             return Ok(Some(Self::Substitute { range: range.to_owned(), pattern, replacement, global }));
         }
-        let line_op = match rest {
+        let line_op: Option<LineOp> = match rest {
             "d" | "de" | "del" | "delete" => Some(LineOp::Delete),
             "y" | "ya" | "yank" => Some(LineOp::Yank),
             ">" => Some(LineOp::Indent),
@@ -157,9 +184,10 @@ impl Command {
         if !range.is_empty() {
             return Err(Error::NotACommand(input.into()));
         }
-        let (name, arg) = input.split_once(char::is_whitespace).map_or((input, ""), |(n, a)| (n, a.trim()));
-        let (name, force) = name.strip_suffix('!').map_or((name, false), |n| (n, true));
-        let path = (!arg.is_empty()).then(|| PathBuf::from(arg));
+        let (name, arg): (&str, &str) =
+            input.split_once(char::is_whitespace).map_or((input, ""), |(n, a)| (n, a.trim()));
+        let (name, force): (&str, bool) = name.strip_suffix('!').map_or((name, false), |n| (n, true));
+        let path: Option<PathBuf> = (!arg.is_empty()).then(|| PathBuf::from(arg));
         Ok(Some(match name {
             "w" | "write" => Self::Write { path, force },
             "wa" | "wall" => Self::WriteAll,
@@ -187,18 +215,33 @@ impl Command {
 }
 
 impl Editor {
+    /// The history of the command line being typed: `:` lines, or `/` `?` patterns.
+    pub(super) fn cmdline_history(&mut self) -> &mut CmdHistory {
+        if self.mode == Mode::Command { &mut self.cmd_history } else { &mut self.search_history }
+    }
+
     pub(super) fn command_line(&mut self, key: Key) {
-        let commands = self.mode == Mode::Command;
+        let commands: bool = self.mode == Mode::Command;
         match key {
             Key::Esc | Key::Ctrl('c') => self.mode = Mode::Normal,
             Key::Backspace | Key::Ctrl('h') if self.cmdline.is_empty() => self.mode = Mode::Normal,
+            Key::Up | Key::Down | Key::ShiftUp | Key::ShiftDown => {
+                let older: bool = matches!(key, Key::Up | Key::ShiftUp);
+                let current: String = self.cmdline.clone();
+                if let Some(recalled) = self.cmdline_history().step(older, &current) {
+                    self.cmdline = recalled;
+                    self.cmd_completion = None;
+                }
+            }
             Key::Backspace | Key::Ctrl('h') => {
+                self.cmdline_history().reset();
                 self.cmdline.pop();
                 if commands {
                     self.update_cmd_completion();
                 }
             }
             Key::Char(c) => {
+                self.cmdline_history().reset();
                 self.cmdline.push(c);
                 if commands {
                     self.update_cmd_completion();
@@ -212,8 +255,9 @@ impl Editor {
             }
             Key::BackTab | Key::Ctrl('p') if commands => self.cycle_cmd_completion(false),
             Key::Enter | Key::Ctrl('j') => {
-                let input = std::mem::take(&mut self.cmdline);
-                let search = self.mode == Mode::Search;
+                let input: String = std::mem::take(&mut self.cmdline);
+                self.cmdline_history().push(&input);
+                let search: bool = self.mode == Mode::Search;
                 self.mode = Mode::Normal;
                 if search {
                     if !input.is_empty() {
@@ -224,7 +268,7 @@ impl Editor {
                     match Command::parse(&input) {
                         Ok(Some(command)) => self.run(command),
                         Ok(None) => {}
-                        Err(e) => self.error(e),
+                        Err(e) => self.error(&e),
                     }
                 }
             }
@@ -234,7 +278,7 @@ impl Editor {
 
     pub(super) fn run(&mut self, command: Command) {
         if let Err(e) = self.try_run(command) {
-            self.error(e);
+            self.error(&e);
         }
     }
 
@@ -272,19 +316,19 @@ impl Editor {
             }
             Command::Edit(path) => self.open(&path),
             Command::New => self.new_buffer(),
-            Command::BufferNext => self.cycle(1),
-            Command::BufferPrev => self.cycle(-1),
+            Command::BufferNext => self.cycle(true, 1),
+            Command::BufferPrev => self.cycle(false, 1),
             Command::BufferDelete { force } => self.close_buffer(force)?,
             Command::NoHighlight => self.highlight_search = false,
             Command::GotoAddress(spec) => {
-                let range = self.parse_range(&spec).ok_or_else(|| Error::NotACommand(spec.clone()))?;
+                let range: LineRange = self.parse_range(&spec).ok_or_else(|| Error::NotACommand(spec.clone()))?;
                 self.push_jump();
-                let buf = self.buf_mut();
+                let buf: &mut Buffer = self.buf_mut();
                 buf.cursor = Pos::new(range.last, buf.first_non_blank(range.last));
             }
             Command::Substitute { range, pattern, replacement, global } => {
-                let lines = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
-                let pattern = if pattern.is_empty() { self.search.clone() } else { pattern };
+                let lines: LineRange = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
+                let pattern: String = if pattern.is_empty() { self.search.clone() } else { pattern };
                 if pattern.is_empty() {
                     return Err(Error::NoPattern);
                 }
@@ -295,8 +339,8 @@ impl Editor {
                 }
             }
             Command::LineOp { range, op } => {
-                let lines = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
-                let (first, last) = (Pos::new(lines.first, 0), Pos::new(lines.last, 0));
+                let lines: LineRange = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
+                let (first, last): (Pos, Pos) = (Pos::new(lines.first, 0), Pos::new(lines.last, 0));
                 self.buf_mut().seal();
                 match op {
                     LineOp::Delete => self.apply(Operator::Delete, first, last, Span::Linewise),
@@ -315,8 +359,8 @@ impl Editor {
             Command::Iconset(None) => self.info(self.options.iconset.clone()),
             Command::Help => self.open_cheatsheet(),
             Command::Goto(n) => {
-                let buf = self.buf_mut();
-                let line = n.saturating_sub(1).min(buf.last_line());
+                let buf: &mut Buffer = self.buf_mut();
+                let line: usize = n.saturating_sub(1).min(buf.last_line());
                 buf.cursor = Pos::new(line, buf.first_non_blank(line));
             }
         }
@@ -324,9 +368,9 @@ impl Editor {
     }
 
     fn write(&mut self, path: Option<&Path>, force: bool) -> Result<(), Error> {
-        let gitsigns = self.options.gitsigns;
-        let buf = self.buf_mut();
-        let summary = buf.save(path, force)?;
+        let gitsigns: bool = self.options.gitsigns;
+        let buf: &mut Buffer = self.buf_mut();
+        let summary: String = buf.save(path, force)?;
         if gitsigns {
             buf.load_git_base();
         }
@@ -368,7 +412,12 @@ mod tests {
         assert!(matches!(Command::parse("frob"), Err(Error::NotACommand(_))));
         assert_eq!(
             Command::parse("%s/a\\/b/c/g").unwrap(),
-            Some(Command::Substitute { range: "%".into(), pattern: "a/b".into(), replacement: "c".into(), global: true })
+            Some(Command::Substitute {
+                range: "%".into(),
+                pattern: "a/b".into(),
+                replacement: "c".into(),
+                global: true
+            })
         );
         assert_eq!(
             Command::parse("'<,'>d").unwrap(),

@@ -1,7 +1,7 @@
 //! gitsigns: which lines are added, changed or deleted against the git index.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sign {
@@ -27,7 +27,7 @@ impl GitState {
     /// Reads the staged version via `git show :./name`; no repo, untracked file or no git → no signs.
     pub fn load(&mut self, path: &Path) {
         self.base = index_text(path).map(|text| {
-            let body = text.strip_suffix('\n').unwrap_or(&text);
+            let body: &str = text.strip_suffix('\n').unwrap_or(&text);
             body.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_owned()).collect()
         });
         self.computed_for = None;
@@ -43,9 +43,9 @@ impl GitState {
 }
 
 fn index_text(path: &Path) -> Option<String> {
-    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let name = path.file_name()?.to_string_lossy().into_owned();
-    let output = Command::new("git")
+    let dir: &Path = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let name: String = path.file_name()?.to_string_lossy().into_owned();
+    let output: Output = Command::new("git")
         .arg("-C")
         .arg(dir)
         .arg("show")
@@ -62,29 +62,30 @@ fn index_text(path: &Path) -> Option<String> {
 
 /// One sign slot per line of `new`.
 pub fn diff(old: &[String], new: &[String]) -> Vec<Option<Sign>> {
-    let mut signs = vec![None; new.len()];
-    let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
-    let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
-    let (old_mid, new_mid) = (&old[prefix..old.len() - suffix], &new[prefix..new.len() - suffix]);
+    let mut signs: Vec<Option<Sign>> = vec![None; new.len()];
+    let prefix: usize = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    let suffix: usize = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
+    let (old_mid, new_mid): (&[String], &[String]) =
+        (&old[prefix..old.len() - suffix], &new[prefix..new.len() - suffix]);
     if old_mid.is_empty() && new_mid.is_empty() {
         return signs;
     }
-    let ops = if old_mid.len().saturating_mul(new_mid.len()) <= MAX_CELLS {
+    let ops: Vec<Op> = if old_mid.len().saturating_mul(new_mid.len()) <= MAX_CELLS {
         lcs_ops(old_mid, new_mid)
     } else {
-        let mut ops = vec![Op::Delete; old_mid.len()];
+        let mut ops: Vec<Op> = vec![Op::Delete; old_mid.len()];
         ops.extend(std::iter::repeat_n(Op::Insert, new_mid.len()));
         ops
     };
     // Each run of deletions/insertions between kept lines becomes one hunk.
-    let (mut line, mut deleted, mut inserted) = (prefix, 0, 0);
+    let (mut line, mut deleted, mut inserted): (usize, usize, usize) = (prefix, 0, 0);
     let flush = |line: usize, deleted: usize, inserted: usize, signs: &mut Vec<Option<Sign>>| {
-        let start = line - inserted;
+        let start: usize = line - inserted;
         for (i, slot) in signs.iter_mut().enumerate().skip(start).take(inserted) {
             *slot = Some(if i - start < deleted { Sign::Change } else { Sign::Add });
         }
         if deleted > inserted {
-            let at = if line > 0 { line - 1 } else { 0 };
+            let at: usize = if line > 0 { line - 1 } else { 0 };
             if let Some(slot) = signs.get_mut(at)
                 && slot.is_none()
             {
@@ -118,18 +119,21 @@ enum Op {
 }
 
 fn lcs_ops(old: &[String], new: &[String]) -> Vec<Op> {
-    let (n, m) = (old.len(), new.len());
+    let (n, m): (usize, usize) = (old.len(), new.len());
     // table[i][j] = LCS length of old[i..] and new[j..]
-    let mut table = vec![0u32; (n + 1) * (m + 1)];
+    let mut table: Vec<u32> = vec![0u32; (n + 1) * (m + 1)];
     let at = |i: usize, j: usize| i * (m + 1) + j;
     for i in (0..n).rev() {
         for j in (0..m).rev() {
-            table[at(i, j)] =
-                if old[i] == new[j] { table[at(i + 1, j + 1)] + 1 } else { table[at(i + 1, j)].max(table[at(i, j + 1)]) };
+            table[at(i, j)] = if old[i] == new[j] {
+                table[at(i + 1, j + 1)] + 1
+            } else {
+                table[at(i + 1, j)].max(table[at(i, j + 1)])
+            };
         }
     }
-    let mut ops = Vec::with_capacity(n + m);
-    let (mut i, mut j) = (0, 0);
+    let mut ops: Vec<Op> = Vec::with_capacity(n + m);
+    let (mut i, mut j): (usize, usize) = (0, 0);
     while i < n || j < m {
         if i < n && j < m && old[i] == new[j] {
             ops.push(Op::Keep);

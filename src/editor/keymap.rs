@@ -4,15 +4,16 @@
 use std::time::Instant;
 
 use super::{Editor, Mode};
-use crate::config::keys::LEADER;
 use crate::config::MapMode;
+use crate::config::keys::LEADER;
 use crate::term::Key;
 
 impl Editor {
     /// The configured `mapleader` becomes the internal leader key where commands start.
     pub(super) fn translate_leader(&self, key: Key) -> Key {
-        let at_command_start = matches!(self.mode, Mode::Normal | Mode::Visual | Mode::VisualLine | Mode::Explorer)
-            && self.pending.prefix.is_none_or(|p| p == LEADER);
+        let at_command_start: bool =
+            matches!(self.mode, Mode::Normal | Mode::Visual | Mode::VisualLine | Mode::Explorer)
+                && self.pending.prefix.is_none_or(|p| p == LEADER);
         if at_command_start && key == self.options.mapleader { Key::Char(LEADER) } else { key }
     }
 
@@ -27,11 +28,11 @@ impl Editor {
 
     /// True when `key` was consumed by the mapping machinery (waiting, or mapped).
     pub(super) fn map_key(&mut self, key: Key) -> bool {
-        let Some(mode) = self.map_mode() else { return self.flush_then(key) };
+        let Some(mode): Option<MapMode> = self.map_mode() else { return self.flush_then(key) };
         self.typeahead.push(key);
-        let typed = &self.typeahead;
-        let mut exact = None;
-        let mut longer = false;
+        let typed: &Vec<Key> = &self.typeahead;
+        let mut exact: Option<Option<Vec<Key>>> = None;
+        let mut longer: bool = false;
         for map in self.keymaps.iter().filter(|m| m.mode == mode && m.lhs.starts_with(typed)) {
             if map.lhs.len() == typed.len() {
                 exact = Some(map.rhs.clone());
@@ -70,7 +71,7 @@ impl Editor {
 
     /// Runs the waiting keys: as their mapping when `timed_out` and one matches exactly, else as typed.
     pub(super) fn flush_typeahead(&mut self, timed_out: bool) {
-        let keys = std::mem::take(&mut self.typeahead);
+        let keys: Vec<Key> = std::mem::take(&mut self.typeahead);
         if timed_out
             && let Some(mode) = self.map_mode()
             && let Some(map) = self.keymaps.iter().find(|m| m.mode == mode && m.lhs == keys)
