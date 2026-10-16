@@ -9,6 +9,30 @@ use crate::buffer::{Buffer, Pos};
 use crate::error::Error;
 use crate::term::Key;
 
+/// Every ex command by its full name, for command-line completion and `<Leader>fC`.
+pub const COMMANDS: &[(&str, &str)] = &[
+    ("bdelete", "Delete buffer"),
+    ("bnext", "Next buffer"),
+    ("bprevious", "Previous buffer"),
+    ("close", "Close window"),
+    ("colorscheme", "Switch theme"),
+    ("edit", "Edit a file"),
+    ("enew", "New empty buffer"),
+    ("help", "Cheatsheet"),
+    ("iconset", "Switch icon set"),
+    ("nohlsearch", "Clear search highlight"),
+    ("only", "Close other windows"),
+    ("qall", "Quit"),
+    ("quit", "Close the window or quit"),
+    ("split", "Split window"),
+    ("vsplit", "Split window vertically"),
+    ("wall", "Write all buffers"),
+    ("wq", "Write and quit"),
+    ("wqall", "Write all and quit"),
+    ("write", "Write the buffer"),
+    ("xit", "Write if changed and quit"),
+];
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Write { path: Option<PathBuf>, force: bool },
@@ -164,13 +188,29 @@ impl Command {
 
 impl Editor {
     pub(super) fn command_line(&mut self, key: Key) {
+        let commands = self.mode == Mode::Command;
         match key {
             Key::Esc | Key::Ctrl('c') => self.mode = Mode::Normal,
             Key::Backspace | Key::Ctrl('h') if self.cmdline.is_empty() => self.mode = Mode::Normal,
             Key::Backspace | Key::Ctrl('h') => {
                 self.cmdline.pop();
+                if commands {
+                    self.update_cmd_completion();
+                }
             }
-            Key::Char(c) => self.cmdline.push(c),
+            Key::Char(c) => {
+                self.cmdline.push(c);
+                if commands {
+                    self.update_cmd_completion();
+                }
+            }
+            Key::Tab | Key::Ctrl('n') if commands => {
+                if self.cmd_completion.is_none() {
+                    self.update_cmd_completion();
+                }
+                self.cycle_cmd_completion(true);
+            }
+            Key::BackTab | Key::Ctrl('p') if commands => self.cycle_cmd_completion(false),
             Key::Enter | Key::Ctrl('j') => {
                 let input = std::mem::take(&mut self.cmdline);
                 let search = self.mode == Mode::Search;

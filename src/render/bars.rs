@@ -12,7 +12,12 @@ type Segment = (Style, String);
 
 /// `left` truncated to fit, then `right` flush against the right edge.
 fn bar(grid: &mut Grid, y: usize, left: &[Segment], right: &[Segment], fill: Style) {
-    let width = grid.width;
+    bar_at(grid, 0, y, left, right, fill);
+}
+
+/// `bar` starting at column `x`, filling the rest of the row.
+fn bar_at(grid: &mut Grid, x: usize, y: usize, left: &[Segment], right: &[Segment], fill: Style) {
+    let width = grid.width.saturating_sub(x);
     let right_width: usize = right.iter().map(|(_, s)| text::str_width(s)).sum();
     let (right, avail) = if right_width > width { (&[][..], width) } else { (right, width - right_width) };
     let mut row = Row::new(width);
@@ -28,10 +33,11 @@ fn bar(grid: &mut Grid, y: usize, left: &[Segment], right: &[Segment], fill: Sty
     for (style, s) in right {
         row.text(*style, s);
     }
-    grid.put(0, y, &row.finish(fill));
+    grid.put(x, y, &row.finish(fill));
 }
 
-pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize) {
+/// Buffer tabs from column `offset`: heirline pads the tabline over the file tree so tabs line up with the windows.
+pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) {
     let t = theme();
     let set = icons(&ed.options);
     let mut segments = Vec::with_capacity(ed.buffers.len() * 4);
@@ -60,7 +66,11 @@ pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize) {
         };
         segments.push((style, mark));
     }
-    bar(grid, y, &segments, &[], t.style(Group::TabLineFill));
+    let fill = t.style(Group::TabLineFill);
+    if offset > 0 {
+        grid.text(0, y, offset, fill, "");
+    }
+    bar_at(grid, offset, y, &segments, &[], fill);
 }
 
 pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {

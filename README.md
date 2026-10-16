@@ -22,8 +22,8 @@ the start screen.
 | ![Live grep](docs/screenshots/grep.png) | ![which-key menu](docs/screenshots/whichkey.png) |
 | **Cheat sheet** (`<F1>`) | **Theme switcher** (`<Leader>ft`, live preview) |
 | ![Cheat sheet](docs/screenshots/cheatsheet.png) | ![Theme picker](docs/screenshots/themes.png) |
-| **Completion** (words from open buffers) | **Visual line + search** |
-| ![Completion menu](docs/screenshots/completion.png) | ![Visual selection](docs/screenshots/visual.png) |
+| **Completion** (words from open buffers) | **Command-line completion** (tabs aligned with the windows) |
+| ![Completion menu](docs/screenshots/completion.png) | ![Command-line completion](docs/screenshots/cmdline.png) |
 
 ## Contents
 
@@ -44,7 +44,7 @@ the start screen.
 | Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`, `"-`, `"_`, `"+`) · marks and jump list that follow edits · `:s` and line ranges |
 | Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, page and line scrolling, `zz zt zb` |
 | Text objects | `iw` `aw` `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
-| AstroNvim look | 23 colorschemes (astrodark by default) · NvChad-style statusline · buffer tabline with jump labels · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
+| AstroNvim look | 23 colorschemes (astrodark by default) · NvChad-style statusline · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
 | Code | keyword highlighting (Rust, Lua, Python, C/C++, JS/TS, Go, shell, TOML/YAML/JSON) with multi-line comments and strings · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) |
 | Git | signs against the index · hunk jumps · branches, log, file log, status and stash pickers · `git browse` · lazygit in one key · status colors in the file tree |
@@ -79,7 +79,11 @@ lim --help | --version
 ```
 
 Messages appear as notifications in the top-right corner (`cmdheight = 0`, as in AstroNvim); `:` and `/`
-borrow the last line while you type. Press `<F1>` (or `<Leader>fh`, `:help`) for the cheat sheet, or press
+borrow a line while you type, pushing the statusline up as Neovim does.
+
+The `:` line completes as you type: command names, then each command's argument (`:colorscheme`
+themes, `:iconset` sets, file paths for `:e`, `:w`, `:sp`, `:vs`). `<Tab>`/`<C-n>` and `<S-Tab>`/`<C-p>`
+cycle through the menu, writing the choice into the line; `<CR>` runs it. Press `<F1>` (or `<Leader>fh`, `:help`) for the cheat sheet, or press
 `<Space>` and wait for which-key.
 
 ## Keymaps

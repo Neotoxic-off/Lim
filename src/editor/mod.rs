@@ -26,6 +26,7 @@ mod tests;
 mod ui;
 mod vim;
 mod visual;
+mod wildmenu;
 mod window;
 
 use std::path::Path;
@@ -40,6 +41,7 @@ use operator::Operator;
 pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
 pub use cheatsheet::Card;
 pub use complete::{Completion, MENU_HEIGHT, words_of};
+pub use wildmenu::CmdCompletion;
 pub use picker::{Picker, Target};
 pub use window::{Layout, Rect, View, Window};
 
@@ -201,6 +203,8 @@ pub struct Editor {
     pub cheatsheet: Option<cheatsheet::Cheatsheet>,
     /// The insert-mode completion menu, when open.
     pub completion: Option<Completion>,
+    /// The `:` completion menu, when open.
+    pub cmd_completion: Option<CmdCompletion>,
     /// `<C-o>` in insert mode: one normal command, then back to insert.
     insert_once: bool,
     /// Line as it was when `R` started, so backspace can restore it.
@@ -263,6 +267,7 @@ impl Editor {
             prompt: None,
             cheatsheet: None,
             completion: None,
+            cmd_completion: None,
             insert_once: false,
             replace_original: String::new(),
             history: Vec::new(),
@@ -380,6 +385,9 @@ impl Editor {
         }
         if self.mode != Mode::Insert {
             self.completion = None;
+        }
+        if self.mode != Mode::Command {
+            self.cmd_completion = None;
         }
         // `<C-o>` from insert mode: back to insert once the normal command is complete.
         if insert_once && self.mode == Mode::Normal && self.pending.is_empty() {

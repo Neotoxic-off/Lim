@@ -287,7 +287,7 @@ impl Editor {
                 .collect(),
             PickerKind::Recent => file_items(self.recent.iter().filter(|p| p.is_file()).cloned().collect()),
             PickerKind::Keymaps => self.keymap_items(),
-            PickerKind::Commands => COMMANDS
+            PickerKind::Commands => super::command::COMMANDS
                 .iter()
                 .map(|(cmd, desc)| Item { label: format!("{cmd:<12}{desc}"), target: Target::Command((*cmd).to_owned()) })
                 .collect(),
@@ -483,24 +483,6 @@ pub(super) fn file_items(files: Vec<PathBuf>) -> Vec<Item> {
     files.into_iter().map(|p| Item { label: p.display().to_string(), target: Target::File(p, None) }).collect()
 }
 
-/// `<Leader>fC`: the ex commands lim understands.
-const COMMANDS: &[(&str, &str)] = &[
-    ("w", "Write the buffer"),
-    ("wa", "Write all buffers"),
-    ("q", "Close the window or quit"),
-    ("qa", "Quit"),
-    ("wq", "Write and quit"),
-    ("x", "Write if changed and quit"),
-    ("enew", "New empty buffer"),
-    ("bn", "Next buffer"),
-    ("bp", "Previous buffer"),
-    ("bd", "Delete buffer"),
-    ("split", "Split window"),
-    ("vsplit", "Split window vertically"),
-    ("only", "Close other windows"),
-    ("close", "Close window"),
-    ("noh", "Clear search highlight"),
-];
 
 #[cfg(test)]
 mod tests {

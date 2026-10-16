@@ -480,3 +480,24 @@ fn ctrl_w_w_cycles_windows() {
     ed.handle(Key::Char('w'));
     assert_eq!((ed.mode, ed.active), (Mode::Normal, 0));
 }
+
+#[test]
+fn command_line_completion() {
+    let mut ed = editor("a");
+    keys(&mut ed, ":colo");
+    assert!(ed.cmd_completion.is_some());
+    ed.handle(Key::Tab);
+    assert_eq!(ed.cmdline, "colorscheme");
+    keys(&mut ed, " drac");
+    ed.handle(Key::Tab);
+    assert_eq!(ed.cmdline, "colorscheme dracula");
+    keys(&mut ed, "\n");
+    assert_eq!(ed.colorscheme, "dracula");
+    keys(&mut ed, ":colorscheme catppuccin-");
+    ed.handle(Key::Tab);
+    ed.handle(Key::Tab);
+    ed.handle(Key::BackTab);
+    assert_eq!(ed.cmdline, "colorscheme catppuccin-mocha");
+    ed.handle(Key::Esc);
+    assert!(ed.cmd_completion.is_none());
+}

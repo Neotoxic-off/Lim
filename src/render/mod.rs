@@ -123,17 +123,20 @@ impl Screen {
         let roomy = height > 3;
         let top = usize::from(options.showtabline && roomy);
         let status = usize::from(options.laststatus && roomy);
-        let cmd = options.cmdheight.min(1) * usize::from(roomy);
+        let prompt = matches!(ed.mode, Mode::Command | Mode::Search);
+        // With cmdheight=0, typing `:` or `/` borrows a line as Neovim does, pushing the statusline up.
+        let cmd = (options.cmdheight.min(1) | usize::from(prompt)) * usize::from(roomy);
         let text_height = height.saturating_sub(top + status + cmd).max(1);
 
+        // Columns taken by the file tree and its border, shared by the tabline and the windows.
+        let tree_width = if ed.explorer.is_some() && width >= 20 { EXPLORER_WIDTH.min(width / 2) } else { 0 };
         if top == 1 {
-            bars::tabline(ed, &mut grid, 0);
+            bars::tabline(ed, &mut grid, 0, if tree_width > 0 { tree_width + 1 } else { 0 });
         }
         let startup = *self.startup.get_or_insert_with(|| ed.started.elapsed());
         let mut area = Rect { x: 0, y: top, w: width, h: text_height };
         let mut cursor = None;
-        if ed.explorer.is_some() && width >= 20 {
-            let tree_width = EXPLORER_WIDTH.min(width / 2);
+        if tree_width > 0 {
             cursor = tree::explorer(ed, &mut grid, Rect { w: tree_width, ..area });
             let border = theme().style(Group::WinSeparator);
             for y in area.y..area.y + area.h {
@@ -164,7 +167,6 @@ impl Screen {
             self.ctx.branch = env::current_dir().ok().and_then(git_branch);
             bars::statusline(ed, &self.ctx, &mut grid, top + text_height);
         }
-        let prompt = matches!(ed.mode, Mode::Command | Mode::Search);
         if cmd == 1 || prompt {
             bars::cmdline(ed, &mut grid, height - 1);
         } else if options.notifications {
@@ -176,6 +178,7 @@ impl Screen {
         if let Some(input) = finder::picker(ed, &mut grid) {
             cursor = Some(input);
         }
+        popup::cmd_completion(ed, &mut grid);
         popup::cheatsheet(ed, &mut grid);
         if ed.mode == Mode::Cheatsheet {
             cursor = None;
@@ -298,3 +301,4 @@ mod fuzz {
         }
     }
 }
+

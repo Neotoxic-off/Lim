@@ -146,3 +146,40 @@ pub fn completion(ed: &Editor, grid: &mut Grid, cursor: Option<(usize, usize)>) 
         grid.put(x + 1, y + 1 + i - first, &cell.finish(base));
     }
 }
+
+/// The `:` completion menu, just above the command line, under the word being completed.
+pub fn cmd_completion(ed: &Editor, grid: &mut Grid) {
+    let Some(menu) = &ed.cmd_completion else { return };
+    let t = theme();
+    let fill = t.style(Group::NormalFloat);
+    let border = t.on(Group::FloatBorder, fill.bg);
+    let shown = menu.items.len().min(crate::editor::MENU_HEIGHT);
+    let first = menu.selected.map_or(0, |s| s.saturating_sub(shown - 1));
+    let label = menu.items.iter().map(|(c, _)| text::str_width(c)).max().unwrap_or(0);
+    let desc = menu.items.iter().map(|(_, d)| text::str_width(d)).max().unwrap_or(0);
+    let width = (label + desc + 6).min(grid.width);
+    let height = shown + 2;
+    // Above the command line and the statusline.
+    let below = 1 + usize::from(ed.options.laststatus);
+    if width < 8 || grid.height < height + below + 1 {
+        return;
+    }
+    let before: String = ed.cmdline.chars().take(menu.start).collect();
+    let x = (1 + text::str_width(&before)).saturating_sub(2).min(grid.width - width);
+    let y = grid.height - below - height;
+    grid.float(Rect { x, y, w: width, h: height }, border, fill, "");
+    let typed = text::char_len(&ed.cmdline) - menu.start;
+    for (i, (item, about)) in menu.items.iter().enumerate().skip(first).take(shown) {
+        let bg = if menu.selected == Some(i) { t.bg(Group::PmenuSel) } else { fill.bg };
+        let base = Style { bg, ..fill };
+        let mut row = Row::new(width - 2);
+        row.text(base, " ");
+        for (k, c) in item.chars().enumerate() {
+            let matched = menu.selected.is_none() && k < typed;
+            row.cell(if matched { t.on(Group::CompletionMatch, bg) } else { base }, c);
+        }
+        row.pad_to(base, label + 3);
+        row.text(t.on(Group::CompletionSource, bg), about);
+        grid.put(x + 1, y + 1 + i - first, &row.finish(base));
+    }
+}
