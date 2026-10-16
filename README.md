@@ -125,7 +125,7 @@ The leader is `<Space>`. Unless marked *lim*, everything matches AstroNvim's def
 | `\|` · `\` | Vertical · horizontal split |
 | `<C-h>` `<C-j>` `<C-k>` `<C-l>` | Move between windows (and into the file tree) |
 | `<C-Up>` `<C-Down>` `<C-Left>` `<C-Right>` | Resize the split |
-| `<C-w>v` `s` `c` `q` `o` `w` `h` `j` `k` `l` | Vim window commands |
+| `<C-w>v` `s` `c` `q` `o` `w` `h` `j` `k` `l`, `<C-w><arrows>` | Vim window commands |
 
 ### Find
 

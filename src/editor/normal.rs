@@ -188,6 +188,11 @@ impl Editor {
         let c: char = match key {
             Key::Char(c) => c,
             Key::Ctrl(c) if prefix == CTRL_W => c,
+            // Vim: `<C-w><Left>` is `<C-w>h`, and so on.
+            Key::Left if prefix == CTRL_W => 'h',
+            Key::Down if prefix == CTRL_W => 'j',
+            Key::Up if prefix == CTRL_W => 'k',
+            Key::Right if prefix == CTRL_W => 'l',
             Key::Enter if prefix == LEADER_F => '\r',
             _ => {
                 self.pending = Pending::default();

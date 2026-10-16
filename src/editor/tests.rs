@@ -489,6 +489,19 @@ fn ctrl_w_w_cycles_windows() {
 }
 
 #[test]
+fn ctrl_w_arrow_focuses_window() {
+    let mut ed: Editor = editor("a");
+    keys(&mut ed, "|");
+    assert_eq!(ed.active, 1);
+    ed.handle(Key::Ctrl('w'));
+    ed.handle(Key::Left);
+    assert_eq!(ed.active, 0);
+    ed.handle(Key::Ctrl('w'));
+    ed.handle(Key::Right);
+    assert_eq!(ed.active, 1);
+}
+
+#[test]
 fn command_line_completion() {
     let mut ed: Editor = editor("a");
     keys(&mut ed, ":colo");
