@@ -1,7 +1,6 @@
 //! Tabline (heirline bufferline), NvChad-style statusline, command line and notifications.
 
 use std::sync::Arc;
-
 use super::Context;
 use super::icons::{Icons, icons};
 use super::row::{Grid, Row};

@@ -39,7 +39,8 @@
     // "colorscheme": "catppuccin-mocha",  // unset: the last one picked with <Leader>ft (nvchad at first)
     "iconset": "nerd",            // "nerd", "unicode" or "ascii"
     "completion": true,           // words from open buffers while typing
-    "statusline_style": "rounded" // "rounded", "slanted", "arrow" or "flat" (Nerd Font icon set)
+    "statusline_style": "rounded", // "rounded", "slanted", "arrow" or "flat" (Nerd Font icon set)
+    "splash": "hydra"             // start screen: "hydra", "cerberus", "mares", "reaper", "devil" or "random"
   },
 
   // astrotheme palette overrides, e.g. "ui": { "base": "#000000" }.

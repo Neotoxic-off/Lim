@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use super::{Editor, Message, Mode};
 use crate::config::json::Json;
-use crate::config::{self, Config, StatusStyle};
+use crate::config::{self, Config, Splash, StatusStyle};
 use crate::render::{icons, palettes};
 use crate::term::Key;
 
@@ -18,6 +18,7 @@ pub enum Values {
     Themes,
     IconSets,
     StatusStyles,
+    Splashes,
     /// `truecolor`: "auto", true or false.
     Auto,
 }
@@ -33,6 +34,7 @@ impl Values {
             Self::Themes => words(&mut palettes::THEMES.iter().map(|t| t.name)),
             Self::IconSets => words(&mut icons::SETS.iter().map(|(name, _, _)| *name)),
             Self::StatusStyles => words(&mut StatusStyle::ALL.iter().map(|s| s.name())),
+            Self::Splashes => words(&mut Splash::ALL.iter().map(|s| s.name())),
             Self::Auto => vec![Json::String("auto".into()), Json::Bool(true), Json::Bool(false)],
         }
     }
@@ -69,6 +71,7 @@ pub const SETTINGS: &[Setting] = &[
     setting("Layout", "cmdheight", "Command line always shown", Values::Range(0, 1)),
     setting("Layout", "notifications", "Messages as notifications", Values::Toggle),
     setting("Layout", "dashboard", "Start screen", Values::Toggle),
+    setting("Layout", "splash", "Start screen monster", Values::Splashes),
     setting("Editing", "tabstop", "Columns per tab", Values::Range(1, 16)),
     setting("Editing", "shiftwidth", "Indent width (0: tabstop)", Values::Range(0, 16)),
     setting("Editing", "expandtab", "Indent with spaces", Values::Toggle),

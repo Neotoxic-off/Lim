@@ -80,6 +80,34 @@ pub struct Options {
     pub completion: bool,
     /// Shape of the statusline section ends (Nerd Font icon set only).
     pub statusline_style: StatusStyle,
+    /// The start screen's monster.
+    pub splash: Splash,
+}
+
+/// The start screen art: monsters of the Greek underworld, or a different one each start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Splash {
+    Hydra,
+    Cerberus,
+    Mares,
+    Reaper,
+    Devil,
+    Random,
+}
+
+impl Splash {
+    pub const ALL: [Self; 6] = [Self::Hydra, Self::Cerberus, Self::Mares, Self::Reaper, Self::Devil, Self::Random];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Hydra => "hydra",
+            Self::Cerberus => "cerberus",
+            Self::Mares => "mares",
+            Self::Reaper => "reaper",
+            Self::Devil => "devil",
+            Self::Random => "random",
+        }
+    }
 }
 
 /// How statusline sections end: `NvChad`'s rounded caps, powerline slants or arrows, or flat blocks.
@@ -144,6 +172,7 @@ pub const OPTION_NAMES: &[&str] = &[
     "iconset",
     "completion",
     "statusline_style",
+    "splash",
 ];
 
 impl Default for Options {
@@ -187,6 +216,7 @@ impl Default for Options {
             iconset: "nerd".into(),
             completion: true,
             statusline_style: StatusStyle::Rounded,
+            splash: Splash::Hydra,
         }
     }
 }
@@ -242,6 +272,7 @@ impl Options {
             "iconset" => Json::String(self.iconset.clone()),
             "completion" => Json::Bool(self.completion),
             "statusline_style" => Json::String(self.statusline_style.name().into()),
+            "splash" => Json::String(self.splash.name().into()),
             _ => Json::Null,
         }
     }
@@ -331,7 +362,8 @@ pub enum CommandOutput {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UserCommand {
     pub name: String,
-    /// Program and arguments; `${file}` and `${plugin}` are expanded when it runs.
+    /// Program and arguments (`windows` instead of `run` on Windows when given); `${file}`, `${line}` and `${plugin}`
+    /// are expanded when it runs.
     pub run: Vec<String>,
     pub output: CommandOutput,
     pub desc: String,
@@ -516,6 +548,12 @@ impl Config {
                         .is_some(),
                     _ => false,
                 },
+                "splash" => match value {
+                    Json::String(s) => {
+                        Splash::ALL.into_iter().find(|art| art.name() == s).map(|art| o.splash = art).is_some()
+                    }
+                    _ => false,
+                },
                 "truecolor" => match value {
                     Json::Bool(b) => {
                         o.truecolor = Some(*b);
@@ -667,12 +705,28 @@ fn user_command(name: &str, spec: &Json, dir: &Path) -> Result<UserCommand, Stri
     }
     let Json::Object(fields): &Json = spec else { return Err(format!("expected an object, found {}", spec.kind())) };
     let field = |n: &str| fields.iter().find(|(k, _)| k == n).map(|(_, v)| v);
-    let run: Vec<String> = match field("run") {
-        Some(Json::Array(parts)) if !parts.is_empty() => parts
-            .iter()
-            .map(|p| if let Json::String(s) = p { Ok(s.clone()) } else { Err(format!("\"run\" holds {}", p.kind())) })
-            .collect::<Result<Vec<String>, String>>()?,
-        _ => return Err("\"run\" must be a non-empty array of strings".into()),
+    let words =
+        |key: &str| -> Result<Option<Vec<String>>, String> {
+            match field(key) {
+                None => Ok(None),
+                Some(Json::Array(parts)) if !parts.is_empty() => parts
+                    .iter()
+                    .map(|p| {
+                        if let Json::String(s) = p {
+                            Ok(s.clone())
+                        } else {
+                            Err(format!("\"{key}\" holds {}", p.kind()))
+                        }
+                    })
+                    .collect::<Result<Vec<String>, String>>()
+                    .map(Some),
+                Some(_) => Err(format!("\"{key}\" must be a non-empty array of strings")),
+            }
+        };
+    // `windows` replaces `run` there, for tools that differ (coreutils vs PowerShell).
+    let (run, windows): (Option<Vec<String>>, Option<Vec<String>>) = (words("run")?, words("windows")?);
+    let Some(run): Option<Vec<String>> = (if cfg!(windows) { windows.or(run) } else { run }) else {
+        return Err("\"run\" must be a non-empty array of strings".into());
     };
     let output: CommandOutput = match field("output") {
         None => CommandOutput::Message,

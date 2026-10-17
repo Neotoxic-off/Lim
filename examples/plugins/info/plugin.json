@@ -1,0 +1,26 @@
+// Facts about the buffer or a range, shown as a message; the text is never changed.
+{
+  "name": "info",
+  "version": "1.0.0",
+  "description": "Word count, SHA-256, calculator",
+  "commands": {
+    "Wc": {
+      "run": ["awk", "{ w += NF; c += length($0) + 1 } END { printf \"%d lines, %d words, %d chars\\n\", NR, w, c }"],
+      "windows": ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${plugin}/info.ps1", "wc"],
+      "desc": "Count lines, words and chars"
+    },
+    "Sha": {
+      "run": ["sh", "-c", "if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1"],
+      "windows": ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${plugin}/info.ps1", "sha"],
+      "desc": "SHA-256 of the text"
+    },
+    "Calc": {
+      "run": ["bc", "-l"],
+      "windows": ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${plugin}/info.ps1", "calc"],
+      "desc": "Evaluate the arithmetic on the line (:.Calc) or the selection"
+    }
+  },
+  "keymaps": {
+    "v": { "<Leader>=": { "rhs": ":Calc<CR>", "desc": "Calculate the selection" } }
+  }
+}

@@ -264,6 +264,20 @@ show the section ends):
 | <img src="docs/gallery/statusline-arrow.svg" alt="arrow" width="300"> | <img src="docs/gallery/statusline-flat.svg" alt="flat" width="300"> |
 | `arrow` | `flat` |
 
+**Start screens** (`splash` option, or `"random"` for a different one each start): lim's hydra, then classic
+ASCII art kept as drawn, signatures included: Cerberus by b'ger ([ascii.co.uk](https://ascii.co.uk/art/cerberus)),
+a wild-maned horse for the Mares of Diomedes by Joan G. Stark, Death by an unknown artist and a horned devil
+signed eViL ([asciiart.eu](https://www.asciiart.eu/mythology)).
+
+| | |
+|---|---|
+| <img src="docs/gallery/splash-hydra.svg" alt="hydra" width="300"> | <img src="docs/gallery/splash-cerberus.svg" alt="cerberus" width="300"> |
+| `hydra` | `cerberus` |
+| <img src="docs/gallery/splash-mares.svg" alt="mares" width="300"> | <img src="docs/gallery/splash-reaper.svg" alt="reaper" width="300"> |
+| `mares` | `reaper` |
+| <img src="docs/gallery/splash-devil.svg" alt="devil" width="300"> | |
+| `devil` | |
+
 ## Configuration
 
 lim reads `$LIM_CONFIG`, else `$XDG_CONFIG_HOME/lim/config.json`, else `~/.config/lim/config.json`
@@ -323,6 +337,7 @@ Names and defaults follow AstroNvim.
 | `colorscheme` | unset | A theme name; unset uses the last one picked (nvchad at first) |
 | `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` |
 | `statusline_style` | `"rounded"` | Statusline section ends: `"rounded"`, `"slanted"`, `"arrow"` or `"flat"` (Nerd Font icon set only) |
+| `splash` | `"hydra"` | Start screen art: `"hydra"`, `"cerberus"`, `"mares"`, `"reaper"`, `"devil"` or `"random"` |
 | `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |
 | `highlighturl` `indentguides` `matchparen` `gitsigns` `wordhighlight` `colorhighlight` `todocomments` `notifications` `dashboard` `syntax` | `true` | Turn each feature off |
@@ -374,9 +389,22 @@ Each command is `:Name`, uppercase first as Vim user commands. Its program gets 
 buffer, or a range (`:'<,'>Name`, `:%Name`, `:3,9Name`). Words typed after the name are added to `run`.
 `output` is `"message"` (default: stdout is shown) or `"replace"` (stdout replaces the lines, as one undo
 step). A program that fails (non-zero exit), prints nothing, or runs more than 10 seconds leaves the text as it
-was and its first stderr line is shown. In `run`, `${file}` is the buffer's path and `${plugin}` the plugin's
-folder, so a plugin can ship its own scripts. Commands appear in `:` completion and the commands picker
+was and its first stderr line is shown. In `run`, `${file}` is the buffer's path, `${line}` the cursor's line
+and `${plugin}` the plugin's folder, so a plugin can ship its own scripts. An optional `windows` array replaces
+`run` on Windows, where coreutils are missing. Commands appear in `:` completion and the commands picker
 (`<Leader>fC`); bind them with a keymap. `commands` also works in the config itself.
+
+**Ready-made plugins** in [`examples/plugins`](examples/plugins): copy a folder into your `plugins/` to use it.
+Text and info work out of the box on Linux, macOS and Windows (coreutils or PowerShell, checked by a test).
+
+| Plugin | Commands | Keys |
+|---|---|---|
+| `format` | `:Prettier` `:Rustfmt` `:Black` `:Gofmt` `:Jq` (the tool must be on `PATH`) | `<Leader>lf` Prettier |
+| `text` | `:Sort` `:Uniq` `:Reverse` `:Upper` `:Lower` `:Trim` (trailing blanks) `:B64` `:B64d` | |
+| `info` | `:Wc` (lines, words, chars) `:Sha` (SHA-256) `:Calc` (arithmetic of the line or selection) | `<Leader>=` in visual: Calc |
+| `git` | `:Blame` (cursor line) `:Log` `:Diff` `:Stage` `:Unstage` `:Branch` `:Status` (on the saved file) | `<Leader>gl` blame · `gL` log · `gd` diff · `gs` stage · `gu` unstage |
+
+Every command takes the whole buffer, or a range: `:'<,'>Sort` from visual mode, `:.Calc` for one line.
 
 ```jsonc
 // ~/.config/lim/plugins/format/plugin.json
@@ -385,7 +413,12 @@ folder, so a plugin can ship its own scripts. Commands appear in `:` completion 
   "description": "Prettier, sorting, word count",
   "commands": {
     "Prettier": { "run": ["prettier", "--stdin-filepath", "${file}"], "output": "replace", "desc": "Format with Prettier" },
-    "Sort": { "run": ["sort"], "output": "replace", "desc": "Sort lines" },
+    "Sort": {
+      "run": ["sort"],
+      "windows": ["powershell", "-NoProfile", "-Command", "$input | Sort-Object"],
+      "output": "replace",
+      "desc": "Sort lines"
+    },
     "Words": { "run": ["python3", "${plugin}/count.py"], "desc": "Count words" }
   },
   "keymaps": { "n": { "<Leader>lf": { "rhs": ":Prettier<CR>", "desc": "Format" } }, "v": { "<Leader>s": ":Sort<CR>" } }

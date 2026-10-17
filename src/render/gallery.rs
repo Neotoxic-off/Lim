@@ -11,7 +11,7 @@ use super::row::{Cell, Grid};
 use super::theme::{Rgb, Style};
 use super::{Screen, apply_colorscheme};
 use crate::buffer::Buffer;
-use crate::config::{Config, StatusStyle};
+use crate::config::{Config, Splash, StatusStyle};
 use crate::editor::Editor;
 use crate::term::{ColorDepth, Key};
 
@@ -35,9 +35,19 @@ fn main() {
 
 const COLS: usize = 100;
 const ROWS: usize = 22;
-/// One cell in pixels; `textLength` keeps every run on the grid whatever the font.
+/// One cell in pixels; each glyph is placed on its cell, whatever the font.
 const CELL_W: usize = 9;
 const CELL_H: usize = 18;
+
+/// The start screen with one monster; tall enough for the art, the wordmark and the footer.
+fn splash(splash: Splash) -> String {
+    apply_colorscheme(DEFAULT, &Config::default());
+    let mut ed: Editor = Editor::new(&[]);
+    ed.dashboard = true;
+    ed.options.splash = splash;
+    let (grid, _): (Grid, Option<(usize, usize)>) = Screen::new(ColorDepth::TrueColor).compose(&mut ed, 80, 38);
+    svg(&grid)
+}
 
 /// One frame with the file tree open on the left and the sample file on the right.
 fn frame(theme: &str, iconset: &str, style: StatusStyle) -> String {
@@ -139,6 +149,9 @@ fn gallery() {
     for style in StatusStyle::ALL {
         let file: String = format!("statusline-{}.svg", style.name());
         fs::write(dir.join(file), frame(DEFAULT, "nerd", style)).unwrap();
+    }
+    for art in Splash::ALL.into_iter().filter(|s| *s != Splash::Random) {
+        fs::write(dir.join(format!("splash-{}.svg", art.name())), splash(art)).unwrap();
     }
 }
 

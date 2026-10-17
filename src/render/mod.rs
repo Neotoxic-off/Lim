@@ -202,7 +202,7 @@ impl Screen {
         };
         if ed.dashboard {
             grid.fill(area, theme().style(Group::Normal));
-            home::dashboard(&mut grid, area, startup);
+            home::dashboard(&mut grid, area, startup, options.splash);
         } else if ed.mode != Mode::Explorer {
             cursor = windows_cursor;
         }
