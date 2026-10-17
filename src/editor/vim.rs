@@ -7,7 +7,9 @@ use std::str::Chars;
 
 use super::bindings::Align;
 use super::{Editor, Message, Mode};
+use crate::buffer::regex::Match;
 use crate::buffer::{Buffer, Pos, text};
+use crate::error::Error;
 use crate::term::Key;
 
 /// Jump list length, as Vim's.
@@ -96,7 +98,12 @@ impl Editor {
             buf.cursor = Pos::new(start.line, buf.cursor.col);
             return;
         }
-        let end: Pos = Pos::new(end.line, end.col.min(buf.line_len(end.line)));
+        // A selection can outlive lines a macro deleted: keep both ends inside the buffer.
+        let clamp = |p: Pos| {
+            let line: usize = p.line.min(buf.last_line());
+            Pos::new(line, if line == p.line { p.col.min(buf.line_len(line)) } else { buf.line_len(line) })
+        };
+        let (start, end): (Pos, Pos) = (clamp(start), clamp(end));
         let original: String = buf.text(start, end);
         let converted: String = convert(&original, case);
         if converted != original {
@@ -191,9 +198,8 @@ impl Editor {
         buf.clamp(false);
     }
 
-    /// `:[range]s/pattern/replacement/[g]`: literal pattern (with `\<`/`\>`), `&` in the
-    /// replacement stands for the match. Returns the number of lines changed.
-    // shortcut: patterns are literal, not Vim regexes; add a small regex engine if users need them.
+    /// `:[range]s/pattern/replacement/[g]` with a Vim regex; in the replacement `&` (or `\0`) is the match and
+    /// `\1`…`\9` its groups. Returns the number of lines changed.
     pub(super) fn substitute(&mut self, range: LineRange, pattern: &str, replacement: &str, global: bool) -> usize {
         self.last_substitute = Some((pattern.to_owned(), replacement.to_owned(), global));
         let buf: &mut Buffer = self.buf_mut();
@@ -201,7 +207,7 @@ impl Editor {
         // Bottom-up, since a `\n` in the replacement splits a line and shifts the ones below.
         for y in (range.first..=range.last.min(buf.last_line())).rev() {
             let line: String = buf.line(y).to_owned();
-            let mut hits: Vec<Range<usize>> = text::find_all(&line, pattern);
+            let mut hits: Vec<Match> = text::find_matches(&line, pattern);
             if !global {
                 hits.truncate(1);
             }
@@ -212,10 +218,9 @@ impl Editor {
             let mut out: String = String::with_capacity(line.len());
             let mut col: usize = 0;
             for hit in hits {
-                out.extend(&chars[col..hit.start]);
-                let matched: String = chars[hit.clone()].iter().collect();
-                out.push_str(&expand_replacement(replacement, &matched));
-                col = hit.end;
+                out.extend(&chars[col..hit.range.start]);
+                out.push_str(&expand_replacement(replacement, &chars, &hit));
+                col = hit.range.end;
             }
             out.extend(&chars[col..]);
             buf.splice(y..y + 1, out.split('\n').map(str::to_owned).collect());
@@ -223,6 +228,15 @@ impl Editor {
             changed += 1;
         }
         changed
+    }
+
+    /// `:s///n`: matches (all of them, or the first per line) and the lines holding one.
+    pub(super) fn count_matches(&self, range: LineRange, pattern: &str, global: bool) -> (usize, usize) {
+        let buf: &Buffer = self.buf();
+        (range.first..=range.last.min(buf.last_line()))
+            .map(|y| text::find_all(buf.line(y), pattern).len())
+            .filter(|&n| n > 0)
+            .fold((0, 0), |(matches, lines), n| (matches + if global { n } else { 1 }, lines + 1))
     }
 
     /// `&`: the last `:s` again on the current line.
@@ -242,10 +256,18 @@ impl Editor {
     }
 
     /// Parses `%`, `.`, `$`, `N`, `'x` and pairs of them joined by `,`.
+    /// The range, or the whole buffer when none was typed (`:sort`, `:g`).
+    pub(super) fn range_or_all(&self, spec: &str) -> Result<LineRange, Error> {
+        if spec.is_empty() {
+            return Ok(LineRange { first: 0, last: self.buf().last_line() });
+        }
+        self.parse_range(spec).ok_or_else(|| Error::NotACommand(spec.into()))
+    }
+
     pub(super) fn parse_range(&self, spec: &str) -> Option<LineRange> {
         let buf: &Buffer = self.buf();
         let last: usize = buf.last_line();
-        let line = |s: &str| -> Option<usize> {
+        let base = |s: &str| -> Option<usize> {
             match s {
                 "" | "." => Some(buf.cursor.line),
                 "$" => Some(last),
@@ -256,6 +278,21 @@ impl Editor {
                 s => s.parse::<usize>().ok().map(|n| n.saturating_sub(1).min(last)),
             }
         };
+        // An address then `+N` / `-N` offsets (`+` alone is 1): `.+3`, `$-1`, `'a+2`, `+`.
+        let line = |s: &str| -> Option<usize> {
+            let skip: usize = if s.starts_with('\'') { 2 } else { 0 };
+            let cut: usize =
+                s.char_indices().skip(skip).find(|(_, c)| matches!(c, '+' | '-')).map_or(s.len(), |(i, _)| i);
+            let mut y: usize = base(&s[..cut])?;
+            let mut rest: &str = &s[cut..];
+            while let Some(sign) = rest.chars().next() {
+                let digits: usize = rest[1..].bytes().take_while(u8::is_ascii_digit).count();
+                let n: usize = if digits == 0 { 1 } else { rest[1..=digits].parse().ok()? };
+                y = if sign == '+' { y.saturating_add(n).min(last) } else { y.saturating_sub(n) };
+                rest = &rest[1 + digits..];
+            }
+            Some(y)
+        };
         if spec == "%" {
             return Some(LineRange { first: 0, last });
         }
@@ -265,7 +302,10 @@ impl Editor {
     }
 }
 
-fn expand_replacement(replacement: &str, matched: &str) -> String {
+/// `&` / `\0` the whole match, `\1`…`\9` its groups (empty when unset), `\n` a line break, `\t` a tab.
+fn expand_replacement(replacement: &str, line: &[char], hit: &Match) -> String {
+    let text =
+        |range: Option<&Range<usize>>| range.map(|r| line[r.clone()].iter().collect::<String>()).unwrap_or_default();
     let mut out: String = String::new();
     let mut chars: Chars<'_> = replacement.chars();
     while let Some(c) = chars.next() {
@@ -273,10 +313,15 @@ fn expand_replacement(replacement: &str, matched: &str) -> String {
             '\\' => match chars.next() {
                 Some('n') => out.push('\n'),
                 Some('t') => out.push('\t'),
+                Some('0') => out.push_str(&text(Some(&hit.range))),
+                Some(d @ '1'..='9') => {
+                    let index: usize = d.to_digit(10).and_then(|n| usize::try_from(n).ok()).unwrap_or(1) - 1;
+                    out.push_str(&text(hit.groups.get(index).and_then(Option::as_ref)));
+                }
                 Some(other) => out.push(other),
                 None => out.push('\\'),
             },
-            '&' => out.push_str(matched),
+            '&' => out.push_str(&text(Some(&hit.range))),
             c => out.push(c),
         }
     }
@@ -291,6 +336,9 @@ mod tests {
     fn case_and_replacement() {
         assert_eq!(convert("aBc", Case::Toggle), "AbC");
         assert_eq!(convert("straße", Case::Upper), "STRASSE");
-        assert_eq!(expand_replacement("<&>\\&", "x"), "<x>&");
+        let line: Vec<char> = "key=12".chars().collect();
+        let hit: Match = text::find_matches("key=12", "\\(\\w\\+\\)=\\(\\d\\+\\)").remove(0);
+        assert_eq!(expand_replacement("<&>\\&", &line, &hit), "<key=12>&");
+        assert_eq!(expand_replacement("\\2=\\1 \\0 [\\3]", &line, &hit), "12=key key=12 []");
     }
 }

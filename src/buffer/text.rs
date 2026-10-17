@@ -1,8 +1,12 @@
 //! Char-indexed helpers over `str`: columns are char counts, never byte offsets.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
+
+use super::regex::{Match, Regex};
 
 // Text-level options (`tabstop`, `ignorecase`, `smartcase`), shared by buffers and the renderer.
 static TAB_STOP: AtomicUsize = AtomicUsize::new(4);
@@ -150,26 +154,48 @@ pub fn char_width(c: char) -> usize {
     }
 }
 
-/// Char ranges of every match, following `ignorecase` / `smartcase`.
-/// Vim's `\<` and `\>` word boundaries are honored at the pattern's start and end.
-// shortcut: lowercasing that changes char counts (e.g. 'İ') shifts columns; fold char by char if search is
-// used on Turkish or other such text.
+/// Char ranges of every match of the Vim regex `pattern`, following `ignorecase` / `smartcase`.
+/// An invalid pattern matches nothing; `compile` says why.
 pub fn find_all(line: &str, pattern: &str) -> Vec<Range<usize>> {
-    let (pattern, word_start): (&str, bool) = pattern.strip_prefix("\\<").map_or((pattern, false), |p| (p, true));
-    let (pattern, word_end): (&str, bool) = pattern.strip_suffix("\\>").map_or((pattern, false), |p| (p, true));
+    find_matches(line, pattern).into_iter().map(|m| m.range).collect()
+}
+
+/// Like `find_all`, with each match's `\(…\)` groups (for `:s` replacements).
+pub fn find_matches(line: &str, pattern: &str) -> Vec<Match> {
     if pattern.is_empty() {
         return Vec::new();
     }
-    let matches: Vec<Range<usize>> = find_plain(line, pattern);
-    if !word_start && !word_end {
-        return matches;
+    compile(pattern).map(|re| re.find_all(line)).unwrap_or_default()
+}
+
+/// `pattern` compiled under the case options. The last one is kept: the renderer asks for it on every visible line.
+pub fn compile(pattern: &str) -> Result<Rc<Regex>, String> {
+    thread_local! {
+        static LAST: RefCell<Option<(String, bool, Rc<Regex>)>> = const { RefCell::new(None) };
     }
-    let chars: Vec<char> = line.chars().collect();
-    let is_word = |i: usize| chars.get(i).is_some_and(|c| c.is_alphanumeric() || *c == '_');
-    matches
-        .into_iter()
-        .filter(|m| (!word_start || m.start == 0 || !is_word(m.start - 1)) && (!word_end || !is_word(m.end)))
-        .collect()
+    let ignore: bool = ignores_case(pattern);
+    LAST.with(|last| {
+        if let Some((cached, cached_ignore, re)) = &*last.borrow()
+            && cached == pattern
+            && *cached_ignore == ignore
+        {
+            return Ok(Rc::clone(re));
+        }
+        let re: Rc<Regex> = Rc::new(Regex::new(pattern, ignore)?);
+        *last.borrow_mut() = Some((pattern.to_owned(), ignore, Rc::clone(&re)));
+        Ok(re)
+    })
+}
+
+/// `ignorecase`, unless `smartcase` sees a capital typed in the pattern (escapes such as `\S` do not count).
+fn ignores_case(pattern: &str) -> bool {
+    let mut capital: bool = false;
+    let mut escaped: bool = false;
+    for c in pattern.chars() {
+        capital |= !escaped && c.is_uppercase();
+        escaped = !escaped && c == '\\';
+    }
+    IGNORE_CASE.load(Relaxed) && !(SMART_CASE.load(Relaxed) && capital)
 }
 
 /// Whole-word, case-sensitive matches of `word` (the word under the cursor).
@@ -234,7 +260,13 @@ pub fn find_hex_colors(line: &str) -> Vec<(Range<usize>, u32)> {
     found
 }
 
-fn find_plain(line: &str, pattern: &str) -> Vec<Range<usize>> {
+/// Literal matches of `pattern` (live grep, where the query is plain text), following the case options.
+// shortcut: lowercasing that changes char counts (e.g. 'İ') shifts columns; fold char by char if live grep is
+// used on Turkish or other such text.
+pub fn find_literal(line: &str, pattern: &str) -> Vec<Range<usize>> {
+    if pattern.is_empty() {
+        return Vec::new();
+    }
     let smart_sensitive: bool = SMART_CASE.load(Relaxed) && pattern.chars().any(char::is_uppercase);
     let (lowered_line, lowered_pattern);
     let (hay, pattern): (&str, &str) = if IGNORE_CASE.load(Relaxed) && !smart_sensitive {

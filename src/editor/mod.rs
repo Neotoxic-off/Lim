@@ -9,8 +9,10 @@ mod command;
 mod complete;
 mod explorer;
 mod extras;
+mod global;
 mod insert;
 mod keymap;
+mod lines;
 mod manage;
 mod motion;
 mod normal;
@@ -216,6 +218,8 @@ pub struct Editor {
     /// File, anchor id in that file's buffer, and the position when recorded (if the buffer is gone).
     jumps: Vec<(Option<PathBuf>, u64, Pos)>,
     next_anchor: u64,
+    /// A `:g` is running; Vim refuses to nest them.
+    in_global: bool,
     /// For `gv`: the last visual selection and its mode.
     last_visual: Option<(Pos, Pos, Mode)>,
     /// `/` searches forward, `?` backward; `n` follows, `N` reverses.
@@ -240,6 +244,8 @@ pub struct Editor {
     /// `<Leader>uZ`: only the focused window, centred, without chrome.
     pub zen: bool,
     block_insert: Option<block::BlockInsert>,
+    /// `$` in visual block: every line's block reaches its own end.
+    block_to_eol: bool,
     /// `<C-r>` in insert mode: the next key names the register to insert.
     insert_register: bool,
     anchor: Pos,
@@ -287,6 +293,7 @@ impl Editor {
             last_find: None,
             jumps: Vec::new(),
             next_anchor: 0,
+            in_global: false,
             last_visual: None,
             search_forward: true,
             last_substitute: None,
@@ -302,6 +309,7 @@ impl Editor {
             history: Vec::new(),
             zen: false,
             block_insert: None,
+            block_to_eol: false,
             insert_register: false,
             anchor: Pos::default(),
             pending: Pending::default(),
@@ -337,7 +345,7 @@ impl Editor {
                 top: start.line,
                 bottom: end.line,
                 left: a.col.min(b.col),
-                right: a.col.max(b.col),
+                right: if self.block_to_eol { usize::MAX - 1 } else { a.col.max(b.col) },
             }),
             _ => None,
         }

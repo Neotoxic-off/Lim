@@ -26,12 +26,18 @@ pub struct History {
     redo: Vec<Group>,
     next_id: u64,
     sealed: bool,
+    /// While set, `seal` is ignored: `:g` and `:norm` make one undo step of many commands.
+    held: bool,
 }
 
 impl History {
     /// Ends the current group: the next change starts a new undo step.
     pub fn seal(&mut self) {
-        self.sealed = true;
+        self.sealed |= !self.held;
+    }
+
+    pub fn hold(&mut self, held: bool) {
+        self.held = held;
     }
 
     /// Identifies the current text state; equal ids mean equal text.

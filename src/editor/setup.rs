@@ -71,7 +71,7 @@ pub const SETTINGS: &[Setting] = &[
     setting("Layout", "cmdheight", "Command line always shown", Values::Range(0, 1)),
     setting("Layout", "notifications", "Messages as notifications", Values::Toggle),
     setting("Layout", "dashboard", "Start screen", Values::Toggle),
-    setting("Layout", "splash", "Start screen monster", Values::Splashes),
+    setting("Layout", "splash", "Start screen hydra", Values::Splashes),
     setting("Editing", "tabstop", "Columns per tab", Values::Range(1, 16)),
     setting("Editing", "shiftwidth", "Indent width (0: tabstop)", Values::Range(0, 16)),
     setting("Editing", "expandtab", "Indent with spaces", Values::Toggle),

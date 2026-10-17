@@ -67,6 +67,34 @@ impl Editor {
         self.switch_to(if forward { self.current + step } else { self.current + len - step } % len);
     }
 
+    /// `:b N` (as numbered in the tabline, from 1) or `:b part-of-name`.
+    pub(super) fn switch_to_named(&mut self, name: &str) -> Result<(), Error> {
+        if name.is_empty() {
+            return Ok(());
+        }
+        if let Ok(n) = name.parse::<usize>() {
+            if n == 0 || n > self.buffers.len() {
+                return Err(Error::Vim(format!("E86: Buffer {n} does not exist")));
+            }
+            self.switch_to(n - 1);
+            return Ok(());
+        }
+        let matching: Vec<usize> = (0..self.buffers.len())
+            .filter(|&i| {
+                let buf: &Buffer = &self.buffers[i];
+                buf.name().contains(name) || buf.path.as_ref().is_some_and(|p| p.to_string_lossy().contains(name))
+            })
+            .collect();
+        match matching[..] {
+            [i] => {
+                self.switch_to(i);
+                Ok(())
+            }
+            [] => Err(Error::Vim(format!("E94: No matching buffer for {name}"))),
+            _ => Err(Error::Vim(format!("E93: More than one match for {name}"))),
+        }
+    }
+
     pub(super) fn go_previous_buffer(&mut self) {
         if let Some(i) = self.previous_buffer {
             self.switch_to(i);

@@ -3,11 +3,32 @@
 </p>
 
 <p align="center">
-  <b>A lightweight modal editor, in Rust, with zero dependencies.</b><br>
-  AstroNvim's keymaps, look and workflow in one ~1 MB binary that starts in under a millisecond.
+  <b>Neovim, fully set up, without Lua, plugin managers or dependencies.</b><br>
+  AstroNvim's keymaps, look and workflow built in: one ~1 MB Rust binary, nothing to install, configure or
+  keep in sync, and nothing that breaks after an update.
 </p>
 
 ---
+
+## Why lim
+
+You want Neovim the way AstroNvim sets it up: the file tree, fuzzy finder, which-key, git signs, statusline,
+themes, completion. Getting there means Lua config, a plugin manager, dozens of plugins, their dependencies
+(ripgrep, fd, a C compiler for treesitter, Node for some servers), and a setup that breaks when one of them
+updates.
+
+lim is that editor with all of it **built in**:
+
+- **No Lua.** One JSON file for options, colors and keymaps, or the `<Leader>,` settings screen.
+- **No plugin manager, no plugins to update.** File tree, pickers, live grep, which-key, git signs,
+  completion, sessions, 30 themes: part of the binary, tested together.
+- **No dependencies.** Zero crates, nothing to install beside the binary; it runs the same on Linux, macOS
+  and Windows.
+- **Nothing breaks after an update.** There is no ecosystem to drift out of sync.
+- **Vim inside.** Operators, text objects, registers, macros, marks, regex `:s` and `:g`, `:norm`, visual
+  block: your muscle memory works.
+- **Still extensible.** [Plugins](#plugins) add commands, keymaps and colors with a JSON file and any
+  program you like (format on save, git, text tools), without an embedded language to learn.
 
 **The symbol.** lim's emblem is the Lernaean Hydra, the many-headed serpent of the lake (λίμνη, *limnē*)
 of Lerna: one body, many heads, like one editor working many windows. It greets you, in plain ASCII, on
@@ -27,6 +48,7 @@ the start screen.
 
 ## Contents
 
+- [Why lim](#why-lim)
 - [Features](#features)
 - [Install](#install)
 - [Usage](#usage)
@@ -42,9 +64,9 @@ the start screen.
 
 | Area | What you get |
 |---|---|
-| Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`, `"-`, `"_`, `"+`) · marks and jump list that follow edits · `:s` and line ranges |
-| Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, page and line scrolling, `<S-arrows>` (word / page), `zz zt zb` · `:` and `/` history |
-| Text objects | `iw` `aw` `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
+| Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`–`"9` shifting, `"-`, `"_`, `"+`) · marks and jump list that follow edits · Vim regexes in `/`, `?`, `*`, `:s`, `:g` · `:g`/`:v`, `:norm`, `:sort`, `:m`, `:t`, `:r` · line ranges with offsets |
+| Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, `gn` (`cgn` then `.`), page and line scrolling, `<S-arrows>` (word / page), `zz zt zb` · `:` and `/` history |
+| Text objects | `iw` `aw` `iW` `aW` `ip` `ap` `it` `at` (HTML/XML tags) `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
 | AstroNvim look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
 | Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) |
@@ -192,9 +214,10 @@ Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
 ### Vim
 
 Everything usual, including: `R` replace mode, `<C-a>`/`<C-x>`, `gu`/`gU`/`g~`, `gJ`, `gi`, `gI`, `gv`,
-`gx`, `ge`, `g_`, `H`/`M`/`L`, `zz`/`zt`/`zb`, `<C-e>`/`<C-y>`, `m{a-z}` with `'`/`` ` ``, `''`, `<C-o>`,
-`"{register}`, `q{r}`/`@{r}`/`@@`, `?`, `;`/`,`, `&`. Visual block: `I`, `A`, `d`, `c`, `y`, `r`, `~`/`u`/`U`, `o`/`O`,
-blockwise put. Insert mode: `<C-r>{r}`, `<C-o>`, `<C-t>`/`<C-d>`, `<C-w>`, `<C-u>`.
+`gx`, `gf` (also `path:line`), `gn`, `ge`, `g_`, `H`/`M`/`L`, `zz`/`zt`/`zb`, `<C-e>`/`<C-y>`, `m{a-z}` with
+`'`/`` ` ``, `''`, `<C-o>`, `<C-^>` (previous buffer), `"{register}`, `q{r}`/`@{r}`/`@@`, `?`, `;`/`,`, `&`. Visual
+block: `I`, `A`, `$` (ragged right edge, then `A` appends to every line), `d`, `c`, `y`, `r`, `~`/`u`/`U`,
+`o`/`O`, blockwise put. Insert mode: `<C-r>{r}`, `<C-o>`, `<C-t>`/`<C-d>`, `<C-w>`, `<C-u>`.
 `<S-Left>`/`<S-Right>` move a word and `<S-Up>`/`<S-Down>` a page, in normal, visual (to grow the selection fast),
 insert and after an operator. On the `:` and `/` lines, `<Up>`/`<Down>` recall older / newer entries that start with
 what is typed (separate histories for commands and searches).
@@ -205,10 +228,18 @@ a letter mark goes away with its line, as in Vim.
 current buffer first. `<Tab>`/`<C-n>`/`<C-j>`/`<Down>` next, `<S-Tab>`/`<C-p>`/`<C-k>`/`<Up>` previous,
 `<CR>` accepts the selected item (with nothing selected it is a plain newline), `<C-e>` hides,
 `<C-Space>` shows the menu on demand.
-Commands: `:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:enew` `:bn` `:bp` `:bd` `:sp` `:vs` `:only`
-`:close` `:noh` `:help` `:settings` (or `:setup`), `:[range]s/a/b/[g]` (literal pattern, `&` = match),
-`:[range]d` `y` `>` `<` `j`, and addresses `N`, `.`, `$`, `%`, `'a`, `'<,'>`. Commands that start with an
-uppercase letter come from [plugins](#plugins).
+Commands: `:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:e!` `:enew` `:saveas file` `:ls` `:b N`/`:b name`
+`:bn` `:bp` `:bd` `:sp` `:vs` `:only` `:close` `:noh` `:help` `:settings` (or `:setup`); on line ranges
+`:s/pat/rep/[flags]`, `:g/pat/cmd` and `:v/pat/cmd`, `:norm[!] keys`, `:sort[!] [i] [n] [u]`, `:m {address}`,
+`:t {address}`, `:r file`, `:d` `:y` `:>` `:<` `:j`. Addresses: `N`, `.`, `$`, `%`, `'a`, `'<,'>`, with `+N`/`-N`
+offsets (`.,+3`, `$-1`). Commands that start with an uppercase letter come from [plugins](#plugins).
+
+**Patterns** are Vim regexes (magic by default): `.` `*` `[a-z]` `[^…]` `^` `$` `\+` `\=` `\?` `\{n,m}`
+`\(…\)` `\|` `\<` `\>` `\d` `\w` `\s` `\a` `\l` `\u` (and `\D` `\W` `\S`…), `\v` for very magic (`(a|b)+`), `\c`/`\C`
+to ignore or match case. In `:s` replacements `&` or `\0` is the match and `\1`…`\9` its groups. `:s` flags: `g`
+every match, `i`/`I` case, `n` count only, `e` no error when nothing matches (`c` confirm is not supported). `:g`
+runs its command on marked lines, so deleting lines on the way is safe, and `u` undoes the whole `:g` or `:norm`.
+Live grep (`<Leader>fw`) stays plain text.
 
 ## Themes and icons
 
@@ -264,19 +295,15 @@ show the section ends):
 | <img src="docs/gallery/statusline-arrow.svg" alt="arrow" width="300"> | <img src="docs/gallery/statusline-flat.svg" alt="flat" width="300"> |
 | `arrow` | `flat` |
 
-**Start screens** (`splash` option, or `"random"` for a different one each start): lim's hydra, then classic
-ASCII art kept as drawn, signatures included: Cerberus by b'ger ([ascii.co.uk](https://ascii.co.uk/art/cerberus)),
-a wild-maned horse for the Mares of Diomedes by Joan G. Stark, Death by an unknown artist and a horned devil
-signed eViL ([asciiart.eu](https://www.asciiart.eu/mythology)).
+**Start screen**: the Lernaean Hydra, lim's symbol, in three drawings. By default (`splash` = `"random"`) each start
+shows a random one among those that fit the window; set `"classic"`, `"braille"` or `"small"` to keep one. The
+braille ones are NvChad's hydra as found online: the [gist by kevinfengcs88](https://gist.github.com/kevinfengcs88/75457d6b401fbab2326450dcbf64a429)
+and the lettered one from [twitchquotes](https://www.twitchquotes.com/copypastas/3638).
 
-| | |
-|---|---|
-| <img src="docs/gallery/splash-hydra.svg" alt="hydra" width="300"> | <img src="docs/gallery/splash-cerberus.svg" alt="cerberus" width="300"> |
-| `hydra` | `cerberus` |
-| <img src="docs/gallery/splash-mares.svg" alt="mares" width="300"> | <img src="docs/gallery/splash-reaper.svg" alt="reaper" width="300"> |
-| `mares` | `reaper` |
-| <img src="docs/gallery/splash-devil.svg" alt="devil" width="300"> | |
-| `devil` | |
+| | | |
+|---|---|---|
+| <img src="docs/gallery/splash-classic.svg" alt="classic" width="300"> | <img src="docs/gallery/splash-braille.svg" alt="braille" width="300"> | <img src="docs/gallery/splash-small.svg" alt="small" width="300"> |
+| `classic` (ASCII) | `braille` | `small` (fits small windows) |
 
 ## Configuration
 
@@ -337,7 +364,7 @@ Names and defaults follow AstroNvim.
 | `colorscheme` | unset | A theme name; unset uses the last one picked (nvchad at first) |
 | `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` |
 | `statusline_style` | `"rounded"` | Statusline section ends: `"rounded"`, `"slanted"`, `"arrow"` or `"flat"` (Nerd Font icon set only) |
-| `splash` | `"hydra"` | Start screen art: `"hydra"`, `"cerberus"`, `"mares"`, `"reaper"`, `"devil"` or `"random"` |
+| `splash` | `"random"` | Start screen hydra: `"random"` (one that fits, each start), `"classic"`, `"braille"` or `"small"` |
 | `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |
 | `highlighturl` `indentguides` `matchparen` `gitsigns` `wordhighlight` `colorhighlight` `todocomments` `notifications` `dashboard` `syntax` | `true` | Turn each feature off |
@@ -394,12 +421,16 @@ and `${plugin}` the plugin's folder, so a plugin can ship its own scripts. An op
 `run` on Windows, where coreutils are missing. Commands appear in `:` completion and the commands picker
 (`<Leader>fC`); bind them with a keymap. `commands` also works in the config itself.
 
+**Format on save**: `"on": "save"` runs a `"replace"` command on the whole buffer before every `:w`, limited to
+the extensions in `"files"` (`["js", "ts"]`; none means every file). A tool that fails or is missing is reported
+after the write, and the file is written unchanged.
+
 **Ready-made plugins** in [`examples/plugins`](examples/plugins): copy a folder into your `plugins/` to use it.
 Text and info work out of the box on Linux, macOS and Windows (coreutils or PowerShell, checked by a test).
 
 | Plugin | Commands | Keys |
 |---|---|---|
-| `format` | `:Prettier` `:Rustfmt` `:Black` `:Gofmt` `:Jq` (the tool must be on `PATH`) | `<Leader>lf` Prettier |
+| `format` | `:Prettier` `:Rustfmt` `:Black` `:Gofmt` (each also on save, for its file types) `:Jq` (the tool must be on `PATH`) | `<Leader>lf` Prettier |
 | `text` | `:Sort` `:Uniq` `:Reverse` `:Upper` `:Lower` `:Trim` (trailing blanks) `:B64` `:B64d` | |
 | `info` | `:Wc` (lines, words, chars) `:Sha` (SHA-256) `:Calc` (arithmetic of the line or selection) | `<Leader>=` in visual: Calc |
 | `git` | `:Blame` (cursor line) `:Log` `:Diff` `:Stage` `:Unstage` `:Branch` `:Status` (on the saved file) | `<Leader>gl` blame · `gL` log · `gd` diff · `gs` stage · `gu` unstage |
@@ -464,11 +495,12 @@ src/
 
 ## Limits
 
-Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics), completion, debugger, treesitter (a keyword
+Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics, language-aware completion; buffer-word completion is there), debugger, treesitter (a keyword
 highlighter stands in), plugins that script the editor itself (they only filter text through a process), an
 embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
-line wrapping, mouse, folds, spell checking, persistent undo. `:s` patterns are literal (plus
-`\<`/`\>`), not regexes. Visual-block columns count characters, so tabs and wide characters select unevenly.
+line wrapping, mouse, folds, spell checking, persistent undo, `:s///c` confirm. A regex group repeats at
+most 100 times in one match. Visual-block columns count characters, so tabs and wide characters select
+unevenly.
 
 ## Development
 

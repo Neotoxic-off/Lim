@@ -146,7 +146,7 @@ impl Picker {
                 .enumerate()
                 .map(|(i, item)| {
                     let positions: Vec<usize> =
-                        text::find_all(&item.label, &self.query).into_iter().flatten().collect();
+                        text::find_literal(&item.label, &self.query).into_iter().flatten().collect();
                     Match { item: i, score: 0, positions }
                 })
                 .collect();
@@ -273,7 +273,7 @@ fn grep(files: &[PathBuf], query: &str) -> Vec<Item> {
         }
         let Ok(content): Result<String, FromUtf8Error> = String::from_utf8(bytes) else { continue };
         for (y, line) in content.lines().enumerate() {
-            if let Some(hit) = text::find_all(line, query).first() {
+            if let Some(hit) = text::find_literal(line, query).first() {
                 let label: String = format!("{}:{}:{}  {}", path.display(), y + 1, hit.start + 1, line.trim());
                 items.push(Item { label, target: Target::File(path.clone(), Some(Pos::new(y, hit.start))) });
                 if items.len() >= MAX_HITS {

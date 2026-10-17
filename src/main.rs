@@ -1,4 +1,4 @@
-//! lim: a lightweight, dependency-free modal editor modelled on an `AstroNvim` setup.
+//! lim: Neovim fully set up as `AstroNvim`, built in: no Lua, no plugin manager, no dependencies.
 
 #![cfg_attr(
     not(test),

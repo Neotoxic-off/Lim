@@ -1,6 +1,5 @@
 //! Tabline (heirline bufferline), NvChad-style statusline, command line and notifications.
 
-use std::sync::Arc;
 use super::Context;
 use super::icons::{Icons, icons};
 use super::row::{Grid, Row};
@@ -9,6 +8,7 @@ use crate::buffer::{Buffer, Pos, text};
 use crate::config::StatusStyle;
 use crate::editor::{Editor, Message, Mode, Rect};
 use crate::render::Theme;
+use std::sync::Arc;
 
 type Segment = (Style, String);
 

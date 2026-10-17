@@ -3,7 +3,7 @@ name = "lim"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Lightweight, dependency-free Vim alternative"
+description = "Neovim, fully set up, without Lua, plugin managers or dependencies"
 
 [dependencies]
 

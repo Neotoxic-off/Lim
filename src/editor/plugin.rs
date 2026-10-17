@@ -2,6 +2,7 @@
 //! or shows as a message. Any language works, since lim only talks to the process.
 
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -17,6 +18,14 @@ use crate::error::Error;
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Editor {
+    /// Runs the `"on": "save"` commands that match `path` on the whole buffer, in load order; the first failure
+    /// stops them and is returned.
+    pub(super) fn run_on_save(&mut self, path: &Path) -> Option<Error> {
+        let names: Vec<String> =
+            self.config.commands.iter().filter(|c| c.runs_on_save(path)).map(|c| c.name.clone()).collect();
+        names.iter().find_map(|name| self.run_user_command("", name, &[]).err())
+    }
+
     /// Without a range, the command gets the whole buffer.
     pub(super) fn run_user_command(&mut self, range: &str, name: &str, args: &[String]) -> Result<(), Error> {
         let Some(command): Option<UserCommand> = self.config.commands.iter().find(|c| c.name == name).cloned() else {

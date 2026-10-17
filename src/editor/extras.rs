@@ -2,13 +2,16 @@
 //! `<Leader>bs…` sorting, `<Leader>t…` tools, `<Leader>go` git browse, `<C-arrows>` resizing, `gx`.
 
 use std::env;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::SystemTime;
 
 use super::bindings::SortBy;
+use super::motion::Span;
 use super::{Editor, Mode, may_spawn};
 use crate::buffer::{Buffer, CharClass, Pos, text};
+use crate::error::Error;
 use crate::syntax;
 
 /// Whether `program` is an executable on `$PATH`.
@@ -73,6 +76,75 @@ impl Editor {
             Some(url) if open_external(&url) => self.info(format!("Opening {url}")),
             Some(_) => self.info("No opener available"),
             None => self.info("No URL under the cursor"),
+        }
+    }
+
+    /// `gn`: the match of the last search under the cursor, else the next one, selected in visual mode or
+    /// handed to a pending operator (`cgn` then `.` changes match after match).
+    pub(super) fn select_match(&mut self) {
+        let pattern: String = self.search.clone();
+        let buf: &Buffer = self.buf();
+        let at: Pos = buf.cursor;
+        let span = |line: usize, from: usize| {
+            text::find_all(buf.line(line), &pattern).into_iter().find(|r| r.end > from && !r.is_empty())
+        };
+        let here: Option<(usize, Range<usize>)> =
+            span(at.line, at.col).filter(|r| r.start <= at.col).map(|r| (at.line, r));
+        let found: Option<(usize, Range<usize>)> = here.or_else(|| {
+            let next: Pos = buf.search(&pattern, at, true)?;
+            Some((next.line, span(next.line, next.col)?))
+        });
+        let Some((line, range)): Option<(usize, Range<usize>)> = found else {
+            let error: Error = if pattern.is_empty() { Error::NoPattern } else { Error::PatternNotFound(pattern) };
+            return self.error(&error);
+        };
+        let (start, end): (Pos, Pos) = (Pos::new(line, range.start), Pos::new(line, range.end));
+        self.highlight_search = true;
+        if let Some(op) = self.pending.op {
+            return self.apply(op, start, end, Span::Exclusive);
+        }
+        if !matches!(self.mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock) {
+            self.mode = Mode::Visual;
+            self.anchor = start;
+        }
+        self.buf_mut().cursor = Pos::new(line, range.end - 1);
+    }
+
+    /// `gf`: opens the path under the cursor, relative to the working directory or else to this file's folder.
+    /// A `:line` suffix (`src/main.rs:42`, as compilers print) also moves to that line.
+    pub(super) fn open_file_under_cursor(&mut self) {
+        let buf: &Buffer = self.buf();
+        let chars: Vec<char> = buf.line(buf.cursor.line).chars().collect();
+        let in_path = |c: char| c.is_alphanumeric() || "/\\.-_+~:#$%=@".contains(c);
+        let col: usize = buf.cursor.col.min(chars.len().saturating_sub(1));
+        if !chars.get(col).is_some_and(|&c| in_path(c)) {
+            return self.info("No file name under the cursor");
+        }
+        let start: usize = chars[..col].iter().rposition(|&c| !in_path(c)).map_or(0, |i| i + 1);
+        let end: usize = chars[col..].iter().position(|&c| !in_path(c)).map_or(chars.len(), |i| col + i);
+        let word: String =
+            chars[start..end].iter().collect::<String>().trim_end_matches(['.', ',', ':', ';']).to_owned();
+        // `file:12` or `file:12:5`: numbers at the end; the first one after the path is the line. Splitting from
+        // the right keeps Windows drives (`C:\…`) whole.
+        let mut name: &str = word.as_str();
+        let mut line: Option<usize> = None;
+        while let Some((head, tail)) = name.rsplit_once(':')
+            && !head.is_empty()
+            && let Ok(n) = tail.parse::<usize>()
+        {
+            (name, line) = (head, Some(n));
+        }
+        let here: Option<PathBuf> = buf.path.as_deref().and_then(Path::parent).map(|dir| dir.join(name));
+        let Some(path): Option<PathBuf> = [Some(PathBuf::from(name)), here].into_iter().flatten().find(|p| p.is_file())
+        else {
+            return self.error(&Error::Vim(format!("E447: Can't find file \"{name}\" in path")));
+        };
+        self.push_jump();
+        self.open(&crate::buffer::canonical(&path));
+        if let Some(n) = line {
+            let buf: &mut Buffer = self.buf_mut();
+            let y: usize = n.saturating_sub(1).min(buf.last_line());
+            buf.cursor = Pos::new(y, buf.first_non_blank(y));
         }
     }
 

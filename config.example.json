@@ -40,7 +40,7 @@
     "iconset": "nerd",            // "nerd", "unicode" or "ascii"
     "completion": true,           // words from open buffers while typing
     "statusline_style": "rounded", // "rounded", "slanted", "arrow" or "flat" (Nerd Font icon set)
-    "splash": "hydra"             // start screen: "hydra", "cerberus", "mares", "reaper", "devil" or "random"
+    "splash": "random"            // start screen hydra: "random" (one that fits), "classic", "braille" or "small"
   },
 
   // astrotheme palette overrides, e.g. "ui": { "base": "#000000" }.

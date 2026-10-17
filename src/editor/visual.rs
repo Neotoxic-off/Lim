@@ -30,6 +30,7 @@ impl Editor {
             return;
         }
         if let Some(motion) = Motion::from_key(key) {
+            self.block_to_eol = key == Key::Char('$');
             return self.run_motion(motion);
         }
         let n: usize = self.pending.count.unwrap_or(1);
@@ -139,6 +140,7 @@ impl Editor {
 
     fn toggle_visual(&mut self, mode: Mode) {
         self.mode = if self.mode == mode { Mode::Normal } else { mode };
+        self.block_to_eol = false;
     }
 
     /// `r{c}`: every selected character becomes `c`.

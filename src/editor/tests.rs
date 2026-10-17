@@ -876,3 +876,159 @@ fn setup_screen_changes_options_live() {
     keys(&mut ed, "\x1b");
     assert_eq!(ed.mode, Mode::Normal);
 }
+
+/// Vim regexes in `/` and `:s`, the `:s` flags, `\1` groups, and the shifting delete registers.
+#[test]
+fn regex_substitute_flags_and_registers() {
+    let mut ed: Editor = editor("foo1 bar22\nFOO3");
+    keys(&mut ed, "/\\d\\+\n");
+    assert_eq!(ed.buf().cursor, Pos::new(0, 3));
+    keys(&mut ed, ":%s/foo/x/gn\n");
+    assert_eq!(ed.message_text(), "2 matches on 2 lines");
+    assert_eq!(text(&ed), "foo1 bar22\nFOO3", "n only counts");
+    keys(&mut ed, ":%s/\\v(\\a+)(\\d+)/\\2-\\1/g\n");
+    assert_eq!(text(&ed), "1-foo 22-bar\n3-FOO");
+    keys(&mut ed, ":%s/foo/X/I\n");
+    assert_eq!(text(&ed), "1-X 22-bar\n3-FOO", "I matches case");
+    keys(&mut ed, ":s/zzz/y/e\n");
+    assert!(!ed.message_text().contains("E486"), "e: no error when nothing matches");
+    keys(&mut ed, ":s/a/b/c\n");
+    assert!(ed.message_text().starts_with("E488"));
+    keys(&mut ed, "/\\(\n");
+    assert!(ed.message_text().starts_with("E54"), "{}", ed.message_text());
+
+    let mut ed: Editor = editor("a\nb\nc");
+    keys(&mut ed, "dddd\"2p");
+    assert_eq!(text(&ed), "c\na", "\"2 holds the delete before last");
+}
+
+/// `:g` / `:v` visit marked lines through deletions as one undo step; `:norm` types keys on each line.
+#[test]
+fn global_and_normal_commands() {
+    let mut ed: Editor = editor("a1\nb\na2\nb\na3");
+    keys(&mut ed, ":g/^a/d\n");
+    assert_eq!(text(&ed), "b\nb");
+    keys(&mut ed, "u");
+    assert_eq!(text(&ed), "a1\nb\na2\nb\na3", "one undo step for the whole :g");
+    keys(&mut ed, ":v/a/d\n");
+    assert_eq!(text(&ed), "a1\na2\na3");
+    keys(&mut ed, "u:g/a/norm A!\n");
+    assert_eq!(text(&ed), "a1!\nb\na2!\nb\na3!");
+    keys(&mut ed, ":g/b/s/b/B/\n");
+    assert_eq!(text(&ed), "a1!\nB\na2!\nB\na3!");
+    keys(&mut ed, ":2,3norm! Ix\n");
+    assert_eq!(text(&ed), "a1!\nxB\nxa2!\nB\na3!");
+    keys(&mut ed, ":g/a/.,+1d\n");
+    assert_eq!(text(&ed), "", "a line deleted by an earlier round is skipped");
+    keys(&mut ed, "u:g/zz/d\n");
+    assert!(ed.message_text().starts_with("E486"));
+    keys(&mut ed, ":g/a/g/x/d\n");
+    assert!(ed.message_text().starts_with("E147"));
+    keys(&mut ed, ":norm ci\n");
+    assert_eq!(ed.mode, Mode::Normal, "an unfinished command is cancelled");
+}
+
+/// Paragraph, tag and WORD text objects with operators and in visual mode.
+#[test]
+fn paragraph_tag_and_word_objects() {
+    let mut ed: Editor = editor("a\nb\n\nc");
+    keys(&mut ed, "dap");
+    assert_eq!(text(&ed), "c");
+    let mut ed: Editor = editor("<p>hi <b>you</b></p>");
+    keys(&mut ed, "fycitme\x1b");
+    assert_eq!(text(&ed), "<p>hi <b>me</b></p>");
+    keys(&mut ed, "0dat");
+    assert_eq!(text(&ed), "");
+    let mut ed: Editor = editor("x foo.bar(1) y");
+    keys(&mut ed, "fbdiW");
+    assert_eq!(text(&ed), "x  y");
+    let mut ed: Editor = editor("a\nb\n\nc");
+    keys(&mut ed, "vipd");
+    assert_eq!(text(&ed), "\nc");
+}
+
+/// `gn` with `cgn` and `.`, `:sort`, `:m`, `:t`, `:r`, `:e!`, `:saveas`, `:b`, `:ls`, `<C-^>`, `gf` and `$` in a block.
+#[test]
+fn gn_line_commands_files_and_block_end() {
+    let mut ed: Editor = editor("foo bar foo\nfoo");
+    keys(&mut ed, "/foo\nggcgnX\x1b..");
+    assert_eq!(text(&ed), "X bar X\nX");
+
+    let mut ed: Editor = editor("b2\na10\nB1\nb2");
+    keys(&mut ed, ":sort\n");
+    assert_eq!(text(&ed), "B1\na10\nb2\nb2");
+    keys(&mut ed, ":sort! n u\n");
+    assert_eq!(text(&ed), "a10\nb2\nB1");
+    keys(&mut ed, ":sort i\n");
+    assert_eq!(text(&ed), "a10\nB1\nb2", "case folded: b1 before b2");
+    keys(&mut ed, ":1m$\n");
+    assert_eq!(text(&ed), "B1\nb2\na10");
+    keys(&mut ed, ":3m0\n");
+    assert_eq!(text(&ed), "a10\nB1\nb2");
+    keys(&mut ed, ":1,2t$\n");
+    assert_eq!(text(&ed), "a10\nB1\nb2\na10\nB1");
+    keys(&mut ed, ":1,2m1\n");
+    assert!(ed.message_text().starts_with("E134"));
+
+    let dir: PathBuf = std::env::temp_dir().join(format!("lim-ex-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (one, two): (PathBuf, PathBuf) = (dir.join("one.txt"), dir.join("two.txt"));
+    std::fs::write(&one, "x\ny\n").unwrap();
+    let mut ed: Editor = editor("top\nbottom");
+    keys(&mut ed, &format!(":r {}\n", one.display()));
+    assert_eq!(text(&ed), "top\nx\ny\nbottom");
+    keys(&mut ed, &format!(":saveas {}\n", two.display()));
+    assert_eq!(std::fs::read_to_string(&two).unwrap(), "top\nx\ny\nbottom\n");
+    assert_eq!(ed.buf().path.as_deref(), Some(two.as_path()));
+    keys(&mut ed, "ggdd:e!\n");
+    assert_eq!(text(&ed), "top\nx\ny\nbottom", ":e! drops the change");
+    assert!(!ed.buf().is_dirty());
+    keys(&mut ed, &format!(":e {}\n", one.display()));
+    keys(&mut ed, ":b two\n");
+    assert_eq!(ed.buf().path.as_deref(), Some(two.as_path()));
+    ed.handle(Key::Ctrl('^'));
+    assert_eq!(ed.buf().path.as_deref(), Some(one.as_path()));
+    keys(&mut ed, ":b 9\n");
+    assert!(ed.message_text().starts_with("E86"));
+    keys(&mut ed, ":ls\n");
+    assert_eq!(ed.mode, Mode::Picker);
+    ed.handle(Key::Esc);
+
+    let mut ed: Editor = editor(&format!("see {}:2 for details", two.display()));
+    keys(&mut ed, "wwgf");
+    assert_eq!(ed.buf().path.as_deref(), Some(two.as_path()));
+    assert_eq!(ed.buf().cursor.line, 1, "path:line jumps to the line");
+    let _: std::io::Result<()> = std::fs::remove_dir_all(&dir);
+
+    let mut ed: Editor = editor("ab\nabcd\na");
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jj$A;\x1b");
+    assert_eq!(text(&ed), "ab;\nabcd;\na;");
+    keys(&mut ed, "gg0l");
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jj$d");
+    assert_eq!(text(&ed), "a\na\na", "$ takes each line to its own end");
+}
+
+/// `"on": "save"` commands run before writing, only for their extensions; a failure is shown and the file is
+/// still written (tests cannot spawn, so the run itself fails here).
+#[test]
+fn format_on_save() {
+    let (config, warnings): (Config, Vec<String>) = Config::from_str(
+        r#"{ "commands": { "Fmt": { "run": ["fmt"], "output": "replace", "on": "save", "files": ["*.rs"] } } }"#,
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let dir: PathBuf = std::env::temp_dir().join(format!("lim-onsave-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut ed: Editor = editor("x");
+    ed.configure(&config);
+    keys(&mut ed, &format!(":w {}\n", dir.join("a.rs").display()));
+    assert_eq!(ed.message_text(), "Fmt: cannot run programs here");
+    assert_eq!(std::fs::read_to_string(dir.join("a.rs")).unwrap(), "x\n", "written anyway");
+    keys(&mut ed, &format!(":saveas {}\n", dir.join("b.txt").display()));
+    assert!(ed.message_text().contains("written"), "not run for other extensions: {}", ed.message_text());
+    let _: std::io::Result<()> = std::fs::remove_dir_all(&dir);
+    let (_, warnings): (Config, Vec<String>) =
+        Config::from_str(r#"{ "commands": { "Bad": { "run": ["x"], "on": "open" } } }"#);
+    assert_eq!(warnings.len(), 1);
+}

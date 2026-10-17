@@ -276,9 +276,18 @@ impl Buffer {
 
     /// `iw` / `aw`: the run of same-class chars under `at`, plus trailing (or leading) blanks for `aw`.
     pub fn word_object(&self, at: Pos, around: bool) -> Option<(Pos, Pos)> {
+        self.word_span(at, around, CharClass::of)
+    }
+
+    /// `iW` / `aW`: as `iw`, with any run of non-blanks as one WORD.
+    pub fn big_word_object(&self, at: Pos, around: bool) -> Option<(Pos, Pos)> {
+        self.word_span(at, around, CharClass::of_big)
+    }
+
+    fn word_span(&self, at: Pos, around: bool, class_of: fn(Option<char>) -> CharClass) -> Option<(Pos, Pos)> {
         let chars: Vec<char> = self.lines[at.line].chars().collect();
         let col: usize = at.col.min(chars.len().checked_sub(1)?);
-        let class = |i: usize| CharClass::of(chars.get(i).copied());
+        let class = |i: usize| class_of(chars.get(i).copied());
         let here: CharClass = class(col);
         let mut start: usize = col;
         while start > 0 && class(start - 1) == here {
@@ -319,6 +328,88 @@ impl Buffer {
         };
         let end: Pos = self.bracket_partner(start, open, usize::MAX)?;
         Some(if around { (start, Pos::new(end.line, end.col + 1)) } else { (Pos::new(start.line, start.col + 1), end) })
+    }
+
+    /// `ip` / `ap`: the first and last line of the paragraph (or run of blank lines) at `line`; `ap` adds the
+    /// blank lines after it, or before it when there are none after.
+    pub fn paragraph_object(&self, line: usize, around: bool) -> (usize, usize) {
+        let blank = |y: usize| self.lines[y].trim().is_empty();
+        let here: bool = blank(line);
+        let (mut first, mut last): (usize, usize) = (line, line);
+        while first > 0 && blank(first - 1) == here {
+            first -= 1;
+        }
+        while last < self.last_line() && blank(last + 1) == here {
+            last += 1;
+        }
+        if around {
+            if last < self.last_line() {
+                while last < self.last_line() && blank(last + 1) != here {
+                    last += 1;
+                }
+            } else {
+                while first > 0 && blank(first - 1) != here {
+                    first -= 1;
+                }
+            }
+        }
+        (first, last)
+    }
+
+    /// `it` / `at`: inside (or including) the innermost `<tag>…</tag>` around `at`, across lines. Comments,
+    /// `<!…>`, `<?…>` and self-closing tags are skipped.
+    pub fn tag_object(&self, at: Pos, around: bool) -> Option<(Pos, Pos)> {
+        let text: Vec<char> = self.lines.join("\n").chars().collect();
+        let starts: Vec<usize> = self
+            .lines
+            .iter()
+            .scan(0, |next, l| {
+                let start: usize = *next;
+                *next += text::char_len(l) + 1;
+                Some(start)
+            })
+            .collect();
+        let cursor: usize = starts[at.line] + at.col;
+        let pos = |i: usize| {
+            let line: usize = starts.partition_point(|&s| s <= i) - 1;
+            Pos::new(line, i - starts[line])
+        };
+        // (name, start of `<name`, end after its `>`) of the tags still open.
+        let mut open: Vec<(String, usize, usize)> = Vec::new();
+        let mut best: Option<(usize, usize, usize, usize)> = None;
+        let mut i: usize = 0;
+        while i < text.len() {
+            if text[i] != '<' {
+                i += 1;
+                continue;
+            }
+            let Some(len): Option<usize> = text[i..].iter().position(|&c| c == '>') else { break };
+            let end: usize = i + len + 1;
+            let inner: String = text[i + 1..end - 1].iter().collect();
+            let closing: bool = inner.starts_with('/');
+            let name: String = inner
+                .trim_start_matches('/')
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || "-_:.".contains(*c))
+                .collect();
+            if name.is_empty() || inner.ends_with('/') {
+                i = end;
+                continue;
+            }
+            if !closing {
+                open.push((name, i, end));
+            } else if let Some(k) = open.iter().rposition(|(n, _, _)| *n == name) {
+                let (_, o_start, o_end): (String, usize, usize) = open.remove(k);
+                open.truncate(k);
+                // Innermost first: the first closed pair around the cursor wins.
+                if o_start <= cursor && cursor < end && best.is_none() {
+                    best = Some((o_start, o_end, i, end));
+                }
+            }
+            i = end;
+        }
+        let (o_start, o_end, c_start, c_end): (usize, usize, usize, usize) = best?;
+        Some(if around { (pos(o_start), pos(c_end)) } else { (pos(o_end), pos(c_start)) })
     }
 
     /// `i"` / `a"`: the quoted string around `at`, or the next one on the line.
@@ -416,6 +507,19 @@ mod tests {
         assert_eq!(b.word_object(Pos::new(3, 1), true), Some((Pos::new(3, 0), Pos::new(3, 4))));
         assert_eq!(b.quote_object(Pos::new(3, 0), '"', false), Some((Pos::new(3, 5), Pos::new(3, 13))));
         assert_eq!(b.quote_object(Pos::new(3, 7), '"', true), Some((Pos::new(3, 4), Pos::new(3, 14))));
+        assert_eq!(b.big_word_object(Pos::new(0, 1), false), Some((Pos::new(0, 0), Pos::new(0, 4))));
+
+        let p: Buffer = Buffer::from_text(None, "a\nb\n\n\nc\nd");
+        assert_eq!(p.paragraph_object(1, false), (0, 1));
+        assert_eq!(p.paragraph_object(0, true), (0, 3));
+        assert_eq!(p.paragraph_object(5, true), (2, 5), "last paragraph: blank lines before it");
+        assert_eq!(p.paragraph_object(2, false), (2, 3));
+
+        let t: Buffer = Buffer::from_text(None, "<ul>\n  <li class=\"x\">one <b>two</b></li>\n  <br/>\n</ul>");
+        assert_eq!(t.tag_object(Pos::new(1, 10), false), Some((Pos::new(1, 16), Pos::new(1, 30))));
+        assert_eq!(t.tag_object(Pos::new(1, 27), true), Some((Pos::new(1, 20), Pos::new(1, 30))));
+        assert_eq!(t.tag_object(Pos::new(2, 3), false), Some((Pos::new(0, 4), Pos::new(3, 0))));
+        assert_eq!(t.tag_object(Pos::new(0, 0), true), Some((Pos::new(0, 0), Pos::new(3, 5))));
     }
 
     #[test]

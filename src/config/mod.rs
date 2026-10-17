@@ -80,32 +80,28 @@ pub struct Options {
     pub completion: bool,
     /// Shape of the statusline section ends (Nerd Font icon set only).
     pub statusline_style: StatusStyle,
-    /// The start screen's monster.
+    /// Which drawing of the hydra the start screen shows.
     pub splash: Splash,
 }
 
-/// The start screen art: monsters of the Greek underworld, or a different one each start.
+/// The start screen's hydra: one of its drawings, or a random one that fits, different each start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Splash {
-    Hydra,
-    Cerberus,
-    Mares,
-    Reaper,
-    Devil,
     Random,
+    Classic,
+    Braille,
+    Small,
 }
 
 impl Splash {
-    pub const ALL: [Self; 6] = [Self::Hydra, Self::Cerberus, Self::Mares, Self::Reaper, Self::Devil, Self::Random];
+    pub const ALL: [Self; 4] = [Self::Random, Self::Classic, Self::Braille, Self::Small];
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::Hydra => "hydra",
-            Self::Cerberus => "cerberus",
-            Self::Mares => "mares",
-            Self::Reaper => "reaper",
-            Self::Devil => "devil",
             Self::Random => "random",
+            Self::Classic => "classic",
+            Self::Braille => "braille",
+            Self::Small => "small",
         }
     }
 }
@@ -216,7 +212,7 @@ impl Default for Options {
             iconset: "nerd".into(),
             completion: true,
             statusline_style: StatusStyle::Rounded,
-            splash: Splash::Hydra,
+            splash: Splash::Random,
         }
     }
 }
@@ -369,6 +365,28 @@ pub struct UserCommand {
     pub desc: String,
     /// The plugin's folder, empty for the config's own commands.
     pub dir: PathBuf,
+    pub on: Trigger,
+    /// File extensions (`"js"`, `"*.ts"`) an automatic run is limited to; empty for every file.
+    pub files: Vec<String>,
+}
+
+/// When a command runs besides `:Name`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Trigger {
+    #[default]
+    Manual,
+    /// `"on": "save"`: before the buffer is written (format on save).
+    Save,
+}
+
+impl UserCommand {
+    /// Whether it runs automatically when a file with this extension is written.
+    pub fn runs_on_save(&self, path: &Path) -> bool {
+        let ext: String = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        self.on == Trigger::Save
+            && (self.files.is_empty()
+                || self.files.iter().any(|f| f.trim_start_matches("*.").eq_ignore_ascii_case(&ext)))
+    }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -738,7 +756,13 @@ fn user_command(name: &str, spec: &Json, dir: &Path) -> Result<UserCommand, Stri
         Some(Json::String(d)) => d.clone(),
         _ => String::new(),
     };
-    Ok(UserCommand { name: name.to_owned(), run, output, desc, dir: dir.to_owned() })
+    let on: Trigger = match field("on") {
+        None => Trigger::Manual,
+        Some(Json::String(s)) if s == "save" => Trigger::Save,
+        Some(_) => return Err("\"on\" can only be \"save\"".into()),
+    };
+    let files: Vec<String> = words("files")?.unwrap_or_default();
+    Ok(UserCommand { name: name.to_owned(), run, output, desc, dir: dir.to_owned(), on, files })
 }
 
 fn set_bool(slot: &mut bool, value: &Json) -> bool {

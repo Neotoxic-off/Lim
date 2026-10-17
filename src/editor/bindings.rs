@@ -71,6 +71,10 @@ pub enum Action {
     Focus(Direction),
     ScrollTo(Align),
     Reselect,
+    /// `gn`
+    SelectMatch,
+    /// `gf`
+    OpenFile,
     InsertLast,
     InsertColumnZero,
     JoinRaw,
@@ -262,6 +266,8 @@ pub const BINDINGS: &[Binding] = &[
     b('g', 'U', A::Operator(Operator::Upper), "Uppercase"),
     b('g', '~', A::Operator(Operator::ToggleCase), "Toggle case"),
     b('g', 'v', A::Reselect, "Reselect last selection"),
+    b('g', 'n', A::SelectMatch, "Select the next search match (cgn, then . repeats)"),
+    b('g', 'f', A::OpenFile, "Open the file under the cursor (path:line too)"),
     b('g', 'x', A::OpenUrl, "Open URL under cursor"),
     b('g', '_', A::Motion(Motion::LastNonBlank), "Last non-blank character"),
     b(']', 'b', A::CycleBuffer { forward: true }, "Next buffer"),
@@ -307,7 +313,7 @@ pub fn key_name(key: char) -> String {
 /// Visual mode reaches `g`, the leader and their sub-menus; the rest are normal-mode only.
 pub fn allowed_in(mode: Mode, action: Action) -> bool {
     !matches!(mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock)
-        || matches!(action, A::Group(_) | A::Motion(_) | A::Operator(_) | A::CommentLines | A::OpenUrl)
+        || matches!(action, A::Group(_) | A::Motion(_) | A::Operator(_) | A::CommentLines | A::OpenUrl | A::SelectMatch)
 }
 
 #[cfg(test)]

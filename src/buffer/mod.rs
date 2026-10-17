@@ -3,6 +3,7 @@
 pub mod git;
 mod history;
 mod motion;
+pub mod regex;
 pub mod text;
 
 use std::collections::HashMap;
@@ -166,6 +167,26 @@ impl Buffer {
         self.history.state() != self.saved
     }
 
+    /// `:e!`: the file as it is on disk, dropping unsaved changes (undo brings them back).
+    pub fn revert(&mut self) -> Result<String, Error> {
+        let path: PathBuf = self.path.clone().ok_or(Error::NoFileName)?;
+        let fresh: Buffer = Self::open(&path)?;
+        let all: Range<usize> = 0..self.lines.len();
+        self.history.seal();
+        self.splice(all, fresh.lines);
+        self.history.seal();
+        self.saved = self.history.state();
+        self.clamp(false);
+        Ok(format!("\"{}\" {}L reloaded", path.display(), self.lines.len()))
+    }
+
+    /// `:saveas`: this buffer now edits `path`.
+    pub fn set_path(&mut self, path: PathBuf) {
+        self.lang = syntax::lang_for(&path);
+        self.syntax.invalidate(0);
+        self.path = Some(path);
+    }
+
     /// Re-reads an unmodified buffer whose file changed on disk (after a shell or lazygit).
     pub fn reload_if_changed(&mut self) {
         let Some(path): Option<PathBuf> = self.path.clone() else { return };
@@ -231,6 +252,11 @@ impl Buffer {
 
     pub fn seal(&mut self) {
         self.history.seal();
+    }
+
+    /// Keeps every change in the current undo step until released (`:g`, `:norm`).
+    pub fn hold_undo(&mut self, held: bool) {
+        self.history.hold(held);
     }
 
     pub fn undo(&mut self) -> bool {
@@ -370,6 +396,9 @@ impl Buffer {
     }
 }
 
+/// Anchors with this bit set vanish when their line is deleted (the lines `:g` still has to visit).
+pub const DROP_ON_DELETE: u64 = 1 << 63;
+
 /// Moves marks and anchors after `removed` lines at `at` were replaced by `inserted` lines.
 /// Lines below shift; positions on lines that went away land on the last new line, and a
 /// letter mark whose line was deleted outright is dropped, as in Vim.
@@ -398,9 +427,7 @@ fn shift_positions(
         true
     };
     marks.retain(|name, p| moved(p) || !name.is_ascii_lowercase());
-    for p in anchors.values_mut() {
-        moved(p);
-    }
+    anchors.retain(|id, p| moved(p) || id & DROP_ON_DELETE == 0);
 }
 
 /// The absolute path with symlinks resolved, or `path` itself when that fails. On Windows the `\\?\` prefix

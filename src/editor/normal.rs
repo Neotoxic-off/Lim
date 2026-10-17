@@ -141,6 +141,7 @@ impl Editor {
             Key::Ctrl('a') => self.increment(i64::try_from(n).unwrap_or(i64::MAX)),
             Key::Ctrl('x') => self.increment(i64::try_from(n).map_or(i64::MIN, |n| -n)),
             Key::Ctrl('o') => self.jump_back(n),
+            Key::Ctrl('^') => self.go_previous_buffer(),
             Key::Ctrl('e') => self.scroll_view(true, n),
             Key::Ctrl('y') => self.scroll_view(false, n),
             Key::Ctrl('v') => self.start_visual(Mode::VisualBlock),
@@ -300,6 +301,8 @@ impl Editor {
             Action::Focus(direction) => self.focus_direction(direction),
             Action::ScrollTo(align) => self.scroll_cursor_to(align),
             Action::Reselect => self.reselect(),
+            Action::SelectMatch => self.select_match(),
+            Action::OpenFile => self.open_file_under_cursor(),
             Action::InsertLast => {
                 let at: Option<Pos> = self.buf().marks.get(&'^').copied();
                 if let Some(at) = at {
@@ -337,8 +340,11 @@ impl Editor {
         let from: Pos = buf.cursor;
         let Some(mut target): Option<Pos> = motion.target(buf, count, self.view_height, &self.search) else {
             if let Motion::SearchNext { .. } = motion {
-                let error: Error =
-                    if self.search.is_empty() { Error::NoPattern } else { Error::PatternNotFound(self.search.clone()) };
+                let error: Error = match text::compile(&self.search) {
+                    _ if self.search.is_empty() => Error::NoPattern,
+                    Err(why) => Error::Vim(why),
+                    Ok(_) => Error::PatternNotFound(self.search.clone()),
+                };
                 self.error(&error);
             }
             return;
@@ -373,8 +379,24 @@ impl Editor {
     fn select_object(&mut self, around: bool, obj: char) {
         let buf: &Buffer = self.buf();
         let at: Pos = buf.cursor;
+        if obj == 'p' {
+            let (first, last): (usize, usize) = buf.paragraph_object(at.line, around);
+            let (start, end): (Pos, Pos) = (Pos::new(first, 0), Pos::new(last, 0));
+            match self.pending.op {
+                Some(op) => self.apply(op, start, end, Span::Linewise),
+                None if self.mode != Mode::Normal => {
+                    self.mode = Mode::VisualLine;
+                    self.anchor = start;
+                    self.buf_mut().cursor = end;
+                }
+                None => {}
+            }
+            return;
+        }
         let range: Option<(Pos, Pos)> = match obj {
             'w' => buf.word_object(at, around),
+            'W' => buf.big_word_object(at, around),
+            't' => buf.tag_object(at, around),
             '(' | ')' | 'b' => buf.pair_object(at, '(', ')', around),
             '[' | ']' => buf.pair_object(at, '[', ']', around),
             '{' | '}' | 'B' => buf.pair_object(at, '{', '}', around),
@@ -427,6 +449,7 @@ impl Editor {
 
     pub(super) fn start_visual(&mut self, mode: Mode) {
         self.anchor = self.buf().cursor;
+        self.block_to_eol = false;
         self.mode = mode;
     }
 

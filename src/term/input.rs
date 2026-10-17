@@ -116,7 +116,9 @@ fn decode(bytes: &[u8]) -> Option<(Key, usize)> {
         1..=26 => (Key::Ctrl(char::from(b'a' + first - 1)), 1),
         0x20..=0x7e => (Key::Char(char::from(first)), 1),
         0 => (Key::Ctrl(' '), 1),
-        28..=31 => (Key::Unknown, 1),
+        // Ctrl-^ (Ctrl-6 on most keyboards): the alternate buffer.
+        30 => (Key::Ctrl('^'), 1),
+        28 | 29 | 31 => (Key::Unknown, 1),
         _ => {
             let len: usize = match first {
                 0xc0..=0xdf => 2,
@@ -195,6 +197,7 @@ mod tests {
         assert_eq!(decode("é".as_bytes()), Some((Key::Char('é'), 2)));
         assert_eq!(decode(&"é".as_bytes()[..1]), None);
         assert_eq!(decode(b"\x13"), Some((Key::Ctrl('s'), 1)));
+        assert_eq!(decode(b"\x1e"), Some((Key::Ctrl('^'), 1)));
         assert_eq!(decode(b"\x1c"), Some((Key::Unknown, 1)));
     }
 

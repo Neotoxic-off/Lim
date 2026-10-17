@@ -1,4 +1,4 @@
-//! Vim registers: unnamed `"`, named `a`–`z` (`A`–`Z` append), yank `0`, delete `1` and `-`,
+//! Vim registers: unnamed `"`, named `a`–`z` (`A`–`Z` append), yank `0`, deletes `1`–`9` (shifting) and `-`,
 //! black hole `_`, clipboard `+`/`*`, and read-only `%` (file) and `/` (search).
 
 use std::collections::HashMap;
@@ -52,6 +52,13 @@ impl Editor {
         let numbered: char = if yank {
             '0'
         } else if value.linewise || value.text.contains('\n') {
+            // A big delete pushes "1 to "2, …, "8 to "9; the old "9 is dropped.
+            for n in (1..9).rev() {
+                let (from, to): (char, char) = (char::from(b'0' + n), char::from(b'1' + n));
+                if let Some(older) = slots.remove(&from) {
+                    slots.insert(to, older);
+                }
+            }
             '1'
         } else {
             '-'

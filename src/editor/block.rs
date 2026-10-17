@@ -16,12 +16,15 @@ pub struct BlockInsert {
     pub col: usize,
     /// `A`: lines shorter than `col` are padded so the text lines up.
     pub pad: bool,
+    /// `$A`: the text goes at the end of every line instead of at `col`.
+    pub eol: bool,
 }
 
 impl Editor {
     fn block_bounds(&self) -> (usize, usize, usize, usize) {
         let (a, b): (Pos, Pos) = (self.anchor, self.buf().cursor);
-        (a.line.min(b.line), a.line.max(b.line), a.col.min(b.col), a.col.max(b.col))
+        let right: usize = if self.block_to_eol { usize::MAX - 1 } else { a.col.max(b.col) };
+        (a.line.min(b.line), a.line.max(b.line), a.col.min(b.col), right)
     }
 
     /// `d`, `x`, `y`, `c` on the block; the register keeps it as a column.
@@ -41,7 +44,7 @@ impl Editor {
         self.mode = Mode::Normal;
         self.store_register(Register { text: pieces.join("\n"), linewise: false, block: true }, !delete);
         if change {
-            self.block_insert = Some(BlockInsert { top, bottom, col: left, pad: false });
+            self.block_insert = Some(BlockInsert { top, bottom, col: left, pad: false, eol: false });
             self.mode = Mode::Insert;
         }
     }
@@ -49,14 +52,21 @@ impl Editor {
     /// `I` / `A` in block mode.
     pub(super) fn block_insert_start(&mut self, append: bool) {
         let (top, bottom, left, right): (usize, usize, usize, usize) = self.block_bounds();
-        let col: usize = if append { right + 1 } else { left };
+        let eol: bool = append && self.block_to_eol;
         let buf: &mut Buffer = self.buf_mut();
+        let col: usize = if eol {
+            buf.line_len(top)
+        } else if append {
+            right + 1
+        } else {
+            left
+        };
         let len: usize = buf.line_len(top);
         if col > len {
             buf.insert(Pos::new(top, len), &" ".repeat(col - len));
         }
         buf.cursor = Pos::new(top, col);
-        self.block_insert = Some(BlockInsert { top, bottom, col, pad: append });
+        self.block_insert = Some(BlockInsert { top, bottom, col, pad: append && !eol, eol });
         self.mode = Mode::Insert;
     }
 
@@ -71,6 +81,10 @@ impl Editor {
         let typed: String = buf.text(Pos::new(block.top, block.col), cursor);
         for y in block.top + 1..=block.bottom.min(buf.last_line()) {
             let len: usize = buf.line_len(y);
+            if block.eol {
+                buf.insert(Pos::new(y, len), &typed);
+                continue;
+            }
             if len < block.col {
                 if !block.pad {
                     continue;

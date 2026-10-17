@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 use std::str::Chars;
 
 use super::cmdhistory::CmdHistory;
+use super::lines::SortKey;
 use super::motion::{Motion, Span};
 use super::operator::Operator;
+use super::picker::PickerKind;
 use super::vim::LineRange;
 use super::{Editor, Mode};
-use crate::buffer::{Buffer, Pos};
+use crate::buffer::{Buffer, Pos, text};
 use crate::error::Error;
 use crate::term::Key;
 
@@ -72,12 +74,54 @@ pub enum Command {
     Goto(usize),
     /// `:$`, `:'a`, `:.`: a single address other than a number.
     GotoAddress(String),
-    /// `:[range]s/pattern/replacement/[g]`
+    /// `:[range]g/pattern/command`, `:g!` and `:v` (`invert`) for the lines that do not match.
+    Global {
+        range: String,
+        pattern: String,
+        command: String,
+        invert: bool,
+    },
+    /// `:[range]norm[!] keys`; `remap` is false with `!`.
+    Normal {
+        range: String,
+        keys: String,
+        remap: bool,
+    },
+    /// `:[range]sort[!] [i] [n] [u]`
+    Sort {
+        range: String,
+        key: SortKey,
+        reverse: bool,
+        unique: bool,
+    },
+    /// `:[range]m {address}`, or `:t` / `:co` with `copy`.
+    MoveLines {
+        range: String,
+        address: String,
+        copy: bool,
+    },
+    /// `:[line]r file`
+    Read {
+        range: String,
+        path: PathBuf,
+    },
+    /// `:e!`: the file again, dropping changes.
+    Reload,
+    /// `:sav[eas][!] file`: write to `file` and edit it from now on.
+    SaveAs {
+        path: PathBuf,
+        force: bool,
+    },
+    /// `:ls`: the buffer list (the buffers picker).
+    ListBuffers,
+    /// `:b N` / `:b name`
+    Buffer(String),
+    /// `:[range]s/pattern/replacement/[flags]`
     Substitute {
         range: String,
         pattern: String,
         replacement: String,
-        global: bool,
+        flags: SubFlags,
     },
     /// `:[range]d`, `y`, `>`, `<`, `j`
     LineOp {
@@ -92,6 +136,42 @@ pub enum Command {
         name: String,
         args: Vec<String>,
     },
+}
+
+/// `:s` flags: `g` every match of a line, `n` count only, `e` no error when nothing matches, `i`/`I` case.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SubFlags {
+    pub global: bool,
+    pub count_only: bool,
+    pub quiet: bool,
+    pub case: SubCase,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SubCase {
+    /// `ignorecase` / `smartcase` decide.
+    #[default]
+    Options,
+    Ignore,
+    Match,
+}
+
+impl SubFlags {
+    fn parse(flags: &str) -> Result<Self, Error> {
+        let mut parsed: Self = Self::default();
+        for c in flags.trim().chars() {
+            match c {
+                'g' => parsed.global = true,
+                'n' => parsed.count_only = true,
+                'e' => parsed.quiet = true,
+                'i' => parsed.case = SubCase::Ignore,
+                'I' => parsed.case = SubCase::Match,
+                'c' => return Err(Error::Vim("E488: Trailing characters: c (confirm is not supported)".into())),
+                _ => return Err(Error::Vim(format!("E488: Trailing characters: {}", flags.trim()))),
+            }
+        }
+        Ok(parsed)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,18 +189,24 @@ fn split_range(input: &str) -> (&str, &str) {
     if let Some(rest) = input.strip_prefix('%') {
         return ("%", rest);
     }
-    let address = |mut i: usize| -> usize {
-        match bytes.get(i) {
+    let digits = |mut i: usize| -> usize {
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        i
+    };
+    let address = |i: usize| -> usize {
+        let mut i: usize = match bytes.get(i) {
             Some(b'.' | b'$') => i + 1,
             Some(b'\'') if i + 1 < bytes.len() && bytes[i + 1].is_ascii() => i + 2,
-            Some(b) if b.is_ascii_digit() => {
-                while bytes.get(i).is_some_and(u8::is_ascii_digit) {
-                    i += 1;
-                }
-                i
-            }
+            Some(b) if b.is_ascii_digit() => digits(i),
             _ => i,
+        };
+        // `+N` / `-N` offsets after it (or alone, from the cursor's line).
+        while matches!(bytes.get(i), Some(b'+' | b'-')) {
+            i = digits(i + 1);
         }
+        i
     };
     let mut end: usize = address(0);
     if end > 0 && bytes.get(end) == Some(&b',') {
@@ -132,8 +218,36 @@ fn split_range(input: &str) -> (&str, &str) {
     (&input[..end], &input[end..])
 }
 
+/// `g/pattern/command`, `g!…` or `v/…` (then `invert`): the pattern up to the next unescaped delimiter, then
+/// the command. The delimiter is any punctuation, so `:vs` and `:vnew` are left alone.
+fn parse_global(rest: &str) -> Option<(bool, String, String)> {
+    let (invert, body): (bool, &str) =
+        [("global!", true), ("g!", true), ("vglobal", true), ("v", true), ("global", false), ("g", false)]
+            .iter()
+            .find_map(|(name, invert)| rest.strip_prefix(name).map(|body| (*invert, body)))?;
+    let mut chars = body.chars();
+    let delim: char = chars.next().filter(|c| !c.is_alphanumeric() && !c.is_whitespace() && *c != '"')?;
+    let mut pattern: String = String::new();
+    let mut escaped: bool = false;
+    for c in chars.by_ref() {
+        match c {
+            _ if escaped => {
+                if c != delim {
+                    pattern.push('\\');
+                }
+                pattern.push(c);
+                escaped = false;
+            }
+            '\\' => escaped = true,
+            c if c == delim => break,
+            c => pattern.push(c),
+        }
+    }
+    Some((invert, pattern, chars.collect()))
+}
+
 /// `s/pattern/replacement/flags` with any punctuation as the delimiter and `\` escaping it.
-fn parse_substitute(rest: &str) -> Option<(String, String, bool)> {
+fn parse_substitute(rest: &str) -> Option<(String, String, String)> {
     let mut chars: Chars<'_> = rest.strip_prefix('s')?.chars();
     let delim: char = chars.next().filter(|c| !c.is_alphanumeric() && !c.is_whitespace())?;
     let mut parts: Vec<String> = vec![String::new()];
@@ -152,12 +266,12 @@ fn parse_substitute(rest: &str) -> Option<(String, String, bool)> {
             c => parts.last_mut()?.push(c),
         }
     }
-    let flags: String = parts.get(2).cloned().unwrap_or_default();
-    Some((parts.first()?.clone(), parts.get(1).cloned().unwrap_or_default(), flags.contains('g')))
+    Some((parts.first()?.clone(), parts.get(1).cloned().unwrap_or_default(), parts.get(2).cloned().unwrap_or_default()))
 }
 
 impl Command {
     /// Ok(None) for an empty line.
+    #[expect(clippy::too_many_lines, reason = "flat dispatch: one arm per command name")]
     pub fn parse(input: &str) -> Result<Option<Self>, Error> {
         let input: &str = input.trim();
         if input.is_empty() {
@@ -171,8 +285,9 @@ impl Command {
         if !range.is_empty() && rest.is_empty() {
             return Ok(Some(Self::GotoAddress(range.to_owned())));
         }
-        if let Some((pattern, replacement, global)) = parse_substitute(rest) {
-            return Ok(Some(Self::Substitute { range: range.to_owned(), pattern, replacement, global }));
+        if let Some((pattern, replacement, flags)) = parse_substitute(rest) {
+            let flags: SubFlags = SubFlags::parse(&flags)?;
+            return Ok(Some(Self::Substitute { range: range.to_owned(), pattern, replacement, flags }));
         }
         let line_op: Option<LineOp> = match rest {
             "d" | "de" | "del" | "delete" => Some(LineOp::Delete),
@@ -184,6 +299,55 @@ impl Command {
         };
         if let Some(op) = line_op {
             return Ok(Some(Self::LineOp { range: range.to_owned(), op }));
+        }
+        if let Some((invert, pattern, command)) = parse_global(rest) {
+            return Ok(Some(Self::Global { range: range.to_owned(), pattern, command, invert }));
+        }
+        let word: &str = rest.split(char::is_whitespace).next().unwrap_or_default();
+        let arg: &str = rest[word.len()..].trim();
+        let (bare, force): (&str, bool) = word.strip_suffix('!').map_or((word, false), |w| (w, true));
+        match bare {
+            "sor" | "sort" => {
+                let key: SortKey = if arg.contains('n') {
+                    SortKey::Numeric
+                } else if arg.contains('i') {
+                    SortKey::IgnoreCase
+                } else {
+                    SortKey::Text
+                };
+                let unique: bool = arg.contains('u');
+                return Ok(Some(Self::Sort { range: range.to_owned(), key, reverse: force, unique }));
+            }
+            "m" | "mo" | "move" | "t" | "co" | "copy" if !arg.is_empty() => {
+                let copy: bool = !bare.starts_with('m');
+                return Ok(Some(Self::MoveLines { range: range.to_owned(), address: arg.to_owned(), copy }));
+            }
+            // `:r !cmd` would run a shell: lim's command line never does.
+            "r" | "read" if !arg.is_empty() && !arg.starts_with('!') => {
+                return Ok(Some(Self::Read { range: range.to_owned(), path: PathBuf::from(arg) }));
+            }
+            // The address may follow the name directly: `:m0`, `:t.`, `:m$`, `:co'a`.
+            _ => {
+                for (name, copy) in
+                    [("move", false), ("mo", false), ("m", false), ("copy", true), ("co", true), ("t", true)]
+                {
+                    if let Some(address) = rest
+                        .strip_prefix(name)
+                        .filter(|a| a.starts_with(|c: char| c.is_ascii_digit() || ".$'+-".contains(c)))
+                    {
+                        let address: String = address.trim().to_owned();
+                        return Ok(Some(Self::MoveLines { range: range.to_owned(), address, copy }));
+                    }
+                }
+            }
+        }
+        if matches!(word, "norm" | "normal" | "norm!" | "normal!") {
+            let keys: &str = rest[word.len()..].strip_prefix(' ').unwrap_or(&rest[word.len()..]);
+            return Ok(Some(Self::Normal {
+                range: range.to_owned(),
+                keys: keys.to_owned(),
+                remap: !word.ends_with('!'),
+            }));
         }
         let (name, args): (&str, &str) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
         if name.starts_with(|c: char| c.is_ascii_uppercase()) {
@@ -209,7 +373,14 @@ impl Command {
             "wq" => Self::WriteQuit { path, force, only_if_dirty: false },
             "x" | "xit" | "exit" => Self::WriteQuit { path, force, only_if_dirty: true },
             "wqa" | "wqall" | "xa" | "xall" => Self::WriteAllQuit,
+            "e" | "edit" if force && path.is_none() => Self::Reload,
             "e" | "edit" => Self::Edit(path.ok_or(Error::NoFileName)?),
+            "sav" | "saveas" => Self::SaveAs { path: path.ok_or(Error::NoFileName)?, force },
+            "ls" | "buffers" | "files" => Self::ListBuffers,
+            "b" | "bu" | "buf" | "buffer" => Self::Buffer(arg.to_owned()),
+            b if b.len() > 1 && b.starts_with('b') && b[1..].bytes().all(|c| c.is_ascii_digit()) => {
+                Self::Buffer(b[1..].to_owned())
+            }
             "enew" => Self::New,
             "bn" | "bnext" => Self::BufferNext,
             "bp" | "bprevious" | "bN" | "bNext" => Self::BufferPrev,
@@ -290,7 +461,8 @@ impl Editor {
         }
     }
 
-    fn try_run(&mut self, command: Command) -> Result<(), Error> {
+    #[expect(clippy::too_many_lines, reason = "flat dispatch: one arm per command")]
+    pub(super) fn try_run(&mut self, command: Command) -> Result<(), Error> {
         match command {
             Command::Write { path, force } => self.write(path.as_deref(), force)?,
             Command::WriteAll => self.write_all()?,
@@ -334,16 +506,73 @@ impl Editor {
                 let buf: &mut Buffer = self.buf_mut();
                 buf.cursor = Pos::new(range.last, buf.first_non_blank(range.last));
             }
-            Command::Substitute { range, pattern, replacement, global } => {
+            Command::Global { range, pattern, command, invert } => {
+                let lines: LineRange = self.range_or_all(&range)?;
+                let pattern: String = if pattern.is_empty() { self.search.clone() } else { pattern };
+                if pattern.is_empty() {
+                    return Err(Error::NoPattern);
+                }
+                self.global(lines, &pattern, invert, &command)?;
+            }
+            Command::Normal { range, keys, remap } => {
+                let lines: Option<LineRange> = if range.is_empty() {
+                    None
+                } else {
+                    Some(self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?)
+                };
+                self.normal_on_lines(lines, &keys, remap)?;
+            }
+            Command::Sort { range, key, reverse, unique } => {
+                let lines: LineRange = self.range_or_all(&range)?;
+                self.sort_lines(lines, key, reverse, unique);
+            }
+            Command::MoveLines { range, address, copy } => {
+                let lines: LineRange = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
+                self.move_lines(lines, &address, copy)?;
+            }
+            Command::Read { range, path } => {
+                let below: usize = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?.last;
+                self.read_file(below, &path)?;
+            }
+            Command::Reload => {
+                let summary: String = self.buf_mut().revert()?;
+                self.info(summary);
+            }
+            Command::SaveAs { path, force } => {
+                if path.exists() && !force {
+                    return Err(Error::FileExists(path));
+                }
+                let buf: &mut Buffer = self.buf_mut();
+                buf.set_path(path);
+                let summary: String = buf.save(None, false)?;
+                self.info(summary);
+            }
+            Command::ListBuffers => self.open_picker(PickerKind::Buffers),
+            Command::Buffer(name) => self.switch_to_named(&name)?,
+            Command::Substitute { range, pattern, replacement, flags } => {
                 let lines: LineRange = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
                 let pattern: String = if pattern.is_empty() { self.search.clone() } else { pattern };
                 if pattern.is_empty() {
                     return Err(Error::NoPattern);
                 }
-                self.buf_mut().seal();
-                match self.substitute(lines, &pattern, &replacement, global) {
-                    0 => return Err(Error::PatternNotFound(pattern)),
-                    n => self.info(format!("{n} line{} changed", if n == 1 { "" } else { "s" })),
+                let pattern: String = match flags.case {
+                    SubCase::Options => pattern,
+                    SubCase::Ignore => format!("\\c{pattern}"),
+                    SubCase::Match => format!("\\C{pattern}"),
+                };
+                text::compile(&pattern).map_err(Error::Vim)?;
+                let plural = |n: usize| if n == 1 { "" } else { "s" };
+                if flags.count_only {
+                    let (matches, on): (usize, usize) = self.count_matches(lines, &pattern, flags.global);
+                    let es: &str = if matches == 1 { "" } else { "es" };
+                    self.info(format!("{matches} match{es} on {on} line{}", plural(on)));
+                } else {
+                    self.buf_mut().seal();
+                    match self.substitute(lines, &pattern, &replacement, flags.global) {
+                        0 if flags.quiet => {}
+                        0 => return Err(Error::PatternNotFound(pattern)),
+                        n => self.info(format!("{n} line{} changed", plural(n))),
+                    }
                 }
             }
             Command::LineOp { range, op } => {
@@ -374,6 +603,8 @@ impl Editor {
     }
 
     fn write(&mut self, path: Option<&Path>, force: bool) -> Result<(), Error> {
+        let target: Option<PathBuf> = path.map(Path::to_path_buf).or_else(|| self.buf().path.clone());
+        let format_error: Option<Error> = target.and_then(|t| self.run_on_save(&t));
         let gitsigns: bool = self.options.gitsigns;
         let buf: &mut Buffer = self.buf_mut();
         let summary: String = buf.save(path, force)?;
@@ -381,6 +612,10 @@ impl Editor {
             buf.load_git_base();
         }
         self.info(summary);
+        // The file is written either way; a formatter that failed says so after the summary.
+        if let Some(e) = format_error {
+            self.error(&e);
+        }
         Ok(())
     }
 
@@ -428,9 +663,16 @@ mod tests {
                 range: "%".into(),
                 pattern: "a/b".into(),
                 replacement: "c".into(),
-                global: true
+                flags: SubFlags { global: true, ..SubFlags::default() }
             })
         );
+        let Ok(Some(Command::Substitute { flags, .. })): Result<Option<Command>, Error> = Command::parse("s/a/b/gi")
+        else {
+            panic!("s/a/b/gi")
+        };
+        assert_eq!(flags, SubFlags { global: true, case: SubCase::Ignore, ..SubFlags::default() });
+        assert!(matches!(Command::parse("s/a/b/c"), Err(Error::Vim(_))));
+        assert!(matches!(Command::parse("s/a/b/x"), Err(Error::Vim(_))));
         assert_eq!(
             Command::parse("'<,'>d").unwrap(),
             Some(Command::LineOp { range: "'<,'>".into(), op: LineOp::Delete })
