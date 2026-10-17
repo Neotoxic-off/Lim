@@ -33,6 +33,7 @@ the start screen.
 - [Keymaps](#keymaps)
 - [Themes and icons](#themes-and-icons)
 - [Configuration](#configuration)
+- [Plugins](#plugins)
 - [How it is built](#how-it-is-built)
 - [Limits](#limits)
 - [Development](#development)
@@ -44,14 +45,15 @@ the start screen.
 | Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`, `"-`, `"_`, `"+`) · marks and jump list that follow edits · `:s` and line ranges |
 | Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, page and line scrolling, `<S-arrows>` (word / page), `zz zt zb` · `:` and `/` history |
 | Text objects | `iw` `aw` `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
-| AstroNvim look | 24 colorschemes (NvChad's onedark by default) · NvChad-style statusline · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
+| AstroNvim look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
 | Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) |
 | Git | signs against the index · hunk jumps · branches, log, file log, status and stash pickers · `git browse` · lazygit in one key · status colors in the file tree |
 | Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · sessions |
 | Windows | `\|` / `\` splits, `<C-h/j/k/l>`, `<C-arrows>` to resize, `<C-w>` family, zen mode, global statusline |
 | System | system clipboard (`clipboard=unnamedplus`, OSC 52 fallback over SSH) · `<F7>` shell, lazygit, node, python, btm, gdu |
-| Config | one JSON file: Neovim option names, colorscheme, astrotheme palette, Neovim highlight groups, keymaps per mode, icon set |
+| Config | settings screen (`<Leader>,`) to search and change every option live and save it · one JSON file: Neovim option names, colorscheme, astrotheme palette, Neovim highlight groups, keymaps per mode, icon set |
+| Plugins | a folder with a `plugin.json` that adds options, colors, keymaps and `:Commands` · a command pipes the lines through a program in any language and puts its output back or shows it |
 | Robustness | atomic saves · refuses to clobber other files · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
 
 ## Install
@@ -82,8 +84,8 @@ lim --help | --version
 Messages appear as notifications in the top-right corner (`cmdheight = 0`, as in AstroNvim); `:` and `/`
 borrow a line while you type, pushing the statusline up as Neovim does.
 
-The `:` line completes as you type: command names, then each command's argument (`:colorscheme`
-themes, `:iconset` sets, file paths for `:e`, `:w`, `:sp`, `:vs`). `<Tab>`/`<C-n>` and `<S-Tab>`/`<C-p>`
+The `:` line completes as you type: command names, then file paths for `:e`, `:w`, `:sp`,
+`:vs`. `<Tab>`/`<C-n>` and `<S-Tab>`/`<C-p>`
 cycle through the menu, writing the choice into the line; `<CR>` runs it. Press `<F1>` (or `<Leader>fh`, `:help`) for the cheat sheet, or press
 `<Space>` and wait for which-key.
 
@@ -104,6 +106,7 @@ The leader is `<Space>`. Unless marked *lim*, everything matches AstroNvim's def
 | `gco` · `gcO` | Add a comment line below / above |
 | `<Leader>h` | Home screen |
 | `<F1>` · `<Leader>fh` · `<Leader>?` | Cheat sheet (*lim*) |
+| `<Leader>,` | Settings: theme, icons, every option (*lim*) |
 
 ### Buffers
 
@@ -203,23 +206,63 @@ current buffer first. `<Tab>`/`<C-n>`/`<C-j>`/`<Down>` next, `<S-Tab>`/`<C-p>`/`
 `<CR>` accepts the selected item (with nothing selected it is a plain newline), `<C-e>` hides,
 `<C-Space>` shows the menu on demand.
 Commands: `:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:enew` `:bn` `:bp` `:bd` `:sp` `:vs` `:only`
-`:close` `:noh` `:colorscheme` `:iconset` `:help`, `:[range]s/a/b/[g]` (literal pattern, `&` = match),
-`:[range]d` `y` `>` `<` `j`, and addresses `N`, `.`, `$`, `%`, `'a`, `'<,'>`.
+`:close` `:noh` `:help` `:settings` (or `:setup`), `:[range]s/a/b/[g]` (literal pattern, `&` = match),
+`:[range]d` `y` `>` `<` `j`, and addresses `N`, `.`, `$`, `%`, `'a`, `'<,'>`. Commands that start with an
+uppercase letter come from [plugins](#plugins).
 
 ## Themes and icons
 
-**Colorschemes**: nvchad (default: NvChad's base46 onedark), astrodark, astrolight, astromars, astrojupiter, catppuccin-mocha,
-catppuccin-macchiato, catppuccin-frappe, catppuccin-latte, tokyonight-night, tokyonight-storm,
-tokyonight-moon, tokyonight-day, dracula, onedark, gruvbox, nord, nordic, night-owl, sonokai, kanagawa,
-rose-pine, rose-pine-moon, rose-pine-dawn. Colors come from each theme's own repository, mapped onto the
-astrotheme palette lim draws with.
+Every picture below is a real frame drawn by lim's renderer (`cargo test gallery -- --ignored` redraws them).
 
-Switch with `<Leader>ft` (the editor recolors as you move through the list; `<Esc>` puts the old one back),
-`:colorscheme name`, or `<Leader>ub` for the light/dark sibling. The last one picked is remembered; set
+**Colorschemes** (30): colors come from each theme's own repository, mapped onto the astrotheme palette lim
+draws with. nvchad (NvChad's base46 onedark) is the default.
+
+|   |   |   |
+|---|---|---|
+| <img src="docs/gallery/nvchad.svg" alt="nvchad" width="300"> | <img src="docs/gallery/astrodark.svg" alt="astrodark" width="300"> | <img src="docs/gallery/astrolight.svg" alt="astrolight" width="300"> |
+| `nvchad` | `astrodark` | `astrolight` |
+| <img src="docs/gallery/astromars.svg" alt="astromars" width="300"> | <img src="docs/gallery/astrojupiter.svg" alt="astrojupiter" width="300"> | <img src="docs/gallery/catppuccin-mocha.svg" alt="catppuccin-mocha" width="300"> |
+| `astromars` | `astrojupiter` | `catppuccin-mocha` |
+| <img src="docs/gallery/catppuccin-macchiato.svg" alt="catppuccin-macchiato" width="300"> | <img src="docs/gallery/catppuccin-frappe.svg" alt="catppuccin-frappe" width="300"> | <img src="docs/gallery/catppuccin-latte.svg" alt="catppuccin-latte" width="300"> |
+| `catppuccin-macchiato` | `catppuccin-frappe` | `catppuccin-latte` |
+| <img src="docs/gallery/tokyonight-night.svg" alt="tokyonight-night" width="300"> | <img src="docs/gallery/tokyonight-storm.svg" alt="tokyonight-storm" width="300"> | <img src="docs/gallery/tokyonight-moon.svg" alt="tokyonight-moon" width="300"> |
+| `tokyonight-night` | `tokyonight-storm` | `tokyonight-moon` |
+| <img src="docs/gallery/tokyonight-day.svg" alt="tokyonight-day" width="300"> | <img src="docs/gallery/dracula.svg" alt="dracula" width="300"> | <img src="docs/gallery/onedark.svg" alt="onedark" width="300"> |
+| `tokyonight-day` | `dracula` | `onedark` |
+| <img src="docs/gallery/gruvbox.svg" alt="gruvbox" width="300"> | <img src="docs/gallery/nord.svg" alt="nord" width="300"> | <img src="docs/gallery/nordic.svg" alt="nordic" width="300"> |
+| `gruvbox` | `nord` | `nordic` |
+| <img src="docs/gallery/night-owl.svg" alt="night-owl" width="300"> | <img src="docs/gallery/sonokai.svg" alt="sonokai" width="300"> | <img src="docs/gallery/kanagawa.svg" alt="kanagawa" width="300"> |
+| `night-owl` | `sonokai` | `kanagawa` |
+| <img src="docs/gallery/rose-pine.svg" alt="rose-pine" width="300"> | <img src="docs/gallery/rose-pine-moon.svg" alt="rose-pine-moon" width="300"> | <img src="docs/gallery/rose-pine-dawn.svg" alt="rose-pine-dawn" width="300"> |
+| `rose-pine` | `rose-pine-moon` | `rose-pine-dawn` |
+| <img src="docs/gallery/everforest.svg" alt="everforest" width="300"> | <img src="docs/gallery/gruvbox-light.svg" alt="gruvbox-light" width="300"> | <img src="docs/gallery/solarized-dark.svg" alt="solarized-dark" width="300"> |
+| `everforest` | `gruvbox-light` | `solarized-dark` |
+| <img src="docs/gallery/solarized-light.svg" alt="solarized-light" width="300"> | <img src="docs/gallery/github-dark.svg" alt="github-dark" width="300"> | <img src="docs/gallery/ayu-dark.svg" alt="ayu-dark" width="300"> |
+| `solarized-light` | `github-dark` | `ayu-dark` |
+
+Switch in the settings (`<Leader>,`), with `<Leader>ft` (the editor recolors as you move through the list;
+`<Esc>` puts the old one back), or `<Leader>ub` for the light/dark sibling. The last one picked is remembered; set
 `"colorscheme"` in the config to pin one. `palette` and `highlights` overrides apply on top of any theme.
 
-**Icon sets**: `nerd` (default, Nerd Font devicons as AstroNvim), `unicode` (any font) and `ascii`. Switch with
-`<Leader>fI`, `:iconset name`, or the `iconset` option.
+**Icon sets**: `nerd` (default, Nerd Font devicons as AstroNvim), `unicode` (any font), `emoji` (color emoji,
+two cells each) and `ascii`. Switch in the settings (`<Leader>,`), `<Leader>fI`, or the `iconset` option.
+
+|   |   |
+|---|---|
+| <img src="docs/gallery/icons-nerd.svg" alt="nerd" width="300"> | <img src="docs/gallery/icons-unicode.svg" alt="unicode" width="300"> |
+| `nerd` | `unicode` |
+| <img src="docs/gallery/icons-emoji.svg" alt="emoji" width="300"> | <img src="docs/gallery/icons-ascii.svg" alt="ascii" width="300"> |
+| `emoji` | `ascii` |
+
+**Statusline styles** (`statusline_style`, Nerd Font icon set; the pictures need a Nerd Font installed to
+show the section ends):
+
+|   |   |
+|---|---|
+| <img src="docs/gallery/statusline-rounded.svg" alt="rounded" width="300"> | <img src="docs/gallery/statusline-slanted.svg" alt="slanted" width="300"> |
+| `rounded` | `slanted` |
+| <img src="docs/gallery/statusline-arrow.svg" alt="arrow" width="300"> | <img src="docs/gallery/statusline-flat.svg" alt="flat" width="300"> |
+| `arrow` | `flat` |
 
 ## Configuration
 
@@ -228,6 +271,13 @@ lim reads `$LIM_CONFIG`, else `$XDG_CONFIG_HOME/lim/config.json`, else `~/.confi
 colorscheme go to `$XDG_STATE_HOME/lim`, `~/.local/state/lim` or `%LOCALAPPDATA%\lim`.
 JSON with `//` comments and trailing commas. Every section is optional; anything invalid is reported in a
 notification and the default stays, so a broken config never stops the editor.
+
+**Settings** (`<Leader>,` or `:settings`, as VS Code's settings page) lists every option except keys
+(`mapleader`, `timeoutlen`, `keymaps` stay in the file), grouped by section, full screen and drawn in the
+theme being set, so each change shows at once. `/` searches names, descriptions and sections (`<CR>` back to the list, `<Esc>` clears),
+`j`/`k` move, `h`/`l` or `<CR>` change the value,
+`w` writes the options into the config file (the other sections are kept; the old file is copied to
+`config.json.bak`, since its comments are not kept), `<Esc>` closes and keeps the changes for this session.
 
 ```sh
 mkdir -p ~/.config/lim && lim --print-config > ~/.config/lim/config.json
@@ -262,7 +312,7 @@ Names and defaults follow AstroNvim.
 | `number` / `relativenumber` | `true` / `true` | Line numbers; both on shows the current line's absolute number |
 | `signcolumn` · `foldcolumn` | `true` · `true` | Two-cell git sign column · one blank column left of the numbers |
 | `cursorline` | `true` | Highlight the cursor's line |
-| `tabstop` · `shiftwidth` · `expandtab` | `2` · `0` · `true` | Tab width · indent step (`0` = tabstop) · indent with spaces |
+| `tabstop` · `shiftwidth` · `expandtab` | `4` · `0` · `true` | Tab width · indent step (`0` = tabstop) · indent with spaces |
 | `scrolloff` / `sidescrolloff` | `0` / `0` | Lines / columns kept around the cursor |
 | `ignorecase` / `smartcase` · `hlsearch` | `true` / `true` · `true` | Search case rules · highlight matches |
 | `autopairs` · `autoindent` | `true` · `true` | Close brackets and quotes · keep indentation |
@@ -271,7 +321,8 @@ Names and defaults follow AstroNvim.
 | `cmdheight` | `0` | `0`: notifications and an on-demand command line; `1`: permanent command line |
 | `clipboard` | `"unnamedplus"` | `""` keeps yanks inside lim |
 | `colorscheme` | unset | A theme name; unset uses the last one picked (nvchad at first) |
-| `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"` or `"ascii"` |
+| `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` |
+| `statusline_style` | `"rounded"` | Statusline section ends: `"rounded"`, `"slanted"`, `"arrow"` or `"flat"` (Nerd Font icon set only) |
 | `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |
 | `highlighturl` `indentguides` `matchparen` `gitsigns` `wordhighlight` `colorhighlight` `todocomments` `notifications` `dashboard` `syntax` | `true` | Turn each feature off |
@@ -311,6 +362,39 @@ Key notation: plain characters, `<Leader>`, `<CR>`, `<Esc>`, `<BS>`, `<Tab>`, `<
 `<C-Up>`…, `<F1>`…`<F12>`, `<Up>` `<Down>` `<Left>` `<Right>`, `<Home>` `<End>`, `<Del>`, `<PageUp>`
 `<PageDown>`, `<lt>`, `<Bar>`, `<Bslash>`.
 
+## Plugins
+
+A plugin is a folder in `plugins/` next to the config file (`~/.config/lim/plugins/<name>/plugin.json`,
+`%APPDATA%\lim\plugins\…` on Windows). Its `plugin.json` holds the same sections as the config (`options`,
+`palette`, `highlights`, `keymaps`), plus `commands` and the informative `name`, `version`, `description`.
+Plugins load in folder-name order, then the config, so a later one wins and your config wins over all.
+Problems are reported with the file they come from.
+
+Each command is `:Name`, uppercase first as Vim user commands. Its program gets the lines on stdin: the whole
+buffer, or a range (`:'<,'>Name`, `:%Name`, `:3,9Name`). Words typed after the name are added to `run`.
+`output` is `"message"` (default: stdout is shown) or `"replace"` (stdout replaces the lines, as one undo
+step). A program that fails (non-zero exit), prints nothing, or runs more than 10 seconds leaves the text as it
+was and its first stderr line is shown. In `run`, `${file}` is the buffer's path and `${plugin}` the plugin's
+folder, so a plugin can ship its own scripts. Commands appear in `:` completion and the commands picker
+(`<Leader>fC`); bind them with a keymap. `commands` also works in the config itself.
+
+```jsonc
+// ~/.config/lim/plugins/format/plugin.json
+{
+  "name": "format",
+  "description": "Prettier, sorting, word count",
+  "commands": {
+    "Prettier": { "run": ["prettier", "--stdin-filepath", "${file}"], "output": "replace", "desc": "Format with Prettier" },
+    "Sort": { "run": ["sort"], "output": "replace", "desc": "Sort lines" },
+    "Words": { "run": ["python3", "${plugin}/count.py"], "desc": "Count words" }
+  },
+  "keymaps": { "n": { "<Leader>lf": { "rhs": ":Prettier<CR>", "desc": "Format" } }, "v": { "<Leader>s": ":Sort<CR>" } }
+}
+```
+
+On Windows, programs are found as `.exe`; run `.cmd`/`.bat` tools (npm ones like `prettier`) through
+`["cmd", "/c", "prettier", …]`.
+
 ## How it is built
 
 No crates: the terminal is driven through a handful of libc calls (`tcsetattr`, `ioctl`, `select`, `read`,
@@ -326,7 +410,7 @@ src/
 ├── editor/        modes, operators, registers, keymaps, the built-in binding table, windows, picker,
 │                  file tree, which-key, cheat sheet, completion, sessions, prompts, clipboard, macros
 ├── syntax/        keyword highlighter with multi-line state, language tables, todo-comments
-├── config/        JSON reader, key notation, options/palette/highlights/keymaps
+├── config/        JSON reader, key notation, options/palette/highlights/keymaps, plugin manifests
 └── render/        cell grid, themes and palettes, icon sets, windows, bars, floats, picker, tree, start screen
 ```
 
@@ -348,7 +432,8 @@ src/
 ## Limits
 
 Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics), completion, debugger, treesitter (a keyword
-highlighter stands in), plugins, an embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
+highlighter stands in), plugins that script the editor itself (they only filter text through a process), an
+embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
 line wrapping, mouse, folds, spell checking, persistent undo. `:s` patterns are literal (plus
 `\<`/`\>`), not regexes. Visual-block columns count characters, so tabs and wide characters select unevenly.
 

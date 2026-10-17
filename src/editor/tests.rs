@@ -67,15 +67,15 @@ fn insert_autopairs_and_indent() {
     keys(&mut ed, "ifn(\x1b");
     assert_eq!(text(&ed), "fn()");
     keys(&mut ed, "A {\nx\x1b");
-    assert_eq!(text(&ed), "fn() {\n  x\n}");
+    assert_eq!(text(&ed), "fn() {\n    x\n}");
     keys(&mut ed, "o\x1b");
-    assert_eq!(text(&ed), "fn() {\n  x\n\n}");
+    assert_eq!(text(&ed), "fn() {\n    x\n\n}");
     keys(&mut ed, "ggA\"\x08\x1b");
-    assert_eq!(text(&ed), "fn() {\n  x\n\n}");
+    assert_eq!(text(&ed), "fn() {\n    x\n\n}");
     keys(&mut ed, "ggi'\x1b"); // no pair before a word char
-    assert_eq!(text(&ed), "'fn() {\n  x\n\n}");
+    assert_eq!(text(&ed), "'fn() {\n    x\n\n}");
     keys(&mut ed, "O'\x1b");
-    assert_eq!(text(&ed), "''\n'fn() {\n  x\n\n}");
+    assert_eq!(text(&ed), "''\n'fn() {\n    x\n\n}");
 }
 
 #[test]
@@ -151,6 +151,18 @@ fn comment_toggle() {
     assert_eq!(text(&ed), "// fn a() {\n//     // // b();\n\n    // c();\n}");
     keys(&mut ed, "uuggjgcc");
     assert_eq!(text(&ed), "fn a() {\n    b();\n\n    c();\n}");
+
+    // Block-comment-only languages wrap each line.
+    ed.buffers[0] = Buffer::from_text(Some("x.html".into()), "<ul>\n  <li>a</li>\n</ul>");
+    keys(&mut ed, "ggjgcc");
+    assert_eq!(text(&ed), "<ul>\n  <!-- <li>a</li> -->\n</ul>");
+    keys(&mut ed, "gcc");
+    assert_eq!(text(&ed), "<ul>\n  <li>a</li>\n</ul>");
+    ed.buffers[0] = Buffer::from_text(Some("x.css".into()), "a { }\nb { }");
+    keys(&mut ed, "gggcj");
+    assert_eq!(text(&ed), "/* a { } */\n/* b { } */");
+    keys(&mut ed, "gcj");
+    assert_eq!(text(&ed), "a { }\nb { }");
 }
 
 #[test]
@@ -199,6 +211,24 @@ fn buffers_and_windows() {
     assert_eq!(ed.windows[0].buffer, 0);
     keys(&mut ed, ":q\n");
     assert!(ed.quit);
+}
+
+/// Plugin commands complete on the command line; tests may not spawn, so running one stops at that guard.
+#[test]
+fn user_commands_complete_and_run() {
+    let (config, warnings): (Config, Vec<String>) = Config::from_str(
+        r#"{ "commands": { "Sort": { "run": ["sort"], "output": "replace", "desc": "Sort lines" } } }"#,
+    );
+    assert!(warnings.is_empty());
+    let mut ed: Editor = editor("b\na");
+    ed.configure(&config);
+    keys(&mut ed, ":So");
+    assert_eq!(ed.cmd_completion.as_ref().map(|c| c.items.clone()), Some(vec![("Sort".into(), "Sort lines".into())]));
+    keys(&mut ed, "rt\n");
+    assert_eq!(ed.message, Some(Message::Error("Sort: cannot run programs here".into())));
+    keys(&mut ed, ":Nope\n");
+    assert_eq!(ed.message, Some(Message::Error("E492: Not an editor command: Nope".into())));
+    assert_eq!(text(&ed), "b\na");
 }
 
 #[test]
@@ -329,7 +359,7 @@ fn ex_ranges_and_substitute() {
     assert_eq!(text(&ed), "X bar <foo>");
     let mut ed: Editor = editor("a\nb\nc\nd");
     keys(&mut ed, "jVj:>\n");
-    assert_eq!(text(&ed), "a\n  b\n  c\nd");
+    assert_eq!(text(&ed), "a\n    b\n    c\nd");
     keys(&mut ed, ":$\n");
     assert_eq!(ed.buf().cursor.line, 3);
     keys(&mut ed, "ggjVj\x1bgg");
@@ -377,7 +407,7 @@ fn insert_extras_and_astro_keys() {
 #[test]
 fn themes_cheatsheet_prompt_and_layout() {
     let mut ed: Editor = editor("a");
-    keys(&mut ed, ":colorscheme dracula\n");
+    ed.set_colorscheme("dracula", false);
     assert_eq!(ed.colorscheme, "dracula");
     keys(&mut ed, " ub");
     assert_eq!(ed.colorscheme, "astrolight");
@@ -386,7 +416,7 @@ fn themes_cheatsheet_prompt_and_layout() {
     assert_eq!(ed.colorscheme, "nord");
     ed.handle(Key::Esc);
     assert_eq!(ed.colorscheme, "astrolight");
-    keys(&mut ed, ":colorscheme nope\n");
+    ed.set_colorscheme("nope", false);
     assert!(ed.message_text().contains("E185"));
 
     ed.handle(Key::F(1));
@@ -504,20 +534,16 @@ fn ctrl_w_arrow_focuses_window() {
 #[test]
 fn command_line_completion() {
     let mut ed: Editor = editor("a");
-    keys(&mut ed, ":colo");
+    keys(&mut ed, ":sett");
     assert!(ed.cmd_completion.is_some());
     ed.handle(Key::Tab);
-    assert_eq!(ed.cmdline, "colorscheme");
-    keys(&mut ed, " drac");
-    ed.handle(Key::Tab);
-    assert_eq!(ed.cmdline, "colorscheme dracula");
-    keys(&mut ed, "\n");
-    assert_eq!(ed.colorscheme, "dracula");
-    keys(&mut ed, ":colorscheme catppuccin-");
+    assert_eq!(ed.cmdline, "settings");
+    ed.handle(Key::Esc);
+    keys(&mut ed, ":b");
     ed.handle(Key::Tab);
     ed.handle(Key::Tab);
     ed.handle(Key::BackTab);
-    assert_eq!(ed.cmdline, "colorscheme catppuccin-mocha");
+    assert_eq!(ed.cmdline, "bdelete");
     ed.handle(Key::Esc);
     assert!(ed.cmd_completion.is_none());
 }
@@ -817,4 +843,36 @@ fn shift_arrows_move_by_word_and_page() {
     ed.handle(Key::End);
     ed.handle(Key::ShiftLeft);
     assert_eq!(ed.buf().cursor, Pos::new(0, 9), "back to the start of the last word");
+}
+
+#[test]
+fn setup_screen_changes_options_live() {
+    let mut ed: Editor = editor("x");
+    keys(&mut ed, " ,");
+    assert_eq!(ed.mode, Mode::Setup);
+    keys(&mut ed, "l");
+    assert_eq!(ed.colorscheme, palettes::THEMES[1].name);
+    assert_eq!(ed.options.colorscheme, None, "remembered like the theme picker, not pinned in the config");
+    keys(&mut ed, "hh");
+    assert_eq!(ed.colorscheme, palettes::THEMES[palettes::THEMES.len() - 1].name);
+    let tabstop: usize = SETTINGS.iter().position(|s| s.name == "tabstop").unwrap();
+    keys(&mut ed, &"j".repeat(tabstop));
+    keys(&mut ed, "ll");
+    assert_eq!(ed.options.tabstop, 6);
+    assert_eq!(ed.setup_value("tabstop"), "6");
+    keys(&mut ed, "Gjl");
+    assert!(!ed.options.gitsigns);
+    keys(&mut ed, "w\x1b");
+    assert_eq!(ed.mode, Mode::Normal);
+    assert_eq!(ed.options.tabstop, 6);
+
+    // Search as in VS Code's settings: `/` filters names, descriptions and sections.
+    keys(&mut ed, ":settings\n/TABLINE");
+    assert_eq!(ed.setup.as_ref().map(|s| s.shown().len()), Some(1));
+    keys(&mut ed, "\nl");
+    assert!(!ed.options.showtabline);
+    keys(&mut ed, "/zzz\x1b");
+    assert_eq!(ed.setup.as_ref().map(|s| s.shown().len()), Some(SETTINGS.len()), "Esc clears the search");
+    keys(&mut ed, "\x1b");
+    assert_eq!(ed.mode, Mode::Normal);
 }

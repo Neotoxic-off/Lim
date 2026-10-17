@@ -1,7 +1,7 @@
 //! A small JSON reader (no crates). Accepts `//` and `/* */` comments and trailing commas,
 //! since config files are written by hand.
 
-use std::fmt;
+use std::fmt::{self, Write};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Json {
@@ -51,6 +51,64 @@ impl Json {
             Self::Object(_) => "an object",
         }
     }
+}
+
+/// `value` as indented JSON, two spaces per level.
+pub fn pretty(value: &Json) -> String {
+    let mut out: String = String::new();
+    write_value(&mut out, value, 0);
+    out
+}
+
+fn write_value(out: &mut String, value: &Json, depth: usize) {
+    let indent = |out: &mut String, depth: usize| out.push_str(&"  ".repeat(depth));
+    match value {
+        Json::Null => out.push_str("null"),
+        Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Json::Number(n) => out.push_str(&n.to_string()),
+        Json::String(s) => write_string(out, s),
+        Json::Array(items) if items.is_empty() => out.push_str("[]"),
+        Json::Object(fields) if fields.is_empty() => out.push_str("{}"),
+        Json::Array(items) => {
+            out.push_str("[\n");
+            for (i, item) in items.iter().enumerate() {
+                indent(out, depth + 1);
+                write_value(out, item, depth + 1);
+                out.push_str(if i + 1 < items.len() { ",\n" } else { "\n" });
+            }
+            indent(out, depth);
+            out.push(']');
+        }
+        Json::Object(fields) => {
+            out.push_str("{\n");
+            for (i, (key, item)) in fields.iter().enumerate() {
+                indent(out, depth + 1);
+                write_string(out, key);
+                out.push_str(": ");
+                write_value(out, item, depth + 1);
+                out.push_str(if i + 1 < fields.len() { ",\n" } else { "\n" });
+            }
+            indent(out, depth);
+            out.push('}');
+        }
+    }
+}
+
+fn write_string(out: &mut String, s: &str) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                let _: fmt::Result = write!(out, "\\u{:04x}", u32::from(c));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
 struct Parser {
@@ -254,5 +312,17 @@ mod tests {
         assert_eq!(parse("{\"a\" 1}").map_err(|e| (e.line, e.col)), Err((1, 6)));
         assert!(parse("[".repeat(100).as_str()).is_err());
         assert!(parse("\"\\ud800\"").is_err());
+    }
+
+    #[test]
+    fn pretty_reads_back() {
+        let value: Json = Json::Object(vec![
+            ("a".into(), Json::Array(vec![Json::Number(2.0), Json::Number(-0.5), Json::Null])),
+            ("s".into(), Json::String("q\"\\\n\u{1}é".into())),
+            ("o".into(), Json::Object(Vec::new())),
+            ("b".into(), Json::Bool(false)),
+        ]);
+        assert_eq!(parse(&pretty(&value)), Ok(value));
+        assert_eq!(pretty(&Json::Object(vec![("n".into(), Json::Number(4.0))])), "{\n  \"n\": 4\n}");
     }
 }

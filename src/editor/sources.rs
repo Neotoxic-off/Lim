@@ -138,9 +138,9 @@ impl Editor {
                 .iter()
                 .map(|t| Item { label: t.name.to_owned(), target: Target::Theme(t.name.to_owned()) })
                 .collect(),
-            PickerKind::IconSets => ["nerd", "unicode", "ascii"]
+            PickerKind::IconSets => crate::render::icons::SETS
                 .iter()
-                .map(|s| Item { label: (*s).to_owned(), target: Target::IconSet((*s).to_owned()) })
+                .map(|(s, _, _)| Item { label: (*s).to_owned(), target: Target::IconSet((*s).to_owned()) })
                 .collect(),
             PickerKind::Sessions { dir, delete } => session::list(dir)
                 .into_iter()
@@ -216,7 +216,7 @@ impl Editor {
         self.dashboard = false;
     }
 
-    /// `:colorscheme`, the theme picker and `<Leader>ub`; `persist` remembers it for next start.
+    /// The settings screen, the theme picker and `<Leader>ub`; `persist` remembers it for next start.
     pub(super) fn set_colorscheme(&mut self, name: &str, persist: bool) {
         if crate::render::palettes::THEMES.iter().all(|t| t.name != name) {
             return self.set_message(Message::Error(format!("E185: Cannot find color scheme '{name}'")));

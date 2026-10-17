@@ -272,6 +272,7 @@ impl Editor {
             Action::FocusExplorer => self.focus_explorer(),
             Action::Home => self.dashboard = !self.dashboard,
             Action::Cheatsheet => self.open_cheatsheet(),
+            Action::Settings => self.open_setup(),
             Action::Picker(kind) => self.open_picker(kind),
             Action::ResumePicker => self.resume_picker(),
             Action::GrepWord => self.grep_word(),

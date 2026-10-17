@@ -7,6 +7,7 @@ use super::icons::{Icons, icons};
 use super::row::{Grid, Row};
 use super::theme::{Group, Rgb, Style, mode_group, theme};
 use crate::buffer::{Buffer, Pos, text};
+use crate::config::StatusStyle;
 use crate::editor::{Editor, Message, Mode, Rect};
 use crate::render::Theme;
 
@@ -85,15 +86,23 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
     let section: Style = t.style(Group::StatusSection);
     let mode: Style = t.style(mode_group(ed.mode));
     let (icon, icon_fg): (String, Option<u32>) = set.for_file(buf.lang);
+    // Powerline shapes need a Nerd Font: sets without caps stay flat whatever the style.
+    let (left_cap, right_cap): (&str, &str) = match ed.options.statusline_style {
+        _ if set.left_cap.is_empty() => ("", ""),
+        StatusStyle::Rounded => (set.left_cap, set.right_cap),
+        StatusStyle::Slanted => ("\u{e0ba}", "\u{e0bc}"),
+        StatusStyle::Arrow => ("\u{e0b2}", "\u{e0b0}"),
+        StatusStyle::Flat => ("", ""),
+    };
     let mut left: Vec<(Style, String)> = vec![
         (mode, format!(" {}{} ", Icons::spaced(set.mode), ed.mode.label())),
-        (Style::new(mode.bg, section.bg), set.right_cap.into()),
+        (Style::new(mode.bg, section.bg), right_cap.into()),
     ];
     if !icon.is_empty() {
         left.push((Style { fg: icon_fg.map_or(section.fg, Rgb), ..section }, format!(" {icon}")));
     }
     left.push((section, format!(" {}{} ", buf.name(), if buf.is_dirty() { " [+]" } else { "" })));
-    left.push((Style::new(section.bg, fill.bg), set.right_cap.into()));
+    left.push((Style::new(section.bg, fill.bg), right_cap.into()));
     if let Some(branch) = &ctx.branch {
         left.push((fill, format!(" {}{branch}", Icons::spaced(set.branch))));
     }
@@ -110,10 +119,10 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
     let cwd: Style = t.style(Group::StatusCwd);
     let position: Style = t.style(Group::StatusPosition);
     right.extend([
-        (Style::new(cwd.bg, fill.bg), set.left_cap.into()),
+        (Style::new(cwd.bg, fill.bg), left_cap.into()),
         (cwd, format!("{} ", if set.cwd.is_empty() { "" } else { set.cwd })),
         (section, format!(" {} ", ctx.cwd)),
-        (Style::new(position.bg, section.bg), set.left_cap.into()),
+        (Style::new(position.bg, section.bg), left_cap.into()),
         (position, format!("{} ", if set.position.is_empty() { "" } else { set.position })),
         (section, format!(" {}:{} {progress} ", line + 1, col + 1)),
     ]);

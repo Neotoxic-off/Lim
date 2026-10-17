@@ -31,7 +31,7 @@ use std::time::Instant;
 
 use editor::Editor;
 use render::Screen;
-use term::{ColorDepth, Event, Input, Terminal};
+use term::{Event, Input, Terminal};
 
 /// Where the panic hook leaves its message for the recovery path.
 static LAST_PANIC: Mutex<String> = Mutex::new(String::new());
@@ -58,11 +58,6 @@ fn main() -> ExitCode {
     let (config, mut warnings): (config::Config, Vec<String>) = config::load();
     let colorscheme: String = render::initial_colorscheme(&config);
     warnings.extend(render::apply_colorscheme(&colorscheme, &config));
-    let depth: ColorDepth = match config.options.truecolor {
-        Some(true) => ColorDepth::TrueColor,
-        Some(false) => ColorDepth::Ansi256,
-        None => term::color_depth(),
-    };
     // `lim some/dir` works inside that folder, as `cd some/dir && nvim .`; files keep their meaning.
     let (dirs, mut files): (Vec<String>, Vec<String>) = args.into_iter().partition(|a| Path::new(a).is_dir());
     if let Some(dir) = dirs.first() {
@@ -79,7 +74,7 @@ fn main() -> ExitCode {
     if !warnings.is_empty() {
         editor.set_message(editor::Message::Error(format!("config: {}", warnings.join("; "))));
     }
-    let result: Result<(), io::Error> = run(&mut editor, depth);
+    let result: Result<(), io::Error> = run(&mut editor);
     editor.autosave_session();
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -90,7 +85,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(editor: &mut Editor, depth: ColorDepth) -> io::Result<()> {
+fn run(editor: &mut Editor) -> io::Result<()> {
     let terminal: Terminal = Terminal::enter()?;
     // A bug must never kill the session: record it quietly, recover, keep editing.
     panic::set_hook(Box::new(|info| {
@@ -106,7 +101,7 @@ fn run(editor: &mut Editor, depth: ColorDepth) -> io::Result<()> {
         }
     }));
     let mut input: Input = Input::default();
-    let mut screen: Screen = Screen::new(depth);
+    let mut screen: Screen = Screen::new(term::color_depth());
     let mut out: io::StdoutLock<'_> = io::stdout().lock();
     while !editor.quit {
         // Skip frames while keys are still queued (pastes, key repeat).

@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="396" viewBox="0 0 900 396" font-family="'JetBrainsMono Nerd Font','Symbols Nerd Font','Cascadia Code',Consolas,monospace" font-size="14" xml:space="preserve">
+<rect x="0" y="0" width="279" height="18" fill="#fffaf3"/>
+<rect x="279" y="0" width="126" height="18" fill="#faf4ed"/>
+<rect x="405" y="0" width="495" height="18" fill="#fffaf3"/>
+<text x="279" y="13" fill="#56949f">▎</text>
+<text x="297" y="13" fill="#464261">▫</text>
+<text x="315 324 333 342 351 360 369" y="13" fill="#464261" font-weight="bold" font-style="italic">main.rs</text>
+<text x="387" y="13" fill="#464261">×</text>
+<rect x="0" y="18" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45" y="31" fill="#464261" font-weight="bold">▾Lim</text>
+<text x="270" y="31" fill="#9893a5">│</text>
+<text x="288" y="31" fill="#797593">▫</text>
+<text x="306 315 324 333 342 351 360" y="31" fill="#797593" font-weight="bold">main.rs</text>
+<rect x="0" y="36" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54" y="49" fill="#56949f">▸docs</text>
+<text x="270" y="49" fill="#9893a5">│</text>
+<text x="306" y="49" fill="#9893a5">8</text>
+<text x="333 342 351" y="49" fill="#286983">use</text>
+<text x="369 378 387 396 405 414 423 432 441 450 459 468 477 486 495 504 513 522" y="49" fill="#464261">std::collections::</text>
+<text x="531 540 549 558 567 576 585" y="49" fill="#d7827e">HashMap</text>
+<text x="594" y="49" fill="#464261">;</text>
+<rect x="0" y="54" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45" y="67" fill="#56949f">▸src</text>
+<text x="270" y="67" fill="#9893a5">│</text>
+<text x="306" y="67" fill="#9893a5">7</text>
+<rect x="0" y="72" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63" y="85" fill="#56949f">▸state</text>
+<text x="270" y="85" fill="#9893a5">│</text>
+<text x="306" y="85" fill="#9893a5">6</text>
+<text x="333 342 351 369 378 387 396 405 414 432 441 450 459 477 486 495 504 522 531 549 558 567 576 585 594 603" y="85" fill="#797593" font-style="italic">///Countseachwordof`text`.</text>
+<rect x="0" y="90" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63 72" y="103" fill="#56949f">▸target</text>
+<text x="270" y="103" fill="#9893a5">│</text>
+<text x="306" y="103" fill="#9893a5">5</text>
+<text x="333 342" y="103" fill="#286983">fn</text>
+<text x="360 369 378 387 396 405 414 423 432 441 450" y="103" fill="#d7827e">word_counts</text>
+<text x="459 468 477 486 495 504 522" y="103" fill="#464261">(text:&amp;</text>
+<text x="531 540 549" y="103" fill="#56949f">str</text>
+<text x="558 576 585" y="103" fill="#464261">)-&gt;</text>
+<text x="603 612 621 630 639 648 657" y="103" fill="#d7827e">HashMap</text>
+<text x="666 675" y="103" fill="#464261">&lt;&amp;</text>
+<text x="684 693 702" y="103" fill="#56949f">str</text>
+<text x="711" y="103" fill="#464261">,</text>
+<text x="729 738 747 756 765" y="103" fill="#56949f">usize</text>
+<text x="774 792" y="103" fill="#464261">&gt;{</text>
+<rect x="0" y="108" width="441" height="18" fill="#faf4ed"/>
+<rect x="441" y="108" width="54" height="18" fill="#dfdad9"/>
+<rect x="495" y="108" width="405" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63 72 81 90 99 108" y="121" fill="#797593">▫Cargo.lock</text>
+<text x="270" y="121" fill="#9893a5">│</text>
+<text x="306" y="121" fill="#9893a5">4</text>
+<text x="333" y="121" fill="#9893a5">▏</text>
+<text x="369 378 387" y="121" fill="#286983">let</text>
+<text x="405 414 423" y="121" fill="#286983">mut</text>
+<text x="441 450 459 468 477 486 495" y="121" fill="#464261">counts:</text>
+<text x="513 522 531 540 549 558 567" y="121" fill="#d7827e">HashMap</text>
+<text x="576 585" y="121" fill="#464261">&lt;&amp;</text>
+<text x="594 603 612" y="121" fill="#56949f">str</text>
+<text x="621" y="121" fill="#464261">,</text>
+<text x="639 648 657 666 675" y="121" fill="#56949f">usize</text>
+<text x="684 702" y="121" fill="#464261">&gt;=</text>
+<text x="720 729 738 747 756 765 774" y="121" fill="#d7827e">HashMap</text>
+<text x="783 792" y="121" fill="#464261">::</text>
+<text x="801 810 819" y="121" fill="#d7827e">new</text>
+<text x="828 837 846" y="121" fill="#464261">();</text>
+<rect x="0" y="126" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63 72 81 90 99 108" y="139" fill="#797593">▫Cargo.toml</text>
+<text x="270" y="139" fill="#9893a5">│</text>
+<text x="306" y="139" fill="#9893a5">3</text>
+<text x="333" y="139" fill="#9893a5">▏</text>
+<text x="369 378 387" y="139" fill="#286983">for</text>
+<text x="405 414 423 432" y="139" fill="#464261">word</text>
+<text x="450 459" y="139" fill="#286983">in</text>
+<text x="477 486 495 504 513" y="139" fill="#464261">text.</text>
+<text x="522 531 540 549 558 567 576 585 594 603 612 621 630 639 648 657" y="139" fill="#d7827e">split_whitespace</text>
+<text x="666 675 693" y="139" fill="#464261">(){</text>
+<rect x="0" y="144" width="414" height="18" fill="#faf4ed"/>
+<rect x="414" y="144" width="54" height="18" fill="#dfdad9"/>
+<rect x="468" y="144" width="306" height="18" fill="#faf4ed"/>
+<rect x="774" y="144" width="54" height="18" fill="#56949f"/>
+<rect x="828" y="144" width="72" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63 72 81 90 99" y="157" fill="#797593">▫CLAUDE.md</text>
+<text x="270" y="157" fill="#9893a5">│</text>
+<text x="306" y="157" fill="#9893a5">2</text>
+<text x="333" y="157" fill="#9893a5">▏</text>
+<text x="369" y="157" fill="#9893a5">▏</text>
+<text x="405 414 423 432 441 450 459 468" y="157" fill="#464261">*counts.</text>
+<text x="477 486 495 504 513" y="157" fill="#d7827e">entry</text>
+<text x="522 531 540 549 558 567 576" y="157" fill="#464261">(word).</text>
+<text x="585 594 603 612 621 630 639 648 657" y="157" fill="#d7827e">or_insert</text>
+<text x="666" y="157" fill="#464261">(</text>
+<text x="675" y="157" fill="#ea9d34">0</text>
+<text x="684 702 711" y="157" fill="#464261">)+=</text>
+<text x="729" y="157" fill="#ea9d34">1</text>
+<text x="738" y="157" fill="#464261">;</text>
+<text x="756 765" y="157" fill="#797593" font-style="italic">//</text>
+<text x="783 792 801 810 819" y="157" fill="#faf4ed" font-weight="bold" font-style="italic">TODO:</text>
+<text x="837 846 855 864 873 882" y="157" fill="#56949f" font-style="italic">ignore</text>
+<rect x="0" y="162" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162 171 180 189" y="175" fill="#797593">▫config.example.json</text>
+<text x="270" y="175" fill="#9893a5">│</text>
+<text x="306" y="175" fill="#9893a5">1</text>
+<text x="333" y="175" fill="#9893a5">▏</text>
+<text x="369" y="175" fill="#464261">}</text>
+<rect x="0" y="180" width="333" height="18" fill="#faf4ed"/>
+<rect x="333" y="180" width="36" height="18" fill="#f2e9e1"/>
+<rect x="369" y="180" width="54" height="18" fill="#dfdad9"/>
+<rect x="423" y="180" width="477" height="18" fill="#f2e9e1"/>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162" y="193" fill="#797593">▫PONYTAIL-DEBT.md</text>
+<text x="270" y="193" fill="#9893a5">│</text>
+<text x="306" y="193" fill="#464261">9</text>
+<text x="333" y="193" fill="#9893a5">▏</text>
+<text x="369 378 387 396 405 414" y="193" fill="#464261">counts</text>
+<rect x="0" y="198" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63 72 81 90 99" y="211" fill="#797593">▫README.md</text>
+<text x="270" y="211" fill="#9893a5">│</text>
+<text x="306" y="211" fill="#9893a5">1</text>
+<text x="333" y="211" fill="#464261">}</text>
+<rect x="0" y="216" width="900" height="18" fill="#faf4ed"/>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="229" fill="#797593">▫rustfmt.toml</text>
+<text x="270" y="229" fill="#9893a5">│</text>
+<text x="306" y="229" fill="#9893a5">2</text>
+<rect x="0" y="234" width="900" height="18" fill="#faf4ed"/>
+<text x="270" y="247" fill="#9893a5">│</text>
+<text x="306" y="247" fill="#9893a5">3</text>
+<text x="333 342" y="247" fill="#286983">fn</text>
+<text x="360 369 378 387" y="247" fill="#d7827e">main</text>
+<text x="396 405 423" y="247" fill="#464261">(){</text>
+<rect x="0" y="252" width="900" height="18" fill="#faf4ed"/>
+<text x="270" y="265" fill="#9893a5">│</text>
+<text x="306" y="265" fill="#9893a5">4</text>
+<text x="333" y="265" fill="#9893a5">▏</text>
+<text x="369 378 387" y="265" fill="#286983">let</text>
+<text x="405 414 423 432 441 459" y="265" fill="#464261">text:&amp;</text>
+<text x="468 477 486" y="265" fill="#56949f">str</text>
+<text x="504" y="265" fill="#464261">=</text>
+<text x="522 531 540 549 567 576 585 594 603 621 630 639 648 657 675 684 693 711 720 729 738 747 765 774 783 792 810 819 828 846 855 864 873 891" y="265" fill="#ea9d34">"thequickbrownfoxjumpsoverthelazyd</text>
+<rect x="0" y="270" width="405" height="18" fill="#faf4ed"/>
+<rect x="405" y="270" width="54" height="18" fill="#dfdad9"/>
+<rect x="459" y="270" width="441" height="18" fill="#faf4ed"/>
+<text x="270" y="283" fill="#9893a5">│</text>
+<text x="306" y="283" fill="#9893a5">5</text>
+<text x="333" y="283" fill="#9893a5">▏</text>
+<text x="369 378 387" y="283" fill="#286983">let</text>
+<text x="405 414 423 432 441 450 468" y="283" fill="#464261">counts=</text>
+<text x="486 495 504 513 522 531 540 549 558 567 576" y="283" fill="#d7827e">word_counts</text>
+<text x="585 594 603 612 621 630 639" y="283" fill="#464261">(text);</text>
+<rect x="0" y="288" width="684" height="18" fill="#faf4ed"/>
+<rect x="684" y="288" width="63" height="18" fill="#61afef"/>
+<rect x="747" y="288" width="27" height="18" fill="#faf4ed"/>
+<rect x="774" y="288" width="54" height="18" fill="#dfdad9"/>
+<rect x="828" y="288" width="72" height="18" fill="#faf4ed"/>
+<text x="270" y="301" fill="#9893a5">│</text>
+<text x="306" y="301" fill="#9893a5">6</text>
+<text x="333" y="301" fill="#9893a5">▏</text>
+<text x="369 378 387 396 405 414 423" y="301" fill="#56949f">println</text>
+<text x="432 441" y="301" fill="#464261">!(</text>
+<text x="450 459 468 486 495 504 513 522 531 540 549 567 576 585 594 603 612 630 639 648 657 666" y="301" fill="#ea9d34">"{}distinctwords,color</text>
+<text x="684 693 702 711 720 729 738" y="301" fill="#000000">#61afef</text>
+<text x="747" y="301" fill="#ea9d34">"</text>
+<text x="756 774 783 792 801 810 819 828" y="301" fill="#464261">,counts.</text>
+<text x="837 846 855" y="301" fill="#d7827e">len</text>
+<text x="864 873 882 891" y="301" fill="#464261">());</text>
+<rect x="0" y="306" width="900" height="18" fill="#faf4ed"/>
+<text x="270" y="319" fill="#9893a5">│</text>
+<text x="306" y="319" fill="#9893a5">7</text>
+<text x="333" y="319" fill="#464261">}</text>
+<rect x="0" y="324" width="900" height="18" fill="#faf4ed"/>
+<text x="270" y="337" fill="#9893a5">│</text>
+<rect x="0" y="342" width="900" height="18" fill="#faf4ed"/>
+<text x="270" y="355" fill="#9893a5">│</text>
+<rect x="0" y="360" width="900" height="18" fill="#faf4ed"/>
+<text x="270" y="373" fill="#9893a5">│</text>
+<rect x="0" y="378" width="90" height="18" fill="#56949f"/>
+<rect x="90" y="378" width="99" height="18" fill="#f2e9e1"/>
+<rect x="189" y="378" width="549" height="18" fill="#fffaf3"/>
+<rect x="738" y="378" width="18" height="18" fill="#b4637a"/>
+<rect x="756" y="378" width="45" height="18" fill="#f2e9e1"/>
+<rect x="801" y="378" width="18" height="18" fill="#6d8f89"/>
+<rect x="819" y="378" width="81" height="18" fill="#f2e9e1"/>
+<text x="9 27 36 45 54 63 72" y="391" fill="#faf4ed" font-weight="bold">◆NORMAL</text>
+<text x="99 117 126 135 144 153 162 171 198 216 225 234 243 252 261" y="391" fill="#797593">▫main.rs⎇master</text>
+<text x="738" y="391" fill="#faf4ed">▣</text>
+<text x="765 774 783" y="391" fill="#797593">Lim</text>
+<text x="801" y="391" fill="#faf4ed">≡</text>
+<text x="828 837 846 864 873 882" y="391" fill="#797593">9:556%</text>
+</svg>

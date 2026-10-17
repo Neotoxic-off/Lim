@@ -15,6 +15,8 @@ pub enum Error {
     NotACommand(String),
     PatternNotFound(String),
     NoPattern,
+    /// A `:Name` command whose program failed: (name, why).
+    UserCommand(String, String),
 }
 
 impl fmt::Display for Error {
@@ -31,6 +33,7 @@ impl fmt::Display for Error {
             Self::NotACommand(c) => write!(f, "E492: Not an editor command: {c}"),
             Self::PatternNotFound(p) => write!(f, "E486: Pattern not found: {p}"),
             Self::NoPattern => write!(f, "E35: No previous regular expression"),
+            Self::UserCommand(name, why) => write!(f, "{name}: {why}"),
         }
     }
 }

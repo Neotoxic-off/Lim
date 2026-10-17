@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 
 // Text-level options (`tabstop`, `ignorecase`, `smartcase`), shared by buffers and the renderer.
-static TAB_STOP: AtomicUsize = AtomicUsize::new(2);
+static TAB_STOP: AtomicUsize = AtomicUsize::new(4);
 static IGNORE_CASE: AtomicBool = AtomicBool::new(true);
 static SMART_CASE: AtomicBool = AtomicBool::new(true);
 
@@ -46,7 +46,8 @@ pub fn str_width(s: &str) -> usize {
 }
 
 /// Terminal cells taken by `c`: 0 for combining marks, 2 for East Asian wide chars and emoji, else 1.
-// shortcut: compact range table (wcwidth + Unicode wide emoji), not the full EastAsianWidth data.
+// shortcut: compact range table (wcwidth + Unicode wide emoji), not the full EastAsianWidth data; generate it from
+// EastAsianWidth.txt if CJK or symbol users report misaligned columns.
 pub fn char_width(c: char) -> usize {
     const ZERO: &[(u32, u32)] = &[
         (0x0300, 0x036F),
@@ -151,7 +152,8 @@ pub fn char_width(c: char) -> usize {
 
 /// Char ranges of every match, following `ignorecase` / `smartcase`.
 /// Vim's `\<` and `\>` word boundaries are honored at the pattern's start and end.
-// shortcut: lowercasing that changes char counts (e.g. 'İ') shifts columns, fine for source code.
+// shortcut: lowercasing that changes char counts (e.g. 'İ') shifts columns; fold char by char if search is
+// used on Turkish or other such text.
 pub fn find_all(line: &str, pattern: &str) -> Vec<Range<usize>> {
     let (pattern, word_start): (&str, bool) = pattern.strip_prefix("\\<").map_or((pattern, false), |p| (p, true));
     let (pattern, word_end): (&str, bool) = pattern.strip_suffix("\\>").map_or((pattern, false), |p| (p, true));
@@ -260,7 +262,7 @@ mod tests {
     #[test]
     fn columns_and_matches() {
         assert_eq!(byte_index("héllo", 2), 3);
-        assert_eq!(display_col("\tab", 2), 3);
+        assert_eq!(display_col("\tab", 2), 5);
         assert_eq!(display_col("日本x", 2), 4);
         assert_eq!(str_width("e\u{301}🦀a"), 4);
         assert_eq!(char_width('\u{e7a8}'), 1); // Nerd Font icons are single-cell

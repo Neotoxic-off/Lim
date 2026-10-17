@@ -1,6 +1,7 @@
 //! Visual block (`<C-v>`): rectangular delete, yank, change, insert/append on every line,
 //! replace, case and blockwise put.
-// shortcut: columns are chars, not screen cells; tabs and wide chars in a block select unevenly.
+// shortcut: columns are chars, not screen cells; tabs and wide chars in a block select unevenly. Switch to display
+// columns if block edits on tab-indented or CJK files come up.
 
 use super::registers::Register;
 use super::vim::{Case, convert};

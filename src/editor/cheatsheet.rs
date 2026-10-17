@@ -106,7 +106,7 @@ const VIM: &[(&str, &[(&str, &str)])] = &[
             (":bn :bp :bd", "Next / previous / delete buffer"),
             (":s/a/b/g :%s", "Substitute on the line / everywhere"),
             (":{range}d y > <", "Delete, yank, indent lines"),
-            (":colorscheme {name}", "Switch theme"),
+            (":settings  <Leader>,", "Settings: theme, icons, every option"),
             (":noh", "Clear search highlight"),
             (":{n}", "Go to line"),
         ],

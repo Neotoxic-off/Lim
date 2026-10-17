@@ -7,6 +7,7 @@ use super::registers::Register;
 use super::vim::Case;
 use super::{Editor, Mode};
 use crate::buffer::{Buffer, Pos, text};
+use crate::syntax::Hl;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operator {
@@ -113,28 +114,40 @@ impl Editor {
     }
 
     /// Comments the lines out at their common indent, or uncomments them if all already are.
+    /// Languages with only block comments (HTML, CSS, Markdown) wrap each line, as Neovim's `commentstring`.
     fn toggle_comment(&mut self, lines: RangeInclusive<usize>) {
         let first: usize = *lines.start();
         let buf: &mut Buffer = self.buf_mut();
-        let leader: &str = buf.lang.map_or("#", |l| l.comment);
-        // shortcut: block-comment-only languages (HTML, CSS, Markdown) are left as they are.
-        if leader.is_empty() {
-            return;
-        }
+        let (open, close): (&str, &str) = match buf.lang {
+            None => ("#", ""),
+            Some(l) if !l.comment.is_empty() => (l.comment, ""),
+            Some(l) => match l.regions.iter().find(|r| r.2 == Hl::Comment) {
+                Some(&(open, close, _)) => (open, close),
+                None => return,
+            },
+        };
+        let is_commented = |line: &str| {
+            let t: &str = line.trim();
+            t.len() >= open.len() + close.len() && t.starts_with(open) && t.ends_with(close)
+        };
         let targets: Vec<usize> = lines.filter(|&y| !buf.line(y).trim().is_empty()).collect();
-        let commented: bool = targets.iter().all(|&y| buf.line(y).trim_start().starts_with(leader));
+        let commented: bool = targets.iter().all(|&y| is_commented(buf.line(y)));
         let indent: usize = targets.iter().map(|&y| text::indent(buf.line(y)).len()).min().unwrap_or(0);
         for y in targets {
             let line: &str = buf.line(y);
             let toggled: String = if commented {
                 let (ind, rest): (&str, &str) = line.split_at(text::indent(line).len());
-                let rest: &str = &rest[leader.len()..];
-                format!("{ind}{}", rest.strip_prefix(' ').unwrap_or(rest))
+                let mut body: &str = &rest[open.len()..];
+                if !close.is_empty() {
+                    body = body.trim_end().strip_suffix(close).unwrap_or(body);
+                    body = body.strip_suffix(' ').unwrap_or(body);
+                }
+                format!("{ind}{}", body.strip_prefix(' ').unwrap_or(body))
             } else {
                 // Indents may mix multi-byte blanks; never split a char.
                 let at: usize = if line.is_char_boundary(indent) { indent } else { text::indent(line).len() };
                 let (ind, rest): (&str, &str) = line.split_at(at);
-                format!("{ind}{leader} {rest}")
+                if close.is_empty() { format!("{ind}{open} {rest}") } else { format!("{ind}{open} {rest} {close}") }
             };
             buf.set_line(y, toggled);
         }

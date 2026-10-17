@@ -1,5 +1,5 @@
-//! Icon sets: Nerd Font glyphs (`AstroNvim`'s), plain Unicode for any font, or ASCII.
-//! Picked with the `iconset` option, `:iconset` or `<Leader>fI`.
+//! Icon sets: Nerd Font glyphs (`AstroNvim`'s), plain Unicode for any font, color emoji, or ASCII.
+//! Picked with the `iconset` option, `:settings` or `<Leader>fI`.
 
 use crate::config::Options;
 use crate::syntax::Lang;
@@ -111,15 +111,46 @@ pub const ASCII: Icons = Icons {
     git_deleted: "D",
 };
 
+/// Color emoji: no special font, but each takes two cells.
+pub const EMOJI: Icons = Icons {
+    languages: false,
+    file: "\u{1f4c4}",
+    folder_closed: "\u{1f4c1}",
+    folder_open: "\u{1f4c2}",
+    modified: "\u{25cf}",
+    close: "\u{00d7}",
+    branch: "\u{1f33f}",
+    mode: "",
+    cwd: "\u{1f4c1}",
+    position: "\u{1f4cd}",
+    left_cap: "",
+    right_cap: "",
+    path_separator: "\u{203a}",
+    search: "\u{1f50d}",
+    info: "\u{1f4a1}",
+    error: "\u{274c}",
+    recording: "\u{1f534}",
+    arrow: "\u{2192}",
+    word: "\u{1f4dd}",
+    git_modified: "\u{25cf}",
+    git_added: "+",
+    git_untracked: "?",
+    git_deleted: "-",
+};
+
+/// Every set by name, with what it needs, for the option, `<Leader>fI` and the settings screen.
+pub const SETS: &[(&str, &str, &Icons)] = &[
+    ("nerd", "Nerd Font glyphs", &NERD),
+    ("unicode", "any font", &UNICODE),
+    ("emoji", "color emoji", &EMOJI),
+    ("ascii", "plain ASCII", &ASCII),
+];
+
 pub fn icons(options: &Options) -> &'static Icons {
     if !options.icons {
         return &ASCII;
     }
-    match options.iconset.as_str() {
-        "unicode" => &UNICODE,
-        "ascii" => &ASCII,
-        _ => &NERD,
-    }
+    SETS.iter().find(|(name, _, _)| *name == options.iconset).map_or(&NERD, |(_, _, set)| set)
 }
 
 impl Icons {

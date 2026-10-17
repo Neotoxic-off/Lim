@@ -16,11 +16,13 @@ mod motion;
 mod normal;
 mod operator;
 mod picker;
+mod plugin;
 mod prompt;
 mod recent;
 mod registers;
 mod repeat;
 mod session;
+mod setup;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -46,6 +48,7 @@ use motion::Motion;
 use operator::Operator;
 pub use picker::{Item, Picker, Target};
 pub use prompt::Prompt;
+pub use setup::{SETTINGS, Setup};
 pub use ui::MenuEntry;
 pub use wildmenu::CmdCompletion;
 pub use window::{Layout, Rect, Separator, View, Window, WindowId};
@@ -72,6 +75,8 @@ pub enum Mode {
     Prompt,
     /// The cheat sheet has the keyboard.
     Cheatsheet,
+    /// The setup screen has the keyboard.
+    Setup,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,9 +90,13 @@ pub enum PickAction {
 impl Mode {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Normal | Self::BufferPick(_) | Self::Picker | Self::Explorer | Self::Prompt | Self::Cheatsheet => {
-                "NORMAL"
-            }
+            Self::Normal
+            | Self::BufferPick(_)
+            | Self::Picker
+            | Self::Explorer
+            | Self::Prompt
+            | Self::Cheatsheet
+            | Self::Setup => "NORMAL",
             Self::Insert => "INSERT",
             Self::Replace => "REPLACE",
             Self::Visual => "VISUAL",
@@ -214,6 +223,7 @@ pub struct Editor {
     last_substitute: Option<(String, String, bool)>,
     pub prompt: Option<Prompt>,
     pub cheatsheet: Option<Cheatsheet>,
+    pub setup: Option<Setup>,
     /// The insert-mode completion menu, when open.
     pub completion: Option<Completion>,
     /// The `:` completion menu, when open.
@@ -282,6 +292,7 @@ impl Editor {
             last_substitute: None,
             prompt: None,
             cheatsheet: None,
+            setup: None,
             completion: None,
             cmd_completion: None,
             cmd_history: CmdHistory::default(),
@@ -379,6 +390,7 @@ impl Editor {
             Mode::Replace => self.replace_key(key),
             Mode::Prompt => self.prompt_key(key),
             Mode::Cheatsheet => self.cheatsheet_key(key),
+            Mode::Setup => self.setup_key(key),
         }
         if let Some(window) = self.windows.get_mut(self.active) {
             window.buffer = self.current;

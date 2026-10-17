@@ -223,9 +223,13 @@ impl Theme {
 /// The statusline group that colors the mode indicator.
 pub fn mode_group(mode: Mode) -> Group {
     match mode {
-        Mode::Normal | Mode::BufferPick(_) | Mode::Picker | Mode::Explorer | Mode::Prompt | Mode::Cheatsheet => {
-            Group::StatusModeNormal
-        }
+        Mode::Normal
+        | Mode::BufferPick(_)
+        | Mode::Picker
+        | Mode::Explorer
+        | Mode::Prompt
+        | Mode::Cheatsheet
+        | Mode::Setup => Group::StatusModeNormal,
         Mode::Insert => Group::StatusModeInsert,
         Mode::Replace => Group::StatusModeReplace,
         Mode::Visual | Mode::VisualLine | Mode::VisualBlock => Group::StatusModeVisual,

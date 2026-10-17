@@ -307,10 +307,9 @@ impl Editor {
             PickerKind::Keymaps => self.keymap_items(),
             PickerKind::Commands => super::command::COMMANDS
                 .iter()
-                .map(|(cmd, desc)| Item {
-                    label: format!("{cmd:<12}{desc}"),
-                    target: Target::Command((*cmd).to_owned()),
-                })
+                .copied()
+                .chain(self.config.commands.iter().map(|c| (c.name.as_str(), c.desc.as_str())))
+                .map(|(cmd, desc)| Item { label: format!("{cmd:<12}{desc}"), target: Target::Command(cmd.to_owned()) })
                 .collect(),
             PickerKind::Lines => self
                 .buf()

@@ -7,7 +7,7 @@ use super::icons::Icons;
 use super::row::{Grid, Row};
 use super::theme::{Group, Rgb, Style, theme};
 use crate::buffer::text;
-use crate::editor::{Card, Cheatsheet, CmdCompletion, Completion, Editor, MenuEntry, Prompt, Rect};
+use crate::editor::{Card, Cheatsheet, CmdCompletion, Completion, Editor, MenuEntry, Prompt, Rect, SETTINGS, Setup};
 
 /// Most rows a which-key menu takes before it truncates.
 const MAX_ROWS: usize = 12;
@@ -123,6 +123,72 @@ pub fn cheatsheet(ed: &Editor, grid: &mut Grid) {
             grid.put(cx, ry, &row.finish(fill));
         }
     }
+}
+
+/// The settings screen over the whole window, as VS Code's settings tab; it is drawn in the theme it changes.
+pub fn setup(ed: &Editor, grid: &mut Grid) {
+    let Some(setup): &Option<Setup> = &ed.setup else { return };
+    let t: Arc<Theme> = theme();
+    let fill: Style = t.style(Group::NormalFloat);
+    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let (w, h): (usize, usize) = (grid.width, grid.height);
+    if w < 30 || h < 7 {
+        return;
+    }
+    let area: Rect = Rect { x: 0, y: 0, w, h };
+    // Float borders keep the background under them; here that would be the bars' colors.
+    grid.fill(area, fill);
+    grid.float(area, border, fill, "Settings");
+    let hint: Style = Style { fg: t.fg(Group::Comment), ..fill };
+    let search: String = if setup.typing {
+        format!(" / {}█", setup.query)
+    } else if setup.query.is_empty() {
+        " / Search settings".into()
+    } else {
+        format!(" / {}", setup.query)
+    };
+    let field: Style = if setup.typing || !setup.query.is_empty() { fill } else { hint };
+    grid.text(area.x + 2, area.y + 1, w - 4, field, &search);
+    let inner: Rect = Rect { x: area.x + 2, y: area.y + 3, w: w - 4, h: h.saturating_sub(5) };
+    // A section title row before each new section, then one row per setting.
+    let shown: Vec<usize> = setup.shown();
+    let current: Option<usize> = shown.get(setup.selected).copied();
+    let mut rows: Vec<(Option<usize>, &str)> = Vec::new();
+    for (n, &i) in shown.iter().enumerate() {
+        if n == 0 || SETTINGS[shown[n - 1]].section != SETTINGS[i].section {
+            rows.push((None, SETTINGS[i].section));
+        }
+        rows.push((Some(i), SETTINGS[i].name));
+    }
+    if rows.is_empty() {
+        grid.text(inner.x, inner.y, inner.w, hint, " No setting matches");
+    }
+    let at: usize = rows.iter().position(|(i, _)| *i == current).unwrap_or(0);
+    let scroll: usize = (at + 1).saturating_sub(inner.h);
+    let selected: Style = t.on(Group::PmenuSel, fill.bg);
+    let selected: Style = Style { bg: t.bg(Group::PmenuSel), ..selected };
+    for (y, (index, text)) in rows.iter().skip(scroll).take(inner.h).enumerate() {
+        let mut row: Row = Row::new(inner.w);
+        let base: Style = if index.is_some() && *index == current { selected } else { fill };
+        match index {
+            None => row.text(t.style(Group::StatusModeNormal), &format!(" {text} ")),
+            Some(i) => {
+                row.text(base, &format!(" {text}"));
+                row.pad_to(base, 20);
+                row.text(Style { fg: t.fg(Group::CheatsheetKey), ..base }, &format!(" {}", ed.setup_value(text)));
+                row.pad_to(base, 40);
+                row.text(Style { fg: t.fg(Group::Comment), italic: false, ..base }, &format!(" {}", SETTINGS[*i].desc));
+            }
+        }
+        grid.put(inner.x, inner.y + y, &row.finish(base));
+    }
+    grid.text(
+        inner.x,
+        area.y + h - 2,
+        inner.w,
+        hint,
+        " / search · j/k move · h/l change · w save to config · Esc close",
+    );
 }
 
 /// blink.cmp's menu under (or above) the cursor: kind icon, label with the typed prefix, source.

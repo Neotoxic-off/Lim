@@ -18,15 +18,14 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("bnext", "Next buffer"),
     ("bprevious", "Previous buffer"),
     ("close", "Close window"),
-    ("colorscheme", "Switch theme"),
     ("edit", "Edit a file"),
     ("enew", "New empty buffer"),
     ("help", "Cheatsheet"),
-    ("iconset", "Switch icon set"),
     ("nohlsearch", "Clear search highlight"),
     ("only", "Close other windows"),
     ("qall", "Quit"),
     ("quit", "Close the window or quit"),
+    ("settings", "Settings: every option, searchable (also :setup)"),
     ("split", "Split window"),
     ("vsplit", "Split window vertically"),
     ("wall", "Write all buffers"),
@@ -85,9 +84,14 @@ pub enum Command {
         range: String,
         op: LineOp,
     },
-    Colorscheme(Option<String>),
-    Iconset(Option<String>),
     Help,
+    Setup,
+    /// `:[range]Name args`: a plugin or config command, by Vim's rule that user commands start uppercase.
+    User {
+        range: String,
+        name: String,
+        args: Vec<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,6 +185,11 @@ impl Command {
         if let Some(op) = line_op {
             return Ok(Some(Self::LineOp { range: range.to_owned(), op }));
         }
+        let (name, args): (&str, &str) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+            let args: Vec<String> = args.split_whitespace().map(str::to_owned).collect();
+            return Ok(Some(Self::User { range: range.to_owned(), name: name.to_owned(), args }));
+        }
         if !range.is_empty() {
             return Err(Error::NotACommand(input.into()));
         }
@@ -206,9 +215,8 @@ impl Command {
             "bp" | "bprevious" | "bN" | "bNext" => Self::BufferPrev,
             "bd" | "bdelete" => Self::BufferDelete { force },
             "noh" | "nohlsearch" => Self::NoHighlight,
-            "colo" | "colorscheme" => Self::Colorscheme((!arg.is_empty()).then(|| arg.to_owned())),
-            "iconset" => Self::Iconset((!arg.is_empty()).then(|| arg.to_owned())),
             "h" | "help" => Self::Help,
+            "settings" | "setup" => Self::Setup,
             _ => return Err(Error::NotACommand(input.into())),
         }))
     }
@@ -353,11 +361,9 @@ impl Editor {
                     }
                 }
             }
-            Command::Colorscheme(Some(name)) => self.set_colorscheme(&name, true),
-            Command::Colorscheme(None) => self.info(self.colorscheme.clone()),
-            Command::Iconset(Some(name)) => self.accept_extra(super::picker::Target::IconSet(name)),
-            Command::Iconset(None) => self.info(self.options.iconset.clone()),
             Command::Help => self.open_cheatsheet(),
+            Command::Setup => self.open_setup(),
+            Command::User { range, name, args } => self.run_user_command(&range, &name, &args)?,
             Command::Goto(n) => {
                 let buf: &mut Buffer = self.buf_mut();
                 let line: usize = n.saturating_sub(1).min(buf.last_line());
@@ -410,6 +416,12 @@ mod tests {
         );
         assert!(matches!(Command::parse("e"), Err(Error::NoFileName)));
         assert!(matches!(Command::parse("frob"), Err(Error::NotACommand(_))));
+        // The command line never reaches a shell: no `:!`, `:cd`, `:sh` or `:terminal`.
+        // Themes and icon sets are picked in `:settings`, not by command.
+        assert!(matches!(Command::parse("colorscheme nord"), Err(Error::NotACommand(_))));
+        for shell in ["!ls", "%!sort", "cd /tmp", "lcd x", "sh", "shell", "terminal", "r !ls"] {
+            assert!(matches!(Command::parse(shell), Err(Error::NotACommand(_))), "{shell}");
+        }
         assert_eq!(
             Command::parse("%s/a\\/b/c/g").unwrap(),
             Some(Command::Substitute {
@@ -425,5 +437,9 @@ mod tests {
         );
         assert_eq!(Command::parse("$").unwrap(), Some(Command::GotoAddress("$".into())));
         assert_eq!(Command::parse("2,4>").unwrap(), Some(Command::LineOp { range: "2,4".into(), op: LineOp::Indent }));
+        assert_eq!(
+            Command::parse("'<,'>Sort -r  -u").unwrap(),
+            Some(Command::User { range: "'<,'>".into(), name: "Sort".into(), args: vec!["-r".into(), "-u".into()] })
+        );
     }
 }

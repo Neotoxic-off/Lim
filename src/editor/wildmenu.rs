@@ -1,5 +1,5 @@
 //! Command-line completion (blink.cmp's cmdline source / Vim's wildmenu): command names, then the
-//! argument each command takes: colorschemes, icon sets, or file paths.
+//! argument each command takes: file paths.
 
 use std::fs;
 use std::io;
@@ -8,6 +8,7 @@ use std::path::Path;
 use super::Editor;
 use super::command::COMMANDS;
 use crate::buffer::text;
+use crate::config::UserCommand;
 
 /// Paths listed at most for one completion.
 const MAX_PATHS: usize = 200;
@@ -21,13 +22,15 @@ pub struct CmdCompletion {
     pub selected: Option<usize>,
 }
 
-/// Where the word to complete starts in `line`, and its candidates.
-pub fn candidates(line: &str) -> (usize, Vec<(String, String)>) {
+/// Where the word to complete starts in `line`, and its candidates; `user` adds the plugins' commands.
+pub fn candidates(line: &str, user: &[UserCommand]) -> (usize, Vec<(String, String)>) {
     let Some((name, _)): Option<(&str, &str)> = line.split_once(' ') else {
         let items: Vec<(String, String)> = COMMANDS
             .iter()
+            .copied()
+            .chain(user.iter().map(|u| (u.name.as_str(), u.desc.as_str())))
             .filter(|(c, _)| c.starts_with(line) && *c != line)
-            .map(|(c, d)| ((*c).to_owned(), (*d).to_owned()))
+            .map(|(c, d)| (c.to_owned(), d.to_owned()))
             .collect();
         return (0, items);
     };
@@ -35,16 +38,6 @@ pub fn candidates(line: &str) -> (usize, Vec<(String, String)>) {
         - text::char_len(line[name.len() + 1..].trim_start());
     let arg: &str = line[name.len() + 1..].trim_start();
     let items: Vec<(String, String)> = match name {
-        "colo" | "colorscheme" => crate::render::palettes::THEMES
-            .iter()
-            .filter(|t| t.name.starts_with(arg))
-            .map(|t| (t.name.to_owned(), if t.light { "light".into() } else { "dark".into() }))
-            .collect(),
-        "iconset" => [("nerd", "Nerd Font glyphs"), ("unicode", "any font"), ("ascii", "plain ASCII")]
-            .iter()
-            .filter(|(s, _)| s.starts_with(arg))
-            .map(|(s, d)| ((*s).to_owned(), (*d).to_owned()))
-            .collect(),
         "e" | "edit" | "w" | "write" | "sp" | "split" | "vs" | "vsplit" | "new" | "vnew" | "wq" | "x" | "xit" => {
             paths(arg)
         }
@@ -88,7 +81,7 @@ fn paths(arg: &str) -> Vec<(String, String)> {
 impl Editor {
     /// Recomputes the menu after the command line changed.
     pub(super) fn update_cmd_completion(&mut self) {
-        let (start, items): (usize, Vec<(String, String)>) = candidates(&self.cmdline);
+        let (start, items): (usize, Vec<(String, String)>) = candidates(&self.cmdline, &self.config.commands);
         self.cmd_completion =
             (!self.cmdline.is_empty() && !items.is_empty()).then_some(CmdCompletion { start, items, selected: None });
     }
@@ -117,15 +110,12 @@ mod tests {
 
     #[test]
     fn completes_names_and_arguments() {
-        let (start, items): (usize, Vec<(String, String)>) = candidates("col");
+        let (start, items): (usize, Vec<(String, String)>) = candidates("sett", &[]);
         assert_eq!(start, 0);
-        assert!(items.iter().any(|(c, _)| c == "colorscheme"));
-        let (start, items): (usize, Vec<(String, String)>) = candidates("colorscheme cat");
-        assert_eq!(start, 12);
-        assert_eq!(items.len(), 4);
-        let (start, items): (usize, Vec<(String, String)>) = candidates("iconset u");
-        assert_eq!((start, items[0].0.as_str()), (8, "unicode"));
-        assert!(candidates("e src/edi").1.iter().any(|(p, _)| p == "src/editor/"));
-        assert!(candidates("frob x").1.is_empty());
+        assert!(items.iter().any(|(c, _)| c == "settings"));
+        let (start, items): (usize, Vec<(String, String)>) = candidates("e src/edi", &[]);
+        assert_eq!(start, 2);
+        assert!(items.iter().any(|(p, _)| p == "src/editor/"));
+        assert!(candidates("frob x", &[]).1.is_empty());
     }
 }

@@ -2,6 +2,8 @@
 
 mod bars;
 mod finder;
+#[cfg(test)]
+mod gallery;
 mod home;
 pub mod icons;
 pub mod palettes;
@@ -92,6 +94,8 @@ fn git_branch(mut dir: PathBuf) -> Option<String> {
 }
 
 pub struct Screen {
+    /// The terminal's own depth, used while `truecolor` is "auto".
+    detected: ColorDepth,
     depth: ColorDepth,
     ctx: Context,
     size: Size,
@@ -101,8 +105,15 @@ pub struct Screen {
 }
 
 impl Screen {
-    pub fn new(depth: ColorDepth) -> Self {
-        Self { depth, ctx: Context::detect(), size: Size::default(), rows: Vec::new(), startup: None }
+    pub fn new(detected: ColorDepth) -> Self {
+        Self {
+            detected,
+            depth: detected,
+            ctx: Context::detect(),
+            size: Size::default(),
+            rows: Vec::new(),
+            startup: None,
+        }
     }
 
     /// Forces the next frame to repaint everything.
@@ -113,7 +124,6 @@ impl Screen {
 
     /// Escape sequences taking the terminal from the previous frame to this one.
     pub fn draw(&mut self, ed: &mut Editor, size: Size) -> String {
-        let t: Arc<Theme> = theme();
         let mut out: String = String::from("\x1b[?25l");
         if size != self.size {
             self.size = size;
@@ -121,6 +131,39 @@ impl Screen {
             out.push_str("\x1b[0m\x1b[2J");
         }
         let (width, height): (usize, usize) = (size.cols.max(1), size.rows.max(1));
+        let options: Options = ed.options.clone();
+        // `truecolor` can change in `:settings`; every row is re-encoded in the new depth.
+        let depth: ColorDepth = match options.truecolor {
+            Some(true) => ColorDepth::TrueColor,
+            Some(false) => ColorDepth::Ansi256,
+            None => self.detected,
+        };
+        if depth != self.depth {
+            self.depth = depth;
+            self.rows.clear();
+        }
+        let (grid, cursor): (Grid, Option<(usize, usize)>) = self.compose(ed, width, height);
+        let rows: Vec<String> = (0..height).map(|y| row::encode(grid.row(y), self.depth)).collect();
+        for (i, line) in rows.iter().enumerate() {
+            if self.rows.get(i) != Some(line) {
+                let _: fmt::Result = write!(out, "\x1b[{};1H{line}", i + 1);
+            }
+        }
+        self.rows = rows;
+        let Some((row, col)): Option<(usize, usize)> = cursor else { return out };
+        let shape: i32 = match ed.mode {
+            Mode::Insert | Mode::Command | Mode::Search | Mode::Picker | Mode::Prompt => 6,
+            Mode::Replace => 4,
+            _ => 2,
+        };
+        let _: fmt::Result =
+            write!(out, "\x1b[{};{}H\x1b[{shape} q\x1b[?25h", row.min(height - 1) + 1, col.min(width - 1) + 1);
+        out
+    }
+
+    /// The frame as cells, and the cursor's screen cell if it shows.
+    fn compose(&mut self, ed: &mut Editor, width: usize, height: usize) -> (Grid, Option<(usize, usize)>) {
+        let t: Arc<Theme> = theme();
         let options: Options = ed.options.clone();
         let mut grid: Grid = Grid::new(width, height, t.style(Group::Normal));
         let roomy: bool = height > 3;
@@ -183,29 +226,14 @@ impl Screen {
         }
         popup::cmd_completion(ed, &mut grid);
         popup::cheatsheet(ed, &mut grid);
-        if ed.mode == Mode::Cheatsheet {
+        popup::setup(ed, &mut grid);
+        if matches!(ed.mode, Mode::Cheatsheet | Mode::Setup) {
             cursor = None;
         }
         if let Some(input) = popup::prompt(ed, &mut grid) {
             cursor = Some(input);
         }
-
-        let rows: Vec<String> = (0..height).map(|y| row::encode(grid.row(y), self.depth)).collect();
-        for (i, line) in rows.iter().enumerate() {
-            if self.rows.get(i) != Some(line) {
-                let _: fmt::Result = write!(out, "\x1b[{};1H{line}", i + 1);
-            }
-        }
-        self.rows = rows;
-        let Some((row, col)): Option<(usize, usize)> = cursor else { return out };
-        let shape: i32 = match ed.mode {
-            Mode::Insert | Mode::Command | Mode::Search | Mode::Picker | Mode::Prompt => 6,
-            Mode::Replace => 4,
-            _ => 2,
-        };
-        let _: fmt::Result =
-            write!(out, "\x1b[{};{}H\x1b[{shape} q\x1b[?25h", row.min(height - 1) + 1, col.min(width - 1) + 1);
-        out
+        (grid, cursor)
     }
 
     /// Every window and split border inside `area`; returns the focused cursor's screen cell.
@@ -301,6 +329,8 @@ mod tests {
         press(&mut ed, &[Key::F(1)], "Operators");
         press(&mut ed, &[Key::Char(' '), Key::Char('R')], "other.rs");
         press(&mut ed, &[Key::Char(' ')], "+Find");
+        let setup: Vec<Key> = ":settings".chars().map(Key::Char).chain([Key::Enter]).collect();
+        press(&mut ed, &setup, "statusline_style");
     }
 }
 

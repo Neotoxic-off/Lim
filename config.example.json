@@ -6,7 +6,7 @@
     "relativenumber": true,
     "signcolumn": true,
     "cursorline": true,
-    "tabstop": 2,
+    "tabstop": 4,
     "shiftwidth": 0,          // 0: use tabstop
     "expandtab": true,
     "scrolloff": 0,
@@ -38,7 +38,8 @@
     "todocomments": true,         // TODO: FIX: HACK: NOTE: … highlighted
     // "colorscheme": "catppuccin-mocha",  // unset: the last one picked with <Leader>ft (nvchad at first)
     "iconset": "nerd",            // "nerd", "unicode" or "ascii"
-    "completion": true            // words from open buffers while typing
+    "completion": true,           // words from open buffers while typing
+    "statusline_style": "rounded" // "rounded", "slanted", "arrow" or "flat" (Nerd Font icon set)
   },
 
   // astrotheme palette overrides, e.g. "ui": { "base": "#000000" }.

@@ -7,7 +7,7 @@
 pub mod json;
 pub mod keys;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{env, fs, io};
 
 use crate::term::Key;
@@ -72,13 +72,79 @@ pub struct Options {
     pub colorhighlight: bool,
     /// todo-comments: `TODO:`, `FIX:`, `HACK:`… highlighted in comments.
     pub todocomments: bool,
-    /// Built-in theme name (see `:colorscheme`); unset, the last one picked (or nvchad).
+    /// Built-in theme name (see `:settings`); unset, the last one picked (or nvchad).
     pub colorscheme: Option<String>,
     /// Icon set: "nerd", "unicode" or "ascii".
     pub iconset: String,
     /// blink.cmp-style completion from buffer words while typing.
     pub completion: bool,
+    /// Shape of the statusline section ends (Nerd Font icon set only).
+    pub statusline_style: StatusStyle,
 }
+
+/// How statusline sections end: `NvChad`'s rounded caps, powerline slants or arrows, or flat blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusStyle {
+    Rounded,
+    Slanted,
+    Arrow,
+    Flat,
+}
+
+impl StatusStyle {
+    pub const ALL: [Self; 4] = [Self::Rounded, Self::Slanted, Self::Arrow, Self::Flat];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rounded => "rounded",
+            Self::Slanted => "slanted",
+            Self::Arrow => "arrow",
+            Self::Flat => "flat",
+        }
+    }
+}
+
+/// Every option, in the order the setup screen writes them.
+pub const OPTION_NAMES: &[&str] = &[
+    "number",
+    "relativenumber",
+    "signcolumn",
+    "cursorline",
+    "tabstop",
+    "shiftwidth",
+    "expandtab",
+    "scrolloff",
+    "sidescrolloff",
+    "ignorecase",
+    "smartcase",
+    "hlsearch",
+    "autopairs",
+    "autoindent",
+    "mapleader",
+    "timeoutlen",
+    "showtabline",
+    "laststatus",
+    "winbar",
+    "cmdheight",
+    "icons",
+    "truecolor",
+    "highlighturl",
+    "indentguides",
+    "matchparen",
+    "gitsigns",
+    "wordhighlight",
+    "notifications",
+    "dashboard",
+    "syntax",
+    "clipboard",
+    "foldcolumn",
+    "colorhighlight",
+    "todocomments",
+    "colorscheme",
+    "iconset",
+    "completion",
+    "statusline_style",
+];
 
 impl Default for Options {
     fn default() -> Self {
@@ -87,7 +153,7 @@ impl Default for Options {
             relativenumber: true,
             signcolumn: true,
             cursorline: true,
-            tabstop: 2,
+            tabstop: 4,
             shiftwidth: 0,
             expandtab: true,
             scrolloff: 0,
@@ -120,6 +186,7 @@ impl Default for Options {
             colorscheme: None,
             iconset: "nerd".into(),
             completion: true,
+            statusline_style: StatusStyle::Rounded,
         }
     }
 }
@@ -128,6 +195,88 @@ impl Options {
     pub fn indent_width(&self) -> usize {
         if self.shiftwidth == 0 { self.tabstop } else { self.shiftwidth }
     }
+
+    /// An option's value as the config file writes it; `Null` for an unset colorscheme or an unknown name.
+    #[expect(clippy::cast_precision_loss, reason = "option values are small counts")]
+    pub fn get(&self, name: &str) -> Json {
+        let count = |n: usize| Json::Number(n as f64);
+        match name {
+            "number" => Json::Bool(self.number),
+            "relativenumber" => Json::Bool(self.relativenumber),
+            "signcolumn" => Json::Bool(self.signcolumn),
+            "cursorline" => Json::Bool(self.cursorline),
+            "tabstop" => count(self.tabstop),
+            "shiftwidth" => count(self.shiftwidth),
+            "expandtab" => Json::Bool(self.expandtab),
+            "scrolloff" => count(self.scrolloff),
+            "sidescrolloff" => count(self.sidescrolloff),
+            "ignorecase" => Json::Bool(self.ignorecase),
+            "smartcase" => Json::Bool(self.smartcase),
+            "hlsearch" => Json::Bool(self.hlsearch),
+            "autopairs" => Json::Bool(self.autopairs),
+            "autoindent" => Json::Bool(self.autoindent),
+            "mapleader" => Json::String(match self.mapleader {
+                Key::Char(c) => c.to_string(),
+                key => keys::display(&[key]),
+            }),
+            "timeoutlen" => count(usize::try_from(self.timeoutlen).unwrap_or(usize::MAX)),
+            "showtabline" => Json::Bool(self.showtabline),
+            "laststatus" => Json::Bool(self.laststatus),
+            "winbar" => Json::Bool(self.winbar),
+            "cmdheight" => count(self.cmdheight),
+            "icons" => Json::Bool(self.icons),
+            "truecolor" => self.truecolor.map_or_else(|| Json::String("auto".into()), Json::Bool),
+            "highlighturl" => Json::Bool(self.highlighturl),
+            "indentguides" => Json::Bool(self.indentguides),
+            "matchparen" => Json::Bool(self.matchparen),
+            "gitsigns" => Json::Bool(self.gitsigns),
+            "wordhighlight" => Json::Bool(self.wordhighlight),
+            "notifications" => Json::Bool(self.notifications),
+            "dashboard" => Json::Bool(self.dashboard),
+            "syntax" => Json::Bool(self.syntax),
+            "clipboard" => Json::String(if self.clipboard { "unnamedplus" } else { "" }.into()),
+            "foldcolumn" => Json::Bool(self.foldcolumn),
+            "colorhighlight" => Json::Bool(self.colorhighlight),
+            "todocomments" => Json::Bool(self.todocomments),
+            "colorscheme" => self.colorscheme.clone().map_or(Json::Null, Json::String),
+            "iconset" => Json::String(self.iconset.clone()),
+            "completion" => Json::Bool(self.completion),
+            "statusline_style" => Json::String(self.statusline_style.name().into()),
+            _ => Json::Null,
+        }
+    }
+}
+
+/// Writes `options` into the config file at `path`, keeping its other sections. The previous file is copied to
+/// `config.json.bak` first, since its comments do not survive. A file that does not parse is left alone.
+pub fn save_options(path: &Path, options: &Options) -> Result<(), String> {
+    let old: Option<String> = match fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let mut sections: Vec<(String, Json)> = match old.as_deref().map(json::parse) {
+        None => Vec::new(),
+        Some(Ok(Json::Object(sections))) => sections,
+        Some(Ok(_)) => return Err(format!("{}: not a JSON object, not overwritten", path.display())),
+        Some(Err(e)) => return Err(format!("{}: {e}, not overwritten", path.display())),
+    };
+    let fields: Vec<(String, Json)> = OPTION_NAMES
+        .iter()
+        .map(|&name| (name.to_owned(), options.get(name)))
+        .filter(|(_, value)| *value != Json::Null)
+        .collect();
+    match sections.iter_mut().find(|(name, _)| name == "options") {
+        Some((_, value)) => *value = Json::Object(fields),
+        None => sections.insert(0, ("options".to_owned(), Json::Object(fields))),
+    }
+    let write = |p: &Path, text: &str| fs::write(p, text).map_err(|e| format!("{}: {e}", p.display()));
+    if let Some(old) = old {
+        write(&path.with_extension("json.bak"), &old)?;
+    } else if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    write(path, &(json::pretty(&Json::Object(sections)) + "\n"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +316,27 @@ pub struct Config {
     pub palette: Vec<(String, Rgb)>,
     pub highlights: Vec<(String, HighlightSpec)>,
     pub keymaps: Vec<Keymap>,
+    pub commands: Vec<UserCommand>,
+}
+
+/// What a `:Name` command does with its program's stdout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandOutput {
+    /// Replaces the lines it was given (a formatter, a sorter).
+    Replace,
+    Message,
+}
+
+/// `:Name` from a plugin or the config: the lines go to `run`'s stdin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserCommand {
+    pub name: String,
+    /// Program and arguments; `${file}` and `${plugin}` are expanded when it runs.
+    pub run: Vec<String>,
+    pub output: CommandOutput,
+    pub desc: String,
+    /// The plugin's folder, empty for the config's own commands.
+    pub dir: PathBuf,
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -191,33 +361,65 @@ fn user_dir(xdg: &str, windows: &str, home: &[&str]) -> Option<PathBuf> {
     Some(base.join("lim"))
 }
 
-/// The config and every problem found in it. A missing file is not a problem.
+/// The plugins, then the config over them, and every problem found. A missing file is not a problem.
 pub fn load() -> (Config, Vec<String>) {
-    let Some(path): Option<PathBuf> = path() else { return (Config::default(), Vec::new()) };
-    match fs::read_to_string(&path) {
-        Ok(text) => {
-            let (config, warnings): (Config, Vec<String>) = Config::from_str(&text);
-            let warnings: Vec<String> = warnings.into_iter().map(|w| format!("{}: {w}", path.display())).collect();
-            (config, warnings)
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => (Config::default(), Vec::new()),
-        Err(e) => (Config::default(), vec![format!("{}: {e}", path.display())]),
+    let mut config: Config = Config::default();
+    let mut warnings: Vec<String> = Vec::new();
+    let Some(path): Option<PathBuf> = path() else { return (config, warnings) };
+    if let Some(dir) = path.parent() {
+        config.read_plugins(&dir.join("plugins"), &mut warnings);
     }
+    match fs::read_to_string(&path) {
+        Ok(text) => config.read_file(&path, &text, None, &mut warnings),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => warnings.push(format!("{}: {e}", path.display())),
+    }
+    (config, warnings)
 }
 
 impl Config {
+    #[cfg(test)]
     pub fn from_str(text: &str) -> (Self, Vec<String>) {
         let mut config: Config = Self::default();
         let mut warnings: Vec<String> = Vec::new();
+        config.read(text, None, &mut warnings);
+        (config, warnings)
+    }
+
+    /// Every `<dir>/<name>/plugin.json`, in name order. A plugin holds the same sections as the config, plus
+    /// `name`, `version` and `description`.
+    pub fn read_plugins(&mut self, dir: &Path, warnings: &mut Vec<String>) {
+        let Ok(entries): io::Result<fs::ReadDir> = fs::read_dir(dir) else { return };
+        let mut manifests: Vec<PathBuf> =
+            entries.filter_map(|e| Some(e.ok()?.path().join("plugin.json"))).filter(|p| p.is_file()).collect();
+        manifests.sort();
+        for manifest in manifests {
+            match fs::read_to_string(&manifest) {
+                Ok(text) => self.read_file(&manifest, &text, manifest.parent(), warnings),
+                Err(e) => warnings.push(format!("{}: {e}", manifest.display())),
+            }
+        }
+    }
+
+    fn read_file(&mut self, path: &Path, text: &str, plugin: Option<&Path>, warnings: &mut Vec<String>) {
+        let mut found: Vec<String> = Vec::new();
+        self.read(text, plugin, &mut found);
+        warnings.extend(found.into_iter().map(|w| format!("{}: {w}", path.display())));
+    }
+
+    /// Merges one config.json, or the plugin.json of the folder `plugin`, over what was read before.
+    fn read(&mut self, text: &str, plugin: Option<&Path>, warnings: &mut Vec<String>) {
         match json::parse(text) {
             Ok(Json::Object(sections)) => {
                 for (name, value) in sections {
                     match name.as_str() {
-                        "options" => config.read_options(&value, &mut warnings),
-                        "palette" => config.read_palette(&value, &mut warnings),
-                        "highlights" => config.read_highlights(&value, &mut warnings),
-                        "keymaps" => config.read_keymaps(&value, &mut warnings),
+                        "options" => self.read_options(&value, warnings),
+                        "palette" => self.read_palette(&value, warnings),
+                        "highlights" => self.read_highlights(&value, warnings),
+                        "keymaps" => self.read_keymaps(&value, warnings),
+                        "commands" => self.read_commands(&value, plugin.unwrap_or(Path::new("")), warnings),
                         "$schema" | "_comment" => {}
+                        "name" | "version" | "description" if plugin.is_some() => {}
                         other => warnings.push(format!("unknown section \"{other}\"")),
                     }
                 }
@@ -225,10 +427,25 @@ impl Config {
             Ok(other) => warnings.push(format!("expected an object at the top, found {}", other.kind())),
             Err(e) => warnings.push(e.to_string()),
         }
-        (config, warnings)
     }
 
-    fn read_options(&mut self, value: &Json, warnings: &mut Vec<String>) {
+    fn read_commands(&mut self, value: &Json, dir: &Path, warnings: &mut Vec<String>) {
+        let Json::Object(commands): &Json = value else {
+            return warnings.push("\"commands\" must be an object".into());
+        };
+        for (name, spec) in commands {
+            match user_command(name, spec, dir) {
+                Ok(command) => {
+                    self.commands.retain(|c| c.name != command.name);
+                    self.commands.push(command);
+                }
+                Err(e) => warnings.push(format!("commands.{name}: {e}")),
+            }
+        }
+    }
+
+    #[expect(clippy::too_many_lines, reason = "one arm per option")]
+    pub fn read_options(&mut self, value: &Json, warnings: &mut Vec<String>) {
         let Json::Object(fields): &Json = value else { return warnings.push("\"options\" must be an object".into()) };
         let o: &mut Options = &mut self.options;
         for (name, value) in fields {
@@ -285,10 +502,18 @@ impl Config {
                     _ => false,
                 },
                 "iconset" => match value {
-                    Json::String(s) if ["nerd", "unicode", "ascii"].contains(&s.as_str()) => {
+                    Json::String(s) if crate::render::icons::SETS.iter().any(|(name, _, _)| name == s) => {
                         o.iconset.clone_from(s);
                         true
                     }
+                    _ => false,
+                },
+                "statusline_style" => match value {
+                    Json::String(s) => StatusStyle::ALL
+                        .into_iter()
+                        .find(|style| style.name() == s)
+                        .map(|style| o.statusline_style = style)
+                        .is_some(),
                     _ => false,
                 },
                 "truecolor" => match value {
@@ -436,6 +661,32 @@ impl Config {
     }
 }
 
+fn user_command(name: &str, spec: &Json, dir: &Path) -> Result<UserCommand, String> {
+    if !name.starts_with(|c: char| c.is_ascii_uppercase()) || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("a name starts with an uppercase letter, then letters or digits, as in Vim".into());
+    }
+    let Json::Object(fields): &Json = spec else { return Err(format!("expected an object, found {}", spec.kind())) };
+    let field = |n: &str| fields.iter().find(|(k, _)| k == n).map(|(_, v)| v);
+    let run: Vec<String> = match field("run") {
+        Some(Json::Array(parts)) if !parts.is_empty() => parts
+            .iter()
+            .map(|p| if let Json::String(s) = p { Ok(s.clone()) } else { Err(format!("\"run\" holds {}", p.kind())) })
+            .collect::<Result<Vec<String>, String>>()?,
+        _ => return Err("\"run\" must be a non-empty array of strings".into()),
+    };
+    let output: CommandOutput = match field("output") {
+        None => CommandOutput::Message,
+        Some(Json::String(s)) if s == "message" => CommandOutput::Message,
+        Some(Json::String(s)) if s == "replace" => CommandOutput::Replace,
+        Some(_) => return Err("\"output\" is \"replace\" or \"message\"".into()),
+    };
+    let desc: String = match field("desc") {
+        Some(Json::String(d)) => d.clone(),
+        _ => String::new(),
+    };
+    Ok(UserCommand { name: name.to_owned(), run, output, desc, dir: dir.to_owned() })
+}
+
 fn set_bool(slot: &mut bool, value: &Json) -> bool {
     match value {
         Json::Bool(b) => {
@@ -471,6 +722,61 @@ mod tests {
         let (config, warnings): (Config, Vec<String>) = Config::from_str(EXAMPLE);
         assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(config.options, Options::default());
+    }
+
+    /// Every option written by `save_options` reads back to the same value, and other sections survive.
+    #[test]
+    fn saved_options_read_back() {
+        let options: Options = Options {
+            tabstop: 8,
+            truecolor: Some(false),
+            clipboard: false,
+            colorscheme: Some("nord".into()),
+            statusline_style: StatusStyle::Arrow,
+            mapleader: Key::Char(','),
+            ..Options::default()
+        };
+        let path: PathBuf = env::temp_dir().join(format!("lim-save-{}.json", std::process::id()));
+        fs::write(&path, "// mine\n{ \"keymaps\": { \"i\": { \"jk\": \"<Esc>\" } }, \"options\": { \"x\": 1 } }")
+            .unwrap();
+        save_options(&path, &options).unwrap();
+        let text: String = fs::read_to_string(&path).unwrap();
+        let backup: String = fs::read_to_string(path.with_extension("json.bak")).unwrap();
+        let _: io::Result<()> = fs::remove_file(&path);
+        let _: io::Result<()> = fs::remove_file(path.with_extension("json.bak"));
+        assert!(backup.starts_with("// mine"));
+        let (config, warnings): (Config, Vec<String>) = Config::from_str(&text);
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(config.options, options);
+        assert_eq!(config.keymaps.len(), 1);
+        assert!(OPTION_NAMES.iter().all(|name| *name == "colorscheme" || Options::default().get(name) != Json::Null));
+    }
+
+    /// Plugins merge in name order, later ones win, and bad commands are reported with their file.
+    #[test]
+    fn plugins_contribute_sections() {
+        let dir: PathBuf = env::temp_dir().join(format!("lim-plugins-{}", std::process::id()));
+        for (name, manifest) in [
+            ("a", r#"{ "name": "a", "options": { "tabstop": 2 }, "commands": { "Sort": { "run": ["sort"] } } }"#),
+            (
+                "b",
+                r#"{ "commands": { "Sort": { "run": ["sort", "-r"], "output": "replace" }, "bad": { "run": [] } } }"#,
+            ),
+        ] {
+            fs::create_dir_all(dir.join(name)).unwrap();
+            fs::write(dir.join(name).join("plugin.json"), manifest).unwrap();
+        }
+        let mut config: Config = Config::default();
+        let mut warnings: Vec<String> = Vec::new();
+        config.read_plugins(&dir, &mut warnings);
+        let _: io::Result<()> = fs::remove_dir_all(&dir);
+        assert_eq!(config.options.tabstop, 2);
+        assert_eq!(config.commands.len(), 1);
+        assert_eq!(config.commands[0].run, ["sort", "-r"]);
+        assert_eq!(config.commands[0].output, CommandOutput::Replace);
+        assert_eq!(config.commands[0].dir, dir.join("b"));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("commands.bad"), "{warnings:?}");
     }
 
     #[test]

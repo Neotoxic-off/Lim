@@ -183,6 +183,8 @@ impl Editor {
             ("tokyonight-moon", "tokyonight-day"),
             ("rose-pine", "rose-pine-dawn"),
             ("rose-pine-moon", "rose-pine-dawn"),
+            ("gruvbox", "gruvbox-light"),
+            ("solarized-dark", "solarized-light"),
         ];
         let current: String = self.colorscheme.clone();
         let other: &str = PAIRS
