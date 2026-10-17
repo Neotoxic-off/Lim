@@ -20,6 +20,7 @@ fn keys(ed: &mut Editor, typed: &str) {
             c => Key::Char(c),
         });
     }
+    ed.refresh_completion();
 }
 
 fn text(ed: &Editor) -> String {
@@ -1031,4 +1032,45 @@ fn format_on_save() {
     let (_, warnings): (Config, Vec<String>) =
         Config::from_str(r#"{ "commands": { "Bad": { "run": ["x"], "on": "open" } } }"#);
     assert_eq!(warnings.len(), 1);
+}
+
+/// Found by the fuzzer: `gv` after its lines were deleted, then an operator; an address with junk after `-`.
+#[test]
+fn fuzz_regressions() {
+    let mut ed: Editor = editor("a\nb\nc\nd\ne");
+    keys(&mut ed, "Gvk\x1bggdGgvs");
+    assert_eq!(ed.mode, Mode::Insert);
+    let mut ed: Editor = editor("é\nx");
+    keys(&mut ed, ":co-rsp>1Namenéls\n");
+    assert_eq!(text(&ed), "é\nx");
+    keys(&mut ed, ":1t.-é\n");
+    assert_eq!(text(&ed), "é\nx");
+}
+
+/// `:norm` replays keys without eating the replay budget of `.` and macros it runs.
+#[test]
+fn norm_runs_dot_and_macros() {
+    let mut ed: Editor = editor("a\nb\nc");
+    keys(&mut ed, "A!\x1b:2,3norm .\n");
+    assert_eq!(text(&ed), "a!\nb!\nc!");
+    keys(&mut ed, "qqI-\x1bqu:g/!/norm @q\n");
+    assert_eq!(text(&ed), "-a!\n-b!\n-c!");
+}
+
+/// `:g/x/d` deletes in one pass but leaves what Vim's line-by-line deletes leave: marks on their lines,
+/// the last deletes in `"1`…, the cursor where the last one was, one undo step.
+#[test]
+fn global_delete_in_one_pass() {
+    let mut ed: Editor = editor("x1\nkeep a\nx2\nkeep b\nx3\nkeep c");
+    keys(&mut ed, "jjjmbgg:g/^x/d\n");
+    assert_eq!(text(&ed), "keep a\nkeep b\nkeep c");
+    assert_eq!(ed.buf().cursor.line, 2, "on the line after the last delete");
+    keys(&mut ed, "gg'b");
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "keep b", "the mark followed its line");
+    keys(&mut ed, "\"1p");
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "x3");
+    keys(&mut ed, "u\"2p");
+    assert_eq!(ed.buf().line(ed.buf().cursor.line), "x2");
+    keys(&mut ed, "uu");
+    assert_eq!(text(&ed), "x1\nkeep a\nx2\nkeep b\nx3\nkeep c", "one undo step");
 }

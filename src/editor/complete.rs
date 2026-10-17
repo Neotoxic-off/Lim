@@ -3,6 +3,7 @@
 //! previous, `<CR>` accept (only when an item is selected), `<C-e>` hide, `<C-Space>` show.
 
 use std::collections::HashSet;
+use std::iter;
 
 use super::{Editor, Mode};
 use crate::buffer::{Buffer, CharClass, Pos, text};
@@ -29,8 +30,14 @@ fn is_word(c: char) -> bool {
 /// Candidates for `prefix` from word lists (current buffer first), smartcase, best first.
 pub fn candidates<'a>(prefix: &str, sources: impl Iterator<Item = &'a [String]>) -> Vec<String> {
     let sensitive: bool = prefix.chars().any(char::is_uppercase);
-    let lower: String = prefix.to_lowercase();
-    let matches = |w: &str| if sensitive { w.starts_with(prefix) } else { w.to_lowercase().starts_with(&lower) };
+    // Compared char by char: lowercasing every word of every buffer on each key was the slow part.
+    let matches = |w: &str| {
+        if sensitive {
+            return w.starts_with(prefix);
+        }
+        let mut word = w.chars().flat_map(char::to_lowercase);
+        prefix.chars().flat_map(char::to_lowercase).all(|p| word.next() == Some(p))
+    };
     let mut seen: HashSet<String> = HashSet::new();
     let mut found: Vec<(usize, String)> = Vec::new();
     for (rank, words) in sources.enumerate() {
@@ -49,7 +56,8 @@ impl Editor {
     /// Refreshes (or closes) the menu for the word before the cursor; `force` shows it even for
     /// an empty prefix result (`<C-Space>`).
     pub(super) fn update_completion(&mut self, force: bool) {
-        if !self.options.completion && !force {
+        // Replayed keys (`.`, macros, `:norm`) open no menu: nobody sees it, and it would cost a scan per key.
+        if (!self.options.completion && !force) || self.replaying_keys() {
             self.completion = None;
             return;
         }
@@ -63,12 +71,12 @@ impl Editor {
         }
         let prefix: String = before[before.len() - len..].iter().collect();
         let current: usize = self.current;
-        let mut lists: Vec<Vec<String>> = Vec::with_capacity(self.buffers.len());
-        lists.push(self.buffers[current].words().to_vec());
-        for i in (0..self.buffers.len()).filter(|&i| i != current) {
-            lists.push(self.buffers[i].words().to_vec());
+        for buf in &mut self.buffers {
+            buf.refresh_words();
         }
-        let items: Vec<String> = candidates(&prefix, lists.iter().map(Vec::as_slice));
+        // Current buffer first, the others after, without copying their lists.
+        let order = iter::once(current).chain((0..self.buffers.len()).filter(|&i| i != current));
+        let items: Vec<String> = candidates(&prefix, order.map(|i| self.buffers[i].words()));
         self.completion = (!items.is_empty()).then(|| Completion {
             start: Pos::new(at.line, at.col - len),
             prefix,
@@ -77,8 +85,22 @@ impl Editor {
         });
     }
 
+    /// Brings the menu up to date with what was typed since it was last computed.
+    pub fn refresh_completion(&mut self) {
+        if std::mem::take(&mut self.completion_stale) {
+            self.update_completion(false);
+        }
+    }
+
     /// Keys the open menu takes; false lets insert mode handle the key.
     pub(super) fn completion_key(&mut self, key: Key) -> bool {
+        // Only the keys that act on the menu need it current; `<Esc>` and typing do not.
+        if matches!(
+            key,
+            Key::Tab | Key::BackTab | Key::Down | Key::Up | Key::Enter | Key::Ctrl('n' | 'j' | 'p' | 'k' | 'e')
+        ) {
+            self.refresh_completion();
+        }
         if key == Key::Ctrl(' ') {
             self.update_completion(true);
             return true;
@@ -129,7 +151,7 @@ pub fn words_of(lines: &[String]) -> Vec<String> {
     let mut words: Vec<String> = Vec::new();
     for line in lines {
         let mut word: String = String::new();
-        for c in line.chars().chain(std::iter::once(' ')) {
+        for c in line.chars().chain(iter::once(' ')) {
             if is_word(c) {
                 word.push(c);
             } else if !word.is_empty() {

@@ -27,6 +27,11 @@ pub(super) struct Repeat {
 }
 
 impl Editor {
+    /// Keys are being replayed (`.`, a macro, `:norm`), not typed: nothing interactive needs updating.
+    pub(super) fn replaying_keys(&self) -> bool {
+        self.repeat.replaying || self.repeat.depth > 0 || self.in_norm
+    }
+
     pub fn recording(&self) -> Option<char> {
         self.repeat.recording.as_ref().map(|(reg, _)| *reg)
     }
@@ -109,6 +114,9 @@ impl Editor {
         if self.repeat.depth == 0 && !self.repeat.replaying {
             self.repeat.budget = REPLAY_BUDGET;
         }
+        if self.repeat.depth == 0 {
+            self.hold_clipboard();
+        }
         self.repeat.depth += 1;
         'replay: for _ in 0..count {
             for &key in &keys {
@@ -119,6 +127,9 @@ impl Editor {
             }
         }
         self.repeat.depth -= 1;
+        if self.repeat.depth == 0 {
+            self.release_clipboard();
+        }
     }
 
     fn spend_replay_key(&mut self) -> bool {

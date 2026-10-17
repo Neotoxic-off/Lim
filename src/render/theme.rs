@@ -91,6 +91,7 @@ groups! {
     WordHighlight = "LspReferenceText",
     Url = "HighlightURL",
     WhichKey = "WhichKey",
+    WhichKeyNormal = "WhichKeyNormal",
     WhichKeyDesc = "WhichKeyDesc",
     WhichKeyPrefix = "WhichKeyGroup",
     WhichKeySeparator = "WhichKeySeparator",
@@ -317,6 +318,8 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::WordHighlight => hl(None, p("ui.highlight")),
         Group::Url => Highlight { underline: true, ..Highlight::default() },
         Group::WhichKey => fg("ui.cyan"),
+        // The editor's own background: the menu sits on the windows without a panel color of its own.
+        Group::WhichKeyNormal => on("ui.text", "ui.base"),
         Group::WhichKeyDesc => fg("ui.purple"),
         Group::WhichKeyPrefix => fg("ui.blue"),
         Group::WhichKeySeparator => fg("ui.none_text"),
@@ -350,6 +353,14 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn which_key_background_is_the_editors() {
+        for def in THEMES {
+            let (theme, _): (Theme, Vec<String>) = Theme::build(&Config::default(), def.name);
+            assert_eq!(theme.bg(Group::WhichKeyNormal), theme.bg(Group::Normal), "{}", def.name);
+        }
+    }
 
     #[test]
     fn overrides_and_links() {

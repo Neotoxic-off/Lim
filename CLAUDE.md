@@ -16,11 +16,15 @@ login shell is fish. Keep the target dir off `/mnt` so builds stay fast:
 
 ```sh
 wsl -d Ubuntu --cd /mnt/d/Code/Github/Lim -e bash -lc 'CARGO_TARGET_DIR=$HOME/.lim-target cargo clippy --all-targets && CARGO_TARGET_DIR=$HOME/.lim-target cargo test'
-cargo test                      # includes a random-key fuzz over every mode and screen size
+cargo test                      # includes the fuzzers (src/fuzz.rs) and the perf budgets (src/perf.rs)
 cargo test <name>               # one test, e.g. cargo test operators_undo_and_paste
 cargo clippy --all-targets      # pedantic (see [lints] in Cargo.toml); must stay at zero warnings
 cargo fmt                       # rustfmt.toml: 120 columns
 cargo llvm-cov --summary-only   # per-file coverage
+cargo test --release perf -- --nocapture   # benchmark table (src/perf.rs): run before and after every change
+LIM_FUZZ=30 cargo test --release fuzz      # a long fuzz session; LIM_FUZZ_SEED=<n> replays one failing seed
+# against Neovim (installed in WSL at ~/.local/nvim): lim must win every operation
+wsl -d Ubuntu --cd /mnt/d/Code/Github/Lim -e bash -lc 'LIM_NVIM=$HOME/.local/nvim/bin/nvim CARGO_TARGET_DIR=$HOME/.lim-target cargo test --release vs_neovim -- --ignored --nocapture'
 ```
 
 ## Architecture
@@ -57,6 +61,13 @@ cargo llvm-cov --summary-only   # per-file coverage
 - Tests live in `#[cfg(test)]` modules next to the code. Editor behaviour tests go in `editor/tests.rs`, which uses
   helpers that feed key strings (`keys(&mut ed, "dw")`) and check the resulting text.
 - When you add a feature, also update README.md (features table, keymaps, limits).
+- Benchmark every change: run `cargo test --release perf -- --nocapture` before and after, and compare. The
+  `perf` test fails on a budget overrun; a new hot path (per key, per frame, per line) gets a case there.
+- lim stays faster than Neovim (`-u NONE`, no plugins) on every operation `vs_neovim` compares; run it after any
+  change to editing, search, Ex commands or undo, and add a row when lim gains an operation both can do.
+- No input may crash or hang lim. A new entry point (a key, a mode, a command, a parser, a file format) gets
+  covered by `src/fuzz.rs`: a phrase that reaches it in `PHRASES`, or its own fuzzer. A fuzz failure prints its
+  seed; fix the cause and add the input as a regression test in `editor/tests.rs`.
 
 ## Coding guidelines
 

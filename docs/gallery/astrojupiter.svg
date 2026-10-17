@@ -123,18 +123,18 @@
 <text x="369 378 387 396 405 414" y="193" fill="#815654">counts</text>
 <rect x="0" y="198" width="270" height="18" fill="#f9dcd1"/>
 <rect x="270" y="198" width="630" height="18" fill="#feeeee"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162" y="211" fill="#9e7876">▫PONYTAIL-DEBT.md</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117" y="211" fill="#9e7876">▫install.bat</text>
 <text x="270" y="211" fill="#d8d6d5">│</text>
 <text x="306" y="211" fill="#d0b6b6">1</text>
 <text x="333" y="211" fill="#815654">}</text>
 <rect x="0" y="216" width="270" height="18" fill="#f9dcd1"/>
 <rect x="270" y="216" width="630" height="18" fill="#feeeee"/>
-<text x="9 27 36 45 54 63 72 81 90 99" y="229" fill="#9e7876">▫README.md</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108" y="229" fill="#9e7876">▫install.sh</text>
 <text x="270" y="229" fill="#d8d6d5">│</text>
 <text x="306" y="229" fill="#d0b6b6">2</text>
 <rect x="0" y="234" width="270" height="18" fill="#f9dcd1"/>
 <rect x="270" y="234" width="630" height="18" fill="#feeeee"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="247" fill="#9e7876">▫rustfmt.toml</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162" y="247" fill="#9e7876">▫PONYTAIL-DEBT.md</text>
 <text x="270" y="247" fill="#d8d6d5">│</text>
 <text x="306" y="247" fill="#d0b6b6">3</text>
 <text x="333 342" y="247" fill="#90437a">fn</text>
@@ -142,6 +142,7 @@
 <text x="396 405 423" y="247" fill="#815654">(){</text>
 <rect x="0" y="252" width="270" height="18" fill="#f9dcd1"/>
 <rect x="270" y="252" width="630" height="18" fill="#feeeee"/>
+<text x="9 27 36 45 54 63 72 81 90 99" y="265" fill="#9e7876">▫README.md</text>
 <text x="270" y="265" fill="#d8d6d5">│</text>
 <text x="306" y="265" fill="#d0b6b6">4</text>
 <text x="333" y="265" fill="#d0b6b6">▏</text>
@@ -154,6 +155,7 @@
 <rect x="270" y="270" width="135" height="18" fill="#feeeee"/>
 <rect x="405" y="270" width="54" height="18" fill="#e7cfca"/>
 <rect x="459" y="270" width="441" height="18" fill="#feeeee"/>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="283" fill="#9e7876">▫rustfmt.toml</text>
 <text x="270" y="283" fill="#d8d6d5">│</text>
 <text x="306" y="283" fill="#d0b6b6">5</text>
 <text x="333" y="283" fill="#d0b6b6">▏</text>

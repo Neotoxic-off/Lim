@@ -81,7 +81,7 @@ impl Editor {
             Key::Char(c) => {
                 self.auto_indent = None;
                 self.type_char(c, prev, next);
-                self.update_completion(false);
+                self.completion_stale = true;
             }
             Key::Enter | Key::Ctrl('j') => {
                 let indent: String = text::indent(line).to_owned();
@@ -107,9 +107,7 @@ impl Editor {
                 let end: Pos = Pos::new(here.line, here.col + usize::from(between_pair));
                 buf.remove(Pos::new(here.line, here.col - 1), end);
                 buf.cursor.col -= 1;
-                if self.completion.is_some() {
-                    self.update_completion(false);
-                }
+                self.completion_stale |= self.completion.is_some();
             }
             Key::Backspace | Key::Ctrl('h') if here.line > 0 => {
                 let col: usize = buf.line_len(here.line - 1);

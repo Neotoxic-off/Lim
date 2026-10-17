@@ -1,7 +1,7 @@
 //! Vim registers: unnamed `"`, named `a`–`z` (`A`–`Z` append), yank `0`, deletes `1`–`9` (shifting) and `-`,
 //! black hole `_`, clipboard `+`/`*`, and read-only `%` (file) and `/` (search).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use super::{Editor, clipboard};
 
@@ -13,19 +13,32 @@ pub struct Register {
     pub block: bool,
 }
 
+/// `"1` to `"9`: the newest delete in front, the tenth dropped.
+const NUMBERED: usize = 9;
+
 #[derive(Debug, Default)]
 pub struct Registers {
     slots: HashMap<char, Register>,
+    /// `"1` … `"9`, newest first.
+    numbered: VecDeque<Register>,
     /// Last text lim put on the system clipboard: when the clipboard still holds it, the
     /// register's own kind (linewise, block) is used instead of guessing from the text.
     copied: Option<String>,
+    /// While `:g`, `:norm` or a macro runs (they nest), only the last text goes to the clipboard, once, at the end.
+    clipboard_holds: usize,
+    clipboard_pending: Option<Register>,
 }
 
 impl Registers {
     pub fn list(&self) -> Vec<(char, Register)> {
-        let mut list: Vec<_> = self.slots.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let numbered = self.numbered.iter().zip('1'..='9').map(|(r, name)| (name, r.clone()));
+        let mut list: Vec<(char, Register)> = self.slots.iter().map(|(k, v)| (*k, v.clone())).chain(numbered).collect();
         list.sort_by_key(|(k, _)| *k);
         list
+    }
+
+    fn numbered(&self, name: char) -> Option<&Register> {
+        self.numbered.get(name.to_digit(10)?.checked_sub(1).and_then(|n| usize::try_from(n).ok())?)
     }
 }
 
@@ -36,38 +49,56 @@ impl Editor {
         if name == Some('_') {
             return;
         }
-        let slots: &mut HashMap<char, Register> = &mut self.registers.slots;
+        let registers: &mut Registers = &mut self.registers;
         match name {
             Some(c @ 'A'..='Z') => {
-                let slot: &mut Register = slots.entry(c.to_ascii_lowercase()).or_default();
+                let slot: &mut Register = registers.slots.entry(c.to_ascii_lowercase()).or_default();
                 let sep: &str = if slot.linewise || value.linewise { "\n" } else { "" };
                 slot.text = format!("{}{sep}{}", slot.text, value.text);
                 slot.linewise |= value.linewise;
             }
-            Some(c @ ('a'..='z' | '0'..='9' | '-')) => {
-                slots.insert(c, value.clone());
+            Some(c @ ('a'..='z' | '0' | '-')) => {
+                registers.slots.insert(c, value.clone());
+            }
+            // `"3yy` writes `"3` itself, padding the list if it is shorter.
+            Some(c @ '1'..='9') => {
+                let index: usize = c.to_digit(10).and_then(|d| usize::try_from(d).ok()).unwrap_or(1) - 1;
+                registers.numbered.resize(registers.numbered.len().max(index + 1), Register::default());
+                registers.numbered[index] = value.clone();
             }
             _ => {}
         }
-        let numbered: char = if yank {
-            '0'
+        if yank {
+            registers.slots.insert('0', value.clone());
         } else if value.linewise || value.text.contains('\n') {
-            // A big delete pushes "1 to "2, …, "8 to "9; the old "9 is dropped.
-            for n in (1..9).rev() {
-                let (from, to): (char, char) = (char::from(b'0' + n), char::from(b'1' + n));
-                if let Some(older) = slots.remove(&from) {
-                    slots.insert(to, older);
-                }
-            }
-            '1'
+            registers.numbered.push_front(value.clone());
+            registers.numbered.truncate(NUMBERED);
         } else {
-            '-'
-        };
-        slots.insert(numbered, value.clone());
+            registers.slots.insert('-', value.clone());
+        }
         if matches!(name, Some('+' | '*')) || (name.is_none() && self.options.clipboard) {
-            self.set_clipboard(&value);
+            if self.registers.clipboard_holds > 0 {
+                self.registers.clipboard_pending = Some(value.clone());
+            } else {
+                self.set_clipboard(&value);
+            }
         }
         self.registers.slots.insert('"', value);
+    }
+
+    /// From here until `release_clipboard`, the clipboard is written once instead of on every yank or delete
+    /// (`:g/x/d` would otherwise run the clipboard tool once per line).
+    pub(super) fn hold_clipboard(&mut self) {
+        self.registers.clipboard_holds += 1;
+    }
+
+    pub(super) fn release_clipboard(&mut self) {
+        self.registers.clipboard_holds = self.registers.clipboard_holds.saturating_sub(1);
+        if self.registers.clipboard_holds == 0
+            && let Some(value) = self.registers.clipboard_pending.take()
+        {
+            self.set_clipboard(&value);
+        }
     }
 
     /// The register `"x` named, or the unnamed one (the clipboard with `clipboard=unnamedplus`).
@@ -79,6 +110,7 @@ impl Editor {
             }
             Some('/') => Some(Register { text: self.search.clone(), ..Register::default() }),
             Some('+' | '*') => self.clipboard_register(),
+            Some(c @ '1'..='9') => self.registers.numbered(c).cloned(),
             Some(c) if c != '"' => self.registers.slots.get(&c.to_ascii_lowercase()).cloned(),
             _ if self.options.clipboard => self.clipboard_register(),
             _ => self.registers.slots.get(&'"').cloned(),

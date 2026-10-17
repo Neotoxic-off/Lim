@@ -54,6 +54,10 @@ impl Operator {
 
 impl Editor {
     pub(super) fn apply(&mut self, op: Operator, a: Pos, b: Pos, span: Span) {
+        // Every operator starts here: a stale end (an old selection, a mark) is brought back to the last line;
+        // each operator clamps the column itself.
+        let last: usize = self.buf().last_line();
+        let (a, b): (Pos, Pos) = (Pos::new(a.line.min(last), a.col), Pos::new(b.line.min(last), b.col));
         let (start, end): (Pos, Pos) = if a <= b { (a, b) } else { (b, a) };
         match (op, span) {
             (Operator::Indent | Operator::Dedent, _) => self.shift(op == Operator::Indent, start.line..=end.line),

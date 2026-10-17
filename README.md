@@ -69,28 +69,47 @@ the start screen.
 | Text objects | `iw` `aw` `iW` `aW` `ip` `ap` `it` `at` (HTML/XML tags) `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
 | AstroNvim look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
 | Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
-| Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) |
-| Git | signs against the index · hunk jumps · branches, log, file log, status and stash pickers · `git browse` · lazygit in one key · status colors in the file tree |
+| Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) · Markdown preview beside the file, live as you type (`<Leader>um`) |
+| Git | signs against the index · hunk jumps · graph of every branch, log, file log, status and stash pickers with diffs · `git browse` · status colors in the file tree |
 | Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · sessions |
 | Windows | `\|` / `\` splits, `<C-h/j/k/l>`, `<C-arrows>` to resize, `<C-w>` family, zen mode, global statusline |
-| System | system clipboard (`clipboard=unnamedplus`, OSC 52 fallback over SSH) · `<F7>` shell, lazygit, node, python, btm, gdu |
+| System | system clipboard (`clipboard=unnamedplus`, OSC 52 fallback over SSH) · `<F7>` shell, node, python, btm, gdu |
 | Config | settings screen (`<Leader>,`) to search and change every option live and save it · one JSON file: Neovim option names, colorscheme, astrotheme palette, Neovim highlight groups, keymaps per mode, icon set |
 | Plugins | a folder with a `plugin.json` that adds options, colors, keymaps and `:Commands` · a command pipes the lines through a program in any language and puts its output back or shows it |
 | Robustness | atomic saves · refuses to clobber other files · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
 
 ## Install
 
-Requirements: Rust 1.88+, Linux, macOS or Windows 10+ (Windows Terminal or the console, not mintty). A [Nerd Font](https://www.nerdfonts.com) for the default icons
-(or `"iconset": "unicode"` / `"ascii"`). Truecolor is detected; other terminals get the 256-color palette.
+One line. The installer builds lim from source with Rust 1.88+ ([rustup](https://rustup.rs); on Windows with the
+MSVC build tools it offers) and puts it in `~/.cargo/bin`, which rustup already adds to your `PATH`.
+
+**Linux, macOS**
 
 ```sh
-git clone <this repo> lim && cd lim
-cargo build --release
-install -m 755 target/release/lim ~/.local/bin/lim   # Windows: copy target\release\lim.exe onto your PATH
+curl -fsSL https://raw.githubusercontent.com/Neotoxic-off/Lim/master/install.sh | sh
 ```
 
+**Windows** (cmd)
+
+```bat
+curl -fsSLo %TEMP%\lim-install.bat https://raw.githubusercontent.com/Neotoxic-off/Lim/master/install.bat && %TEMP%\lim-install.bat
+```
+
+**Windows** (PowerShell)
+
+```powershell
+curl.exe -fsSLo $env:TEMP\lim-install.bat https://raw.githubusercontent.com/Neotoxic-off/Lim/master/install.bat; & $env:TEMP\lim-install.bat
+```
+
+Run the same line again to update. Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim --locked`,
+or from a clone `cargo build --release` and copy `target/release/lim` (`lim.exe`) onto your `PATH`.
+
+Runs on Linux, macOS and Windows 10+ (Windows Terminal or the console, not mintty). A
+[Nerd Font](https://www.nerdfonts.com) for the default icons (or `"iconset": "unicode"` / `"ascii"`). Truecolor is
+detected; other terminals get the 256-color palette.
+
 Optional, picked up when installed: `wl-copy`/`xclip`/`xsel`/`pbcopy` (clipboard; Windows uses its own),
-`lazygit`, `node`, `python3`, `btm`, `gdu`, `xdg-open`/`open` (`gx`, `<Leader>go`; Windows uses `explorer`).
+`node`, `python3`, `btm`, `gdu`, `xdg-open`/`open` (`gx`, `<Leader>go`; Windows uses `explorer`).
 
 ## Usage
 
@@ -172,8 +191,8 @@ Inside a picker: type to filter, `<C-n>`/`<C-p>` (or arrows, `<C-j>`/`<C-k>`) to
 | Keys | Action |
 |---|---|
 | `]g` `[g` · `]G` `[G` | Next / previous hunk · last / first hunk |
-| `<Leader>gg` | lazygit |
-| `<Leader>gb` · `gc` · `gC` · `gt` · `gT` | Branches (switch) · log · log of this file · status · stash |
+| `<Leader>gg` | Graph of every branch (`git log --graph --all`); `<CR>` on a commit shows it |
+| `<Leader>gc` · `gC` · `gt` · `gT` | Log · log of this file · status · stash |
 | `<Leader>go` | Open the file and line on the git host |
 
 ### File tree
@@ -192,7 +211,7 @@ Inside a picker: type to filter, `<C-n>`/`<C-p>` (or arrows, `<C-j>`/`<C-k>`) to
 ### Terminal and tools
 
 `<F7>`, `<Leader>tf`, `<Leader>th`, `<Leader>tv` suspend lim and open your `$SHELL` (`%COMSPEC%` on Windows; `exit` comes back);
-`<Leader>tl` lazygit, `<Leader>tn` node, `<Leader>tp` python, `<Leader>tt` btm, `<Leader>tu` gdu.
+`<Leader>tn` node, `<Leader>tp` python, `<Leader>tt` btm, `<Leader>tu` gdu.
 Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
 
 ### Sessions
@@ -210,6 +229,7 @@ Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
 | `<Leader>un` · `ui` | Cycle line numbering · indent width (prompt) |
 | `<Leader>ur` · `uu` · `uz` · `uy` · `u\|` | References · URLs · colors · syntax · indent guides |
 | `<Leader>uN` · `uD` · `uZ` | Notifications · dismiss them · zen mode |
+| `<Leader>um` | Markdown preview beside Markdown buffers (*lim*) |
 
 ### Vim
 
@@ -298,7 +318,7 @@ show the section ends):
 **Start screen**: the Lernaean Hydra, lim's symbol, in three drawings. By default (`splash` = `"random"`) each start
 shows a random one among those that fit the window; set `"classic"`, `"braille"` or `"small"` to keep one. The
 braille ones are NvChad's hydra as found online: the [gist by kevinfengcs88](https://gist.github.com/kevinfengcs88/75457d6b401fbab2326450dcbf64a429)
-and the lettered one from [twitchquotes](https://www.twitchquotes.com/copypastas/3638).
+and the small one from [twitchquotes](https://www.twitchquotes.com/copypastas/3638).
 
 | | | |
 |---|---|---|
@@ -389,7 +409,7 @@ Each takes `fg`, `bg` (`"#RRGGBB"`), `bold`, `italic`, `underline`, or `link` to
 | Messages, floats | `MsgArea` `ErrorMsg` `NormalFloat` `FloatBorder` `FloatTitle` `PmenuSel` `SnacksNotifierInfo` `SnacksNotifierError` |
 | Completion | `BlinkCmpLabelMatch` `BlinkCmpKind` `BlinkCmpSource` (menu: `NormalFloat`, `FloatBorder`, `PmenuSel`) |
 | Git, TODO | `GitSignsAdd` `GitSignsChange` `GitSignsDelete` · `TodoFgFIX` `TodoFgTODO` `TodoFgHACK` `TodoFgWARN` `TodoFgPERF` `TodoFgNOTE` `TodoFgTEST` |
-| Plugins look-alikes | `WhichKey` `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksPickerMatch` `SnacksPickerDir` · `NeoTreeNormal` `NeoTreeRootName` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
+| Plugins look-alikes | `WhichKey` `WhichKeyNormal` (menu background, the editor's by default) `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksPickerMatch` `SnacksPickerDir` · `NeoTreeNormal` `NeoTreeRootName` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
 | lim | `LimCheatsheetKey` `LimCheatsheetDesc` (the start screen uses `Normal`) |
 
 ### Keymaps
@@ -505,9 +525,41 @@ unevenly.
 ## Development
 
 ```sh
-cargo test                     # 69 tests, including a random-key fuzz over every mode and screen size
+cargo test                     # 110+ tests: behaviour, fuzzers on every input, perf budgets
 cargo clippy --all-targets     # pedantic, zero warnings; unwrap/expect/panic are denied
 cargo fmt --check              # rustfmt.toml, 120 columns
+cargo test --release perf -- --nocapture   # the benchmark table: run it before and after a change
+LIM_FUZZ=30 cargo test --release fuzz      # a long fuzz session (LIM_FUZZ_SEED=<n> replays a failure)
+LIM_NVIM=nvim cargo test --release vs_neovim -- --ignored --nocapture   # lim against Neovim
 ```
+
+**No crash, no hang** (`src/fuzz.rs`): fuzzers feed random input to every entry point and check that nothing
+panics, hangs (a key over 3 s) or breaks the editor's invariants (cursor inside the text, valid buffers and
+windows). Random keys in every mode and screen size, mixed with phrases that reach every picker, the settings,
+`:g`, `:norm`, regexes, macros, visual block and so on, over Rust, Markdown, HTML, JSON, wide and combining
+characters and a 10 000-char line; random Ex command lines; random regexes (checked against a plain scan); random
+and corrupted config files; key notation; text helpers; Markdown and highlighting in ten languages. The long
+sessions found and fixed real bugs: a crash in line ranges (`:co-x` on non-ASCII text), a stale selection after
+`gv`, completion rescanning the file on every key, live grep re-reading every file on every key.
+
+**Performance budgets** (`src/perf.rs`) time the hot paths on a 10 000-line file: startup, opening, scrolling,
+typing with a frame per key, regex search, `:%s`, `:g`, `:g … norm`, undo, the Markdown preview and the lines
+picker. Each has a budget of about 3-5x its debug time, so `cargo test` fails on a real slowdown.
+
+**Against Neovim** (`vs_neovim`): the same operations on the same 10 000-line file, timed inside each editor, best
+of 5, Neovim 0.12 with `-u NONE` (no config, no plugins: its fastest). lim must win every row:
+
+| Operation | lim | Neovim | lim is |
+|---|---|---|---|
+| Open the file | 0.28 ms | 0.56 ms | 2.0x faster |
+| `:%s/\v(\w+): (\w+)/\2 \1/g` | 6.7 ms | 15.2 ms | 2.3x |
+| `:g/TODO/d` | 0.44 ms | 1.34 ms | 3.0x |
+| `:g/item/norm Ax` | 3.7 ms | 32.0 ms | 8.6x |
+| Regex search, `n` x50 | 0.29 ms | 0.79 ms | 2.8x |
+| Type 500 chars | 0.04 ms | 0.08 ms | 1.8x |
+| Undo + redo 300 steps | 0.93 ms | 52.0 ms | 56x |
+| `:sort` | 0.84 ms | 12.1 ms | 14x |
+
+(Linux in WSL, release build.)
 
 Screenshots are real lim frames captured in a pseudo-terminal and rasterised.

@@ -13,6 +13,7 @@ use std::io::{self, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::string::FromUtf8Error;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use crate::error::Error;
 use crate::syntax::{self, Hl, Lang};
@@ -47,9 +48,9 @@ pub struct Buffer {
     pub title: Option<String>,
     /// Positions the jump list points at, kept in step with edits like marks.
     anchors: HashMap<u64, Pos>,
-    /// Bumped on every change (unlike `version`, which typing within one undo step keeps).
+    /// See `revision()`.
     revision: u64,
-    /// Completion words and the revision they were read at.
+    /// Completion words and the undo state they were read at.
     word_cache: (u64, Vec<String>),
     lines: Vec<String>,
     crlf: bool,
@@ -74,7 +75,7 @@ impl Buffer {
             marks: HashMap::new(),
             title: None,
             anchors: HashMap::new(),
-            revision: 0,
+            revision: next_revision(),
             word_cache: (u64::MAX, Vec::new()),
             path,
             cursor: Pos::default(),
@@ -187,7 +188,7 @@ impl Buffer {
         self.path = Some(path);
     }
 
-    /// Re-reads an unmodified buffer whose file changed on disk (after a shell or lazygit).
+    /// Re-reads an unmodified buffer whose file changed on disk (after a shell or another program).
     pub fn reload_if_changed(&mut self) {
         let Some(path): Option<PathBuf> = self.path.clone() else { return };
         if self.is_dirty() {
@@ -204,6 +205,12 @@ impl Buffer {
             self.clamp(false);
             self.load_git_base();
         }
+    }
+
+    /// New on every change, typing included (`version` stays the same within one undo step), and never the same
+    /// as another buffer's: caches keyed on it need no buffer identity.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Changes whenever the text does (edits, undo, redo).
@@ -261,7 +268,7 @@ impl Buffer {
 
     pub fn undo(&mut self) -> bool {
         self.syntax.invalidate(0);
-        self.revision += 1;
+        self.revision = next_revision();
         let (marks, anchors): (&mut HashMap<char, Pos>, &mut HashMap<u64, Pos>) = (&mut self.marks, &mut self.anchors);
         let cursor: Option<Pos> = self
             .history
@@ -271,7 +278,7 @@ impl Buffer {
 
     pub fn redo(&mut self) -> bool {
         self.syntax.invalidate(0);
-        self.revision += 1;
+        self.revision = next_revision();
         let (marks, anchors): (&mut HashMap<char, Pos>, &mut HashMap<u64, Pos>) = (&mut self.marks, &mut self.anchors);
         let cursor: Option<Pos> = self
             .history
@@ -279,19 +286,25 @@ impl Buffer {
         cursor.map(|p| self.cursor = p).is_some()
     }
 
-    /// Words for completion, re-read only when the text changed. Huge files contribute the
-    /// lines around the cursor only.
-    pub fn words(&mut self) -> &[String] {
+    /// Re-reads the completion words if the text changed since, at undo-step granularity: typing one insert
+    /// keeps the list (rescanning a big file on every key was the slowest part of typing). Huge files
+    /// contribute the lines around the cursor only.
+    pub fn refresh_words(&mut self) {
         const WINDOW: usize = 5_000;
-        if self.word_cache.0 != self.revision {
+        let state: u64 = self.history.state();
+        if self.word_cache.0 != state {
             let lines: &[String] = if self.lines.len() > 4 * WINDOW {
                 let from: usize = self.cursor.line.saturating_sub(WINDOW);
                 &self.lines[from..(self.cursor.line + WINDOW).min(self.lines.len())]
             } else {
                 &self.lines[..]
             };
-            self.word_cache = (self.revision, crate::editor::words_of(lines));
+            self.word_cache = (state, crate::editor::words_of(lines));
         }
+    }
+
+    /// The completion words as of the last `refresh_words`.
+    pub fn words(&self) -> &[String] {
         &self.word_cache.1
     }
 
@@ -310,9 +323,71 @@ impl Buffer {
 
     /// The single mutation point: every edit goes through here so it is undoable.
     pub fn splice(&mut self, range: Range<usize>, new: Vec<String>) {
-        self.syntax.invalidate(range.start);
-        self.revision += 1;
         shift_positions(&mut self.marks, &mut self.anchors, range.start, range.len(), new.len());
+        self.replace(range, new);
+    }
+
+    /// Deletes the sorted `marked` lines in one pass and one change, returning them in order. It is what
+    /// `:g/x/d` does line by line, without moving the rest of the file once per deleted line. Marks and
+    /// anchors stay on their lines; on a deleted line they behave as with `splice`.
+    pub fn delete_lines(&mut self, marked: &[usize]) -> Vec<String> {
+        let last_line: usize = self.last_line();
+        let marked: Vec<usize> = marked.iter().copied().filter(|&y| y <= last_line).collect();
+        let (Some(&first), Some(&last)): (Option<&usize>, Option<&usize>) = (marked.first(), marked.last()) else {
+            return Vec::new();
+        };
+        // `before[i]`: deleted lines above `first + i`, so a kept line moves up by that much.
+        let mut gone: Vec<bool> = vec![false; last - first + 1];
+        for &y in &marked {
+            gone[y - first] = true;
+        }
+        let before: Vec<usize> = gone
+            .iter()
+            .scan(0, |count, &g| {
+                let above: usize = *count;
+                *count += usize::from(g);
+                Some(above)
+            })
+            .collect();
+        let deleted: usize = marked.len();
+        let kept_last: usize = last_line - deleted;
+        let moved = |p: &mut Pos| -> bool {
+            if p.line > last {
+                p.line -= deleted;
+            } else if p.line >= first {
+                let i: usize = p.line - first;
+                p.line = (p.line - before[i]).min(kept_last);
+                if gone[i] {
+                    p.col = 0;
+                    return false;
+                }
+            }
+            true
+        };
+        self.marks.retain(|name, p| moved(p) || !name.is_ascii_lowercase());
+        self.anchors.retain(|id, p| moved(p) || id & DROP_ON_DELETE == 0);
+        let mut removed: Vec<String> = Vec::with_capacity(deleted);
+        let mut kept: Vec<String> = Vec::with_capacity(gone.len() - deleted);
+        for (line, &g) in self.lines[first..=last].iter().zip(&gone) {
+            if g { &mut removed } else { &mut kept }.push(line.clone());
+        }
+        self.replace(first..last + 1, kept);
+        removed
+    }
+
+    /// Replaces lines and records the change for undo; marks are the caller's to move.
+    fn replace(&mut self, range: Range<usize>, mut new: Vec<String>) {
+        self.syntax.invalidate(range.start);
+        self.revision = next_revision();
+        // Each key typed on one line: swap the line in place, the run's first snapshot already undoes it.
+        if range.len() == 1
+            && new.len() == 1
+            && self.history.absorb(range.start)
+            && let Some(line) = new.pop()
+        {
+            self.lines[range.start] = line;
+            return;
+        }
         let new_len: usize = new.len();
         let old: Vec<String> = self.lines.splice(range.clone(), new).collect();
         self.history.record(Change { at: range.start, old, new_len, cursor: self.cursor });
@@ -352,6 +427,11 @@ impl Buffer {
     /// Inserts `s` (which may hold '\n') at `at`; returns the position right after it.
     pub fn insert(&mut self, at: Pos, s: &str) -> Pos {
         let (head, tail): (&str, &str) = self.lines[at.line].split_at(self.byte(at));
+        if !s.contains('\n') {
+            let line: String = [head, s, tail].concat();
+            self.set_line(at.line, line);
+            return Pos::new(at.line, at.col + text::char_len(s));
+        }
         let mut parts: Vec<String> = s.split('\n').map(str::to_owned).collect();
         let last: usize = parts.len() - 1;
         let end_col: usize = if last == 0 { at.col } else { 0 } + text::char_len(&parts[last]);
@@ -394,6 +474,13 @@ impl Buffer {
     fn byte(&self, p: Pos) -> usize {
         text::byte_index(&self.lines[p.line], p.col)
     }
+}
+
+/// Source of `Buffer::revision`: one counter for all buffers, so a revision never repeats between them.
+static REVISIONS: AtomicU64 = AtomicU64::new(0);
+
+fn next_revision() -> u64 {
+    REVISIONS.fetch_add(1, Relaxed) + 1
 }
 
 /// Anchors with this bit set vanish when their line is deleted (the lines `:g` still has to visit).

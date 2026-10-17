@@ -41,6 +41,10 @@ pub struct Regex {
     branches: Vec<Vec<Node>>,
     groups: usize,
     ignore_case: bool,
+    /// Text every match contains (the longest run of plain chars): a line without it is skipped whole.
+    required: Option<String>,
+    /// The char every match starts with: other start positions are not tried.
+    first: Option<char>,
 }
 
 /// One match: char ranges of the whole match and of each `\(…\)` group.
@@ -69,19 +73,43 @@ impl Regex {
         if parser.at < chars.len() {
             return Err("E54: Unmatched \\)".into());
         }
-        Ok(Self { branches, groups: parser.groups, ignore_case: parser.case.unwrap_or(ignore_case) })
+        let ignore_case: bool = parser.case.unwrap_or(ignore_case);
+        // Shortcuts are exact only for a single branch, and for chars case folding cannot change.
+        let plain = |node: &Node| match node {
+            Node::Char(c) if !ignore_case || fold(*c) == upper(*c) => Some(*c),
+            _ => None,
+        };
+        let (required, first): (Option<String>, Option<char>) = match &branches[..] {
+            [only] => {
+                let runs = only.split(|n| plain(n).is_none()).filter(|run| !run.is_empty());
+                let longest: Option<&[Node]> = runs.max_by_key(|run| run.len());
+                (longest.map(|run| run.iter().filter_map(plain).collect()), only.first().and_then(plain))
+            }
+            _ => (None, None),
+        };
+        Ok(Self { branches, groups: parser.groups, ignore_case, required, first })
     }
 
     /// Every non-overlapping match in `line`, left to right.
     pub fn find_all(&self, line: &str) -> Vec<Match> {
+        if self.required.as_deref().is_some_and(|text| !line.contains(text)) {
+            return Vec::new();
+        }
         let chars: Vec<char> = line.chars().collect();
         let budget: Cell<usize> = Cell::new(BUDGET);
         let matcher: Matcher<'_> =
             Matcher { chars: &chars, ignore_case: self.ignore_case, budget: &budget, depth: Cell::new(0) };
         let mut found: Vec<Match> = Vec::new();
+        let mut caps: Caps = vec![None; self.groups + 1];
         let mut start: usize = 0;
         while start <= chars.len() {
-            let Some(m): Option<Match> = self.match_at(&matcher, start) else {
+            if let Some(c) = self.first {
+                match chars[start..].iter().position(|&x| x == c) {
+                    Some(skip) => start += skip,
+                    None => break,
+                }
+            }
+            let Some(m): Option<Match> = self.match_at(&matcher, start, &mut caps) else {
                 start += 1;
                 continue;
             };
@@ -95,17 +123,25 @@ impl Regex {
         found
     }
 
-    fn match_at(&self, matcher: &Matcher<'_>, start: usize) -> Option<Match> {
-        let mut caps: Caps = vec![None; self.groups + 1];
+    /// The same pattern scanning every position of every line, to check the shortcuts against.
+    #[cfg(test)]
+    pub fn without_shortcuts(&self) -> Self {
+        Self { required: None, first: None, ..self.clone() }
+    }
+
+    /// The match starting at `start`, if any; `caps` is scratch space reused across positions.
+    fn match_at(&self, matcher: &Matcher<'_>, start: usize, caps: &mut Caps) -> Option<Match> {
+        caps.fill(None);
         let mut end: Option<usize> = None;
         self.branches.iter().any(|branch| {
-            matcher.seq(branch, start, &mut caps, &mut |pos: usize, _: &mut Caps| {
+            matcher.seq(branch, start, caps, &mut |pos: usize, _: &mut Caps| {
                 end = Some(pos);
                 true
             })
         });
+        let end: usize = end?;
         let groups: Vec<Option<Range<usize>>> = caps.iter().skip(1).map(|c| c.map(|(a, b)| a..b)).collect();
-        Some(Match { range: start..end?, groups })
+        Some(Match { range: start..end, groups })
     }
 }
 
@@ -473,6 +509,20 @@ mod tests {
         assert!(Regex::new("\\(a", false).is_err());
         assert!(Regex::new("[a", false).is_err());
         assert!(Regex::new("a\\)", false).is_err());
+    }
+
+    #[test]
+    fn shortcuts_keep_the_same_matches() {
+        let re: Regex = Regex::new("TODO", false).unwrap();
+        assert_eq!((re.required.as_deref(), re.first), (Some("TODO"), Some('T')));
+        let re: Regex = Regex::new("\\v(\\w+): (\\w+)", false).unwrap();
+        assert_eq!((re.required.as_deref(), re.first), (Some(": "), None));
+        let re: Regex = Regex::new("ab\\|cd", false).unwrap();
+        assert_eq!((re.required.as_deref(), re.first), (None, None), "no shortcut across alternatives");
+        let re: Regex = Regex::new("abc", true).unwrap();
+        assert_eq!((re.required.as_deref(), re.first), (None, None), "letters fold when ignoring case");
+        assert_eq!(spans("x\\d", "a x1 xx x2"), vec![2..4, 8..10]);
+        assert_eq!(Regex::new("Ab1", true).unwrap().find_all("aB1 ab1").len(), 2);
     }
 
     /// Nested repeats on a long line stop at the step budget instead of hanging.

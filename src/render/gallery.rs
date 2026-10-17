@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use super::icons::SETS;
 use super::palettes::{DEFAULT, THEMES};
 use super::row::{Cell, Grid};
-use super::theme::{Rgb, Style};
+use super::theme::{Group, Rgb, Style, theme};
 use super::{Screen, apply_colorscheme};
 use crate::buffer::Buffer;
 use crate::config::{Config, Splash, StatusStyle};
@@ -176,4 +176,20 @@ fn settings_hide_the_bars() {
     let (grid, _): (Grid, Option<(usize, usize)>) = Screen::new(ColorDepth::TrueColor).compose(&mut ed, 80, 20);
     let bg: Rgb = grid.row(1)[1].style.bg;
     assert!(grid.row(19).iter().all(|c| c.style.bg == bg), "the bottom border keeps the float's background");
+}
+
+/// The which-key menu, frame included, has exactly the editor's background (nvchad, the default theme).
+#[test]
+fn which_key_has_the_editor_background() {
+    apply_colorscheme(DEFAULT, &Config::default());
+    let mut ed: Editor = Editor::new(&[]);
+    ed.dashboard = false;
+    ed.handle(Key::Char(' '));
+    let (grid, _): (Grid, Option<(usize, usize)>) = Screen::new(ColorDepth::TrueColor).compose(&mut ed, 120, 14);
+    let editor: Rgb = theme().bg(Group::Normal);
+    let menu_rows: Vec<usize> = (0..14).filter(|&y| grid.row(y).iter().any(|c| c.ch == '╭' || c.ch == '╰')).collect();
+    assert_eq!(menu_rows.len(), 2, "the menu's top and bottom borders are on screen");
+    for y in menu_rows[0]..=menu_rows[1] {
+        assert!(grid.row(y).iter().all(|c| c.style.bg == editor), "row {y} has another background");
+    }
 }

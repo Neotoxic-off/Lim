@@ -185,6 +185,48 @@ fn escape(bytes: &[u8]) -> Option<(Key, usize)> {
 mod tests {
     use super::*;
 
+    /// Any bytes the terminal sends (escape sequences cut anywhere, UTF-8 halves, garbage) decode without
+    /// panicking, and every key consumes at least one byte and no more than there are.
+    #[test]
+    fn decodes_any_bytes() {
+        let pieces: &[&[u8]] = &[
+            b"\x1b",
+            b"[",
+            b"O",
+            b"1;5A",
+            b"A",
+            b"~",
+            b"3",
+            b";",
+            b"2",
+            b"<",
+            b"M",
+            b"\x7f",
+            b"\r",
+            b"\t",
+            b"x",
+            b"\x00",
+            b"\x1e",
+            "é".as_bytes(),
+            &[0xe6, 0x97],
+            &[0xff],
+            &[0xc3],
+        ];
+        let mut state: u64 = 17;
+        let mut next = |n: usize| {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(state >> 33).unwrap_or(0) % n
+        };
+        for _ in 0..20_000 {
+            let bytes: Vec<u8> = (0..next(12)).flat_map(|_| pieces[next(pieces.len())].iter().copied()).collect();
+            let mut rest: &[u8] = &bytes;
+            while let Some((_, used)) = decode(rest) {
+                assert!((1..=rest.len()).contains(&used), "{bytes:?}: used {used} of {}", rest.len());
+                rest = &rest[used..];
+            }
+        }
+    }
+
     #[test]
     fn decodes_keys() {
         assert_eq!(decode(b"\x1b[A"), Some((Key::Up, 3)));

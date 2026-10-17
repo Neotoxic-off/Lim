@@ -248,7 +248,7 @@ impl Editor {
         self.substitute(LineRange { first: line, last: line }, &pattern, &replacement, global);
     }
 
-    /// After a shell or lazygit: unmodified buffers whose file changed on disk are reloaded.
+    /// After a shell or another program: unmodified buffers whose file changed on disk are reloaded.
     pub fn reload_changed_buffers(&mut self) {
         for buf in &mut self.buffers {
             buf.reload_if_changed();
@@ -286,6 +286,10 @@ impl Editor {
             let mut y: usize = base(&s[..cut])?;
             let mut rest: &str = &s[cut..];
             while let Some(sign) = rest.chars().next() {
+                // Only `+N` / `-N` may follow; anything else makes the address invalid.
+                if !matches!(sign, '+' | '-') {
+                    return None;
+                }
                 let digits: usize = rest[1..].bytes().take_while(u8::is_ascii_digit).count();
                 let n: usize = if digits == 0 { 1 } else { rest[1..=digits].parse().ok()? };
                 y = if sign == '+' { y.saturating_add(n).min(last) } else { y.saturating_sub(n) };

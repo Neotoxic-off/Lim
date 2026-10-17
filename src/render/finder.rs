@@ -29,7 +29,7 @@ pub fn picker(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
     let (x, y): (usize, usize) = ((sw - w) / 2, (sh - h) / 2);
     let list_w: usize = if w >= 80 { w * 45 / 100 } else { w };
     let fill: Style = t.style(Group::NormalFloat);
-    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let border: Style = t.style(Group::FloatBorder);
     let title: Style = t.on(Group::FloatTitle, fill.bg);
 
     // Input.

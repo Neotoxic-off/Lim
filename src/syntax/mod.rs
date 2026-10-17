@@ -4,7 +4,7 @@
 mod lang;
 mod todo;
 
-use lang::Kind;
+pub use lang::Kind;
 pub use lang::{Lang, lang_for};
 pub use todo::{Todo, todo};
 

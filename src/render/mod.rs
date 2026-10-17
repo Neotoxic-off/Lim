@@ -6,6 +6,7 @@ mod finder;
 mod gallery;
 mod home;
 pub mod icons;
+pub mod markdown;
 pub mod palettes;
 mod popup;
 mod row;
@@ -163,6 +164,7 @@ impl Screen {
 
     /// The frame as cells, and the cursor's screen cell if it shows.
     fn compose(&mut self, ed: &mut Editor, width: usize, height: usize) -> (Grid, Option<(usize, usize)>) {
+        ed.refresh_completion();
         let t: Arc<Theme> = theme();
         let options: Options = ed.options.clone();
         let mut grid: Grid = Grid::new(width, height, t.style(Group::Normal));
@@ -184,11 +186,16 @@ impl Screen {
         let mut cursor: Option<(usize, usize)> = None;
         if tree_width > 0 {
             cursor = tree::explorer(ed, &mut grid, Rect { w: tree_width, ..area });
-            let border: theme::Style = theme().style(Group::WinSeparator);
-            for y in area.y..area.y + area.h {
-                grid.text(tree_width, y, 1, border, "\u{2502}");
-            }
+            grid.vline(tree_width, area.y..area.y + area.h, theme().style(Group::WinSeparator));
             area = Rect { x: tree_width + 1, w: width - tree_width - 1, ..area };
+        }
+        // The Markdown preview takes the right half, past a separator, while a Markdown buffer is shown.
+        if ed.markdown_preview && !ed.zen && area.w >= 40 && markdown::is_markdown(ed.buf()) {
+            let panel_width: usize = area.w / 2;
+            area.w -= panel_width + 1;
+            let separator: usize = area.x + area.w;
+            grid.vline(separator, area.y..area.y + area.h, theme().style(Group::WinSeparator));
+            markdown::preview(ed, &mut grid, Rect { x: separator + 1, w: panel_width, ..area });
         }
         let windows_cursor: Option<(usize, usize)> = if ed.zen {
             // snacks.zen: the focused window alone, centred, at most 120 columns wide.
@@ -209,7 +216,7 @@ impl Screen {
         popup::completion(ed, &mut grid, cursor);
         popup::which_key(ed, &mut grid, area);
         if status == 1 {
-            // The branch can change under us (lazygit, `<Leader>gb`): re-read HEAD, a tiny file.
+            // The branch can change under us (a shell, another terminal): re-read HEAD, a tiny file.
             self.ctx.branch = env::current_dir().ok().and_then(git_branch);
             bars::statusline(ed, &self.ctx, &mut grid, top + text_height);
         }
@@ -254,9 +261,7 @@ impl Screen {
         let border: theme::Style = theme().style(Group::WinSeparator);
         for sep in separators {
             if sep.vertical {
-                for y in sep.y..sep.y + sep.len {
-                    grid.text(sep.x, y, 1, border, "\u{2502}");
-                }
+                grid.vline(sep.x, sep.y..sep.y + sep.len, border);
             } else {
                 grid.text(sep.x, sep.y, sep.len, border, &"\u{2500}".repeat(sep.len));
             }
@@ -270,6 +275,7 @@ mod tests {
     use std::str::Chars;
 
     use super::*;
+    use crate::buffer::Buffer;
     use crate::term::Key;
 
     /// Every mode and odd sizes render without panicking.
@@ -311,7 +317,7 @@ mod tests {
     fn draws_floats() {
         let mut ed: Editor = Editor::new(&[]);
         ed.dashboard = false;
-        ed.buffers.push(crate::buffer::Buffer::from_text(Some("other.rs".into()), "x"));
+        ed.buffers.push(Buffer::from_text(Some("other.rs".into()), "x"));
         let mut screen: Screen = Screen::new(ColorDepth::TrueColor);
         let mut press = |ed: &mut Editor, keys: &[Key], expect: &str| {
             ed.handle(Key::Esc);
@@ -331,67 +337,12 @@ mod tests {
         press(&mut ed, &[Key::Char(' ')], "+Find");
         let setup: Vec<Key> = ":settings".chars().map(Key::Char).chain([Key::Enter]).collect();
         press(&mut ed, &setup, "statusline_style");
-    }
-}
-
-#[cfg(test)]
-mod fuzz {
-    use super::*;
-    use crate::buffer::Buffer;
-    use crate::term::Key;
-
-    /// Random keys in every mode, frames at random sizes: nothing may panic or hang.
-    #[test]
-    fn random_keys_never_crash() {
-        let alphabet: Vec<Key> =
-            "hjklwbeWBE0^$%{}gGfFtTnN*#iaIAoOxXsSDCYpPJ~ruvV.q@:/<>dcy|\\ 123456789()[]{}\"'`;,-_=+abc\u{e9}日"
-                .chars()
-                .map(Key::Char)
-                .chain([
-                    Key::Esc,
-                    Key::Enter,
-                    Key::Backspace,
-                    Key::Tab,
-                    Key::BackTab,
-                    Key::Up,
-                    Key::Down,
-                    Key::Left,
-                    Key::Right,
-                    Key::Home,
-                    Key::End,
-                    Key::Delete,
-                    Key::PageUp,
-                    Key::PageDown,
-                    Key::F(7),
-                    Key::ShiftUp,
-                    Key::ShiftDown,
-                    Key::ShiftLeft,
-                    Key::ShiftRight,
-                    Key::Unknown,
-                ])
-                .chain(('a'..='z').map(Key::Ctrl))
-                .collect();
-        for seed in [1u64, 7, 42, 2026] {
-            let mut ed: Editor = Editor::new(&[]);
-            ed.dashboard = false;
-            ed.buffers[0] = Buffer::from_text(Some("fuzz.rs".into()), "fn main() {\n    let x = \"a\";\n}\n\n/* c\n*/");
-            let mut screen: Screen = Screen::new(ColorDepth::Ansi256);
-            let mut state: u64 = seed;
-            let mut next = move |n: usize| {
-                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                (state >> 33) as usize % n
-            };
-            for step in 0..20_000 {
-                let key: Key = alphabet[next(alphabet.len())];
-                ed.handle(key);
-                ed.quit = false;
-                ed.shell_requested = None;
-                if step % 97 == 0 {
-                    ed.tick();
-                    let size: Size = Size { cols: 1 + next(140), rows: 1 + next(50) };
-                    screen.draw(&mut ed, size);
-                }
-            }
-        }
+        // `<Leader>um` beside a Markdown buffer shows it rendered: no `**`, the bullet drawn.
+        // Paragraphs first, so the bullet sits below the "enabled" notification in the top right corner.
+        let notes: &str = "# Notes\none\n\ntwo\n\nthree\n\n- **bold** point";
+        ed.buffers.push(Buffer::from_text(Some("notes.md".into()), notes));
+        ed.handle(Key::Esc);
+        ed.current = ed.buffers.len() - 1;
+        press(&mut ed, &[Key::Char(' '), Key::Char('u'), Key::Char('m')], "• bold point");
     }
 }

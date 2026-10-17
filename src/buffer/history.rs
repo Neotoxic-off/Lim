@@ -45,7 +45,21 @@ impl History {
         self.undo.last().map_or(0, |g| g.id)
     }
 
+    /// Typing on one line: a one-line change of `line` continuing the current group's last change needs no
+    /// record, since that first snapshot already reverts the whole run. Clears redo as any change does.
+    pub fn absorb(&mut self, line: usize) -> bool {
+        let continues: bool = !self.sealed
+            && self.undo.last().and_then(|g| g.changes.last()).is_some_and(|c| c.at == line && c.new_len == 1);
+        if continues {
+            self.redo.clear();
+        }
+        continues
+    }
+
     pub fn record(&mut self, change: Change) {
+        if change.new_len == 1 && change.old.len() == 1 && self.absorb(change.at) {
+            return;
+        }
         self.redo.clear();
         if self.sealed || self.undo.is_empty() {
             self.next_id += 1;
@@ -56,15 +70,6 @@ impl History {
             self.sealed = false;
         }
         let Some(group): Option<&mut Group> = self.undo.last_mut() else { return };
-        // Typing on one line: the first snapshot of that line already reverts the whole run.
-        if let Some(last) = group.changes.last()
-            && last.at == change.at
-            && last.new_len == 1
-            && change.new_len == 1
-            && change.old.len() == 1
-        {
-            return;
-        }
         group.changes.push(change);
     }
 

@@ -16,8 +16,8 @@ const MAX_ROWS: usize = 12;
 pub fn which_key(ed: &Editor, grid: &mut Grid, area: Rect) {
     let Some((title, entries)): Option<(String, Vec<MenuEntry>)> = ed.which_key() else { return };
     let t: Arc<Theme> = theme();
-    let fill: Style = t.style(Group::NormalFloat);
-    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let fill: Style = t.style(Group::WhichKeyNormal);
+    let border: Style = t.style(Group::FloatBorder);
     let arrow: String = format!(" {} ", super::icons::icons(&ed.options).arrow);
     let arrow: &str = arrow.as_str();
     let cell_width: usize = entries
@@ -51,7 +51,7 @@ pub fn prompt(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
     let prompt: &Prompt = ed.prompt.as_ref()?;
     let t: Arc<Theme> = theme();
     let fill: Style = t.style(Group::NormalFloat);
-    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let border: Style = t.style(Group::FloatBorder);
     let width: usize = (text::str_width(&prompt.text) + 6).max(40).min(grid.width.saturating_sub(4));
     if width < 10 || grid.height < 4 {
         return None;
@@ -72,7 +72,7 @@ pub fn cheatsheet(ed: &Editor, grid: &mut Grid) {
     let Some(sheet): &Option<Cheatsheet> = &ed.cheatsheet else { return };
     let t: Arc<Theme> = theme();
     let fill: Style = t.style(Group::NormalFloat);
-    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let border: Style = t.style(Group::FloatBorder);
     let (w, h): (usize, usize) =
         ((grid.width * 9 / 10).max(grid.width.min(30)), (grid.height * 9 / 10).max(grid.height.min(8)));
     if w < 24 || h < 6 {
@@ -130,14 +130,12 @@ pub fn setup(ed: &Editor, grid: &mut Grid) {
     let Some(setup): &Option<Setup> = &ed.setup else { return };
     let t: Arc<Theme> = theme();
     let fill: Style = t.style(Group::NormalFloat);
-    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let border: Style = t.style(Group::FloatBorder);
     let (w, h): (usize, usize) = (grid.width, grid.height);
     if w < 30 || h < 7 {
         return;
     }
     let area: Rect = Rect { x: 0, y: 0, w, h };
-    // Float borders keep the background under them; here that would be the bars' colors.
-    grid.fill(area, fill);
     grid.float(area, border, fill, "Settings");
     let hint: Style = Style { fg: t.fg(Group::Comment), ..fill };
     let search: String = if setup.typing {
@@ -199,7 +197,7 @@ pub fn completion(ed: &Editor, grid: &mut Grid, cursor: Option<(usize, usize)>) 
     let t: Arc<Theme> = theme();
     let set: &Icons = super::icons::icons(&ed.options);
     let fill: Style = t.style(Group::NormalFloat);
-    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let border: Style = t.style(Group::FloatBorder);
     let shown: usize = menu.items.len().min(crate::editor::MENU_HEIGHT);
     let first: usize = menu.selected.map_or(0, |s| s.saturating_sub(shown - 1));
     let label_width: usize = menu.items.iter().map(|w| text::str_width(w)).max().unwrap_or(0);
@@ -235,7 +233,7 @@ pub fn cmd_completion(ed: &Editor, grid: &mut Grid) {
     let Some(menu): &Option<CmdCompletion> = &ed.cmd_completion else { return };
     let t: Arc<Theme> = theme();
     let fill: Style = t.style(Group::NormalFloat);
-    let border: Style = t.on(Group::FloatBorder, fill.bg);
+    let border: Style = t.style(Group::FloatBorder);
     let shown: usize = menu.items.len().min(crate::editor::MENU_HEIGHT);
     let first: usize = menu.selected.map_or(0, |s| s.saturating_sub(shown - 1));
     let label: usize = menu.items.iter().map(|(c, _)| text::str_width(c)).max().unwrap_or(0);

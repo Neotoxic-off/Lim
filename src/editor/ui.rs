@@ -140,6 +140,10 @@ impl Editor {
                 self.zen = !self.zen;
                 ("zen mode", self.zen)
             }
+            Toggle::MarkdownPreview => {
+                self.markdown_preview = !self.markdown_preview;
+                ("Markdown preview", self.markdown_preview)
+            }
             Toggle::Indent => {
                 let width: String = if o.expandtab { o.indent_width().to_string() } else { format!("-{}", o.tabstop) };
                 return self.open_prompt(

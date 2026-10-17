@@ -112,22 +112,23 @@
 <text x="333" y="193" fill="#a89984">▏</text>
 <text x="369 378 387 396 405 414" y="193" fill="#3c3836">counts</text>
 <rect x="0" y="198" width="900" height="18" fill="#fbf1c7"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162" y="211" fill="#3c3836">▫PONYTAIL-DEBT.md</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117" y="211" fill="#3c3836">▫install.bat</text>
 <text x="270" y="211" fill="#bdae93">│</text>
 <text x="306" y="211" fill="#a89984">1</text>
 <text x="333" y="211" fill="#3c3836">}</text>
 <rect x="0" y="216" width="900" height="18" fill="#fbf1c7"/>
-<text x="9 27 36 45 54 63 72 81 90 99" y="229" fill="#3c3836">▫README.md</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108" y="229" fill="#3c3836">▫install.sh</text>
 <text x="270" y="229" fill="#bdae93">│</text>
 <text x="306" y="229" fill="#a89984">2</text>
 <rect x="0" y="234" width="900" height="18" fill="#fbf1c7"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="247" fill="#3c3836">▫rustfmt.toml</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162" y="247" fill="#3c3836">▫PONYTAIL-DEBT.md</text>
 <text x="270" y="247" fill="#bdae93">│</text>
 <text x="306" y="247" fill="#a89984">3</text>
 <text x="333 342" y="247" fill="#9d0006">fn</text>
 <text x="360 369 378 387" y="247" fill="#79740e">main</text>
 <text x="396 405 423" y="247" fill="#3c3836">(){</text>
 <rect x="0" y="252" width="900" height="18" fill="#fbf1c7"/>
+<text x="9 27 36 45 54 63 72 81 90 99" y="265" fill="#3c3836">▫README.md</text>
 <text x="270" y="265" fill="#bdae93">│</text>
 <text x="306" y="265" fill="#a89984">4</text>
 <text x="333" y="265" fill="#a89984">▏</text>
@@ -139,6 +140,7 @@
 <rect x="0" y="270" width="405" height="18" fill="#fbf1c7"/>
 <rect x="405" y="270" width="54" height="18" fill="#d5c4a1"/>
 <rect x="459" y="270" width="441" height="18" fill="#fbf1c7"/>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="283" fill="#3c3836">▫rustfmt.toml</text>
 <text x="270" y="283" fill="#bdae93">│</text>
 <text x="306" y="283" fill="#a89984">5</text>
 <text x="333" y="283" fill="#a89984">▏</text>

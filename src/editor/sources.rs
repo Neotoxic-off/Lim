@@ -1,11 +1,11 @@
-//! Picker sources beyond files: git (branches, log, status, stash), config files, recent in the
+//! Picker sources beyond files: git (graph, log, status, stash), config files, recent in the
 //! working directory, notifications, registers, marks, colorschemes, icon sets and sessions.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use super::picker::{Item, PickerKind, Preview, Target, file_items};
-use super::{Editor, Message, Mode, Picker, may_spawn, session};
+use super::{Editor, Message, Mode, Picker, session};
 use crate::buffer::{Buffer, Pos};
 
 /// Git log entries listed at most.
@@ -14,18 +14,6 @@ const MAX_COMMITS: &str = "500";
 fn git(args: &[&str]) -> Option<String> {
     let out: Output = Command::new("git").args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-fn git_or_error(args: &[&str]) -> Result<String, String> {
-    if !may_spawn() {
-        return Err("disabled in tests".into());
-    }
-    let out: Output = Command::new("git").args(args).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
-    }
 }
 
 fn lines_of(output: &str) -> impl Iterator<Item = &str> {
@@ -37,12 +25,26 @@ impl Editor {
     #[expect(clippy::too_many_lines, reason = "flat dispatch: one arm per picker source")]
     pub(super) fn extra_items(&mut self, kind: PickerKind) -> Option<Vec<Item>> {
         let items: Vec<Item> = match kind {
-            PickerKind::GitBranches => {
-                let out: String = git(&["branch", "--all", "--format=%(HEAD) %(refname:short)"])?;
+            PickerKind::GitGraph => {
+                let out: String = git(&[
+                    "log",
+                    "--graph",
+                    "--all",
+                    "--decorate",
+                    "--date-order",
+                    "--date=short",
+                    "--pretty=format:%h %ad %d %s",
+                    "-n",
+                    MAX_COMMITS,
+                ])?;
+                // Lines with a commit open it; the ones that only draw the graph do nothing.
                 lines_of(&out)
                     .map(|l| {
-                        let name: String = l.get(1..).unwrap_or_default().trim().to_owned();
-                        Item { label: l.to_owned(), target: Target::Branch(name) }
+                        let hash: &str = l.trim_start_matches(|c: char| "*|/\\_ .-".contains(c));
+                        let hash: &str = hash.split(' ').next().unwrap_or_default();
+                        let is_commit: bool = hash.len() >= 7 && hash.bytes().all(|b| b.is_ascii_hexdigit());
+                        let target: Target = if is_commit { Target::Commit(hash.to_owned()) } else { Target::Nothing };
+                        Item { label: l.to_owned(), target }
                     })
                     .collect()
             }
@@ -164,7 +166,6 @@ impl Editor {
                 git(&["show", "--stat", "--patch", hash]).map(|o| (format!("commit {hash}"), o))
             }
             Some(Target::Stash(name)) => git(&["stash", "show", "-p", name]).map(|o| (name.clone(), o)),
-            Some(Target::Branch(name)) => git(&["log", "--oneline", "-n", "50", name]).map(|o| (name.clone(), o)),
             _ => None,
         };
         picker.preview =
@@ -176,16 +177,6 @@ impl Editor {
 
     pub(super) fn accept_extra(&mut self, target: Target) {
         match target {
-            Target::Branch(name) => {
-                let local: String = name.strip_prefix("origin/").unwrap_or(&name).to_owned();
-                match git_or_error(&["switch", &local]) {
-                    Ok(_) => {
-                        self.reload_changed_buffers();
-                        self.info(format!("Switched to {local}"));
-                    }
-                    Err(e) => self.set_message(Message::Error(e)),
-                }
-            }
             Target::Commit(hash) => self.show_scratch(&format!("commit {hash}"), git(&["show", &hash])),
             Target::Stash(name) => self.show_scratch(&name, git(&["stash", "show", "-p", &name])),
             Target::Session { name, dir, delete: false } => self.load_session(&name, dir),

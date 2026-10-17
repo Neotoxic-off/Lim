@@ -6,7 +6,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command as Process, Output, Stdio};
-use std::string::FromUtf8Error;
 
 use super::command::Command;
 use super::{Editor, Mode};
@@ -32,7 +31,7 @@ pub enum PickerKind {
     Keymaps,
     Commands,
     Lines,
-    GitBranches,
+    GitGraph,
     GitLog { file: bool },
     GitStatus,
     GitStash,
@@ -59,7 +58,7 @@ impl PickerKind {
             Self::Keymaps => "Keymaps",
             Self::Commands => "Commands",
             Self::Lines => "Lines",
-            Self::GitBranches => "Git Branches",
+            Self::GitGraph => "Git Graph",
             Self::GitLog { file: false } => "Git Log",
             Self::GitLog { file: true } => "Git Log (file)",
             Self::GitStatus => "Git Status",
@@ -87,7 +86,6 @@ pub enum Target {
     Keys(Vec<Key>),
     Command(String),
     Line(usize),
-    Branch(String),
     Commit(String),
     Stash(String),
     Session { name: String, dir: bool, delete: bool },
@@ -127,6 +125,8 @@ pub struct Picker {
     pub selected: usize,
     /// Files to search, for grep (whose items depend on the query).
     files: Vec<PathBuf>,
+    /// Their text, read on the first search and kept while the picker is open: later keys search memory.
+    texts: Option<Vec<(PathBuf, String)>>,
     pub preview: Option<Preview>,
     /// Colorscheme before the theme picker opened, restored on `<Esc>`.
     pub(super) original_theme: Option<String>,
@@ -139,7 +139,12 @@ impl Picker {
 
     fn refilter(&mut self) {
         if let PickerKind::Grep { .. } = self.kind {
-            self.items = grep(&self.files, &self.query);
+            self.items = if text::char_len(&self.query) < MIN_GREP_QUERY {
+                Vec::new()
+            } else {
+                let files: &[PathBuf] = &self.files;
+                grep(self.texts.get_or_insert_with(|| searchable(files)), &self.query)
+            };
             self.matches = self
                 .items
                 .iter()
@@ -258,20 +263,24 @@ fn git_files() -> Option<Vec<PathBuf>> {
 
 /// Literal search (following ignorecase/smartcase) in text files.
 // shortcut: scans files on each keystroke; fine for project-sized trees, use an index for huge monorepos.
-fn grep(files: &[PathBuf], query: &str) -> Vec<Item> {
+/// The text files among `files`: not too big, not binary, valid UTF-8.
+fn searchable(files: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    files
+        .iter()
+        .filter(|path| !fs::metadata(path).is_ok_and(|m| m.len() > MAX_GREP_BYTES))
+        .filter_map(|path| {
+            let bytes: Vec<u8> = fs::read(path).ok()?;
+            if bytes.iter().take(8000).any(|&b| b == 0) {
+                return None;
+            }
+            Some((path.clone(), String::from_utf8(bytes).ok()?))
+        })
+        .collect()
+}
+
+fn grep(texts: &[(PathBuf, String)], query: &str) -> Vec<Item> {
     let mut items: Vec<Item> = Vec::new();
-    if text::char_len(query) < MIN_GREP_QUERY {
-        return items;
-    }
-    for path in files {
-        if fs::metadata(path).is_ok_and(|m| m.len() > MAX_GREP_BYTES) {
-            continue;
-        }
-        let Ok(bytes): io::Result<Vec<u8>> = fs::read(path) else { continue };
-        if bytes.iter().take(8000).any(|&b| b == 0) {
-            continue;
-        }
-        let Ok(content): Result<String, FromUtf8Error> = String::from_utf8(bytes) else { continue };
+    for (path, content) in texts {
         for (y, line) in content.lines().enumerate() {
             if let Some(hit) = text::find_literal(line, query).first() {
                 let label: String = format!("{}:{}:{}  {}", path.display(), y + 1, hit.start + 1, line.trim());
@@ -350,6 +359,7 @@ impl Editor {
             matches: Vec::new(),
             selected: 0,
             files,
+            texts: None,
             preview: None,
             original_theme,
         };

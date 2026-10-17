@@ -220,6 +220,8 @@ pub struct Editor {
     next_anchor: u64,
     /// A `:g` is running; Vim refuses to nest them.
     in_global: bool,
+    /// `:norm` is feeding keys: they count as replayed, not typed.
+    in_norm: bool,
     /// For `gv`: the last visual selection and its mode.
     last_visual: Option<(Pos, Pos, Mode)>,
     /// `/` searches forward, `?` backward; `n` follows, `N` reverses.
@@ -230,6 +232,9 @@ pub struct Editor {
     pub setup: Option<Setup>,
     /// The insert-mode completion menu, when open.
     pub completion: Option<Completion>,
+    /// Typing changed the word before the cursor: the menu is recomputed when next needed (a frame, a menu
+    /// key), so keys that arrive together (a paste, fast typing) cost one lookup, not one each.
+    completion_stale: bool,
     /// The `:` completion menu, when open.
     pub cmd_completion: Option<CmdCompletion>,
     /// `:` lines and `/` `?` patterns typed before, for `<Up>` / `<Down>`.
@@ -243,6 +248,8 @@ pub struct Editor {
     pub history: Vec<Message>,
     /// `<Leader>uZ`: only the focused window, centred, without chrome.
     pub zen: bool,
+    /// `<Leader>um`: the rendered Markdown beside Markdown buffers.
+    pub markdown_preview: bool,
     block_insert: Option<block::BlockInsert>,
     /// `$` in visual block: every line's block reaches its own end.
     block_to_eol: bool,
@@ -294,6 +301,7 @@ impl Editor {
             jumps: Vec::new(),
             next_anchor: 0,
             in_global: false,
+            in_norm: false,
             last_visual: None,
             search_forward: true,
             last_substitute: None,
@@ -301,6 +309,7 @@ impl Editor {
             cheatsheet: None,
             setup: None,
             completion: None,
+            completion_stale: false,
             cmd_completion: None,
             cmd_history: CmdHistory::default(),
             search_history: CmdHistory::default(),
@@ -308,6 +317,7 @@ impl Editor {
             replace_original: String::new(),
             history: Vec::new(),
             zen: false,
+            markdown_preview: false,
             block_insert: None,
             block_to_eol: false,
             insert_register: false,
@@ -423,6 +433,7 @@ impl Editor {
         }
         if self.mode != Mode::Insert {
             self.completion = None;
+            self.completion_stale = false;
         }
         if self.mode != Mode::Command {
             self.cmd_completion = None;

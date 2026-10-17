@@ -55,10 +55,13 @@ impl Editor {
     /// `gv`
     pub(super) fn reselect(&mut self) {
         if let Some((anchor, cursor, mode)) = self.last_visual {
-            self.anchor = anchor;
             let buf: &mut Buffer = self.buf_mut();
+            // Lines may have gone since the selection was made: both ends come back inside the text.
+            let line: usize = anchor.line.min(buf.last_line());
+            let anchor: Pos = Pos::new(line, anchor.col.min(buf.line_len(line)));
             buf.cursor = cursor;
             buf.clamp(false);
+            self.anchor = anchor;
             self.mode = mode;
         }
     }

@@ -2,6 +2,7 @@
 //! and the encoding of a row into ANSI with an SGR sequence only when the style changes.
 
 use std::fmt::{self, Write};
+use std::ops::Range;
 
 use super::theme::{Rgb, Style};
 use crate::buffer::text;
@@ -145,12 +146,22 @@ impl Grid {
         self.put(x, y, &row.finish(style));
     }
 
-    /// A rounded float (`winborder = "rounded"`) with an optional title.
+    /// A `│` separator in column `x` over `rows`.
+    pub fn vline(&mut self, x: usize, rows: Range<usize>, style: Style) {
+        for y in rows {
+            self.text(x, y, 1, style, "\u{2502}");
+        }
+    }
+
+    /// A rounded float (`winborder = "rounded"`) with an optional title. The border is part of the panel: it
+    /// takes `fill`'s background, never `border`'s or the colors underneath, so the float reads as one block.
     pub fn float(&mut self, area: Rect, border: Style, fill: Style, title: &str) {
         let Rect { x, y, w, h }: Rect = area;
         if w < 2 || h < 2 {
             return;
         }
+        // `FloatBorder` brings its own background in most themes; the frame takes the inside's instead.
+        let border: Style = Style { bg: fill.bg, ..border };
         let mut top: Row = Row::new(w);
         top.cell(border, '╭');
         if !title.is_empty() {
@@ -161,13 +172,13 @@ impl Grid {
             top.cell(border, '─');
         }
         top.cell(border, '╮');
-        self.put_border(x, y, top.finish(border), false);
+        self.put(x, y, &top.finish(border));
         for r in 1..h - 1 {
             let mut row: Row = Row::new(w);
             row.cell(border, '│');
             row.pad_to(fill, w - 1);
             row.cell(border, '│');
-            self.put_border(x, y + r, row.finish(fill), true);
+            self.put(x, y + r, &row.finish(fill));
         }
         let mut bottom: Row = Row::new(w);
         bottom.cell(border, '╰');
@@ -175,23 +186,7 @@ impl Grid {
             bottom.cell(border, '─');
         }
         bottom.cell(border, '╯');
-        self.put_border(x, y + h - 1, bottom.finish(border), false);
-    }
-
-    /// Puts a row of a float whose border cells (all of them, or the two ends with `ends_only`) keep the
-    /// background already on screen, so the rounded corners blend into what the float covers.
-    fn put_border(&mut self, x: usize, y: usize, mut cells: Vec<Cell>, ends_only: bool) {
-        let last: usize = cells.len().saturating_sub(1);
-        for (i, cell) in cells.iter_mut().enumerate() {
-            let col: usize = x + i;
-            if (!ends_only || i == 0 || i == last)
-                && col < self.width
-                && let Some(under) = self.cells.get(y * self.width + col)
-            {
-                cell.style.bg = under.style.bg;
-            }
-        }
-        self.put(x, y, &cells);
+        self.put(x, y + h - 1, &bottom.finish(border));
     }
 }
 
@@ -254,6 +249,21 @@ fn ansi256(r: u32, g: u32, b: u32) -> u32 {
 mod tests {
     use super::*;
 
+    /// Over any background, a float's border and inside share one color: no band around the panel.
+    #[test]
+    fn float_is_one_block() {
+        let (under, panel): (Style, Style) =
+            (Style::new(Rgb(0x111111), Rgb(0xaa0000)), Style::new(Rgb(0xeeeeee), Rgb(0x222222)));
+        let mut grid: Grid = Grid::new(10, 5, under);
+        let border: Style = Style::new(Rgb(0x888888), Rgb(0x333333));
+        grid.float(Rect { x: 1, y: 1, w: 6, h: 3 }, border, panel, "t");
+        for y in 1..4 {
+            assert!(grid.row(y)[1..7].iter().all(|c| c.style.bg == panel.bg), "row {y}");
+            assert_eq!(grid.row(y)[0].style.bg, under.bg, "outside stays");
+        }
+        assert_eq!(grid.row(1)[1].ch, '╭');
+    }
+
     #[test]
     fn rows_grid_and_encoding() {
         let style: Style = Style::new(Rgb(0xffffff), Rgb(0));
@@ -270,19 +280,5 @@ mod tests {
         grid.text(2, 0, 2, style, "xy"); // overwrites the tail of 日: its head becomes blank
         assert!(encode(grid.row(0), ColorDepth::TrueColor).ends_with("a xy"));
         assert_eq!(ansi256(0x50, 0xA4, 0xE9), 74);
-    }
-
-    #[test]
-    fn float_border_keeps_the_background_under_it() {
-        let backdrop: Style = Style::new(Rgb(0xffffff), Rgb(0x111111));
-        let border: Style = Style::new(Rgb(0x888888), Rgb(0x222222));
-        let fill: Style = Style::new(Rgb(0xffffff), Rgb(0x222222));
-        let mut grid: Grid = Grid::new(6, 4, backdrop);
-        grid.float(Rect { x: 1, y: 0, w: 4, h: 3 }, border, fill, "");
-        let bg = |x: usize, y: usize| grid.row(y)[x].style.bg;
-        assert_eq!([bg(1, 0), bg(4, 0), bg(1, 1), bg(4, 1), bg(1, 2), bg(4, 2)], [Rgb(0x111111); 6], "border");
-        assert_eq!([bg(2, 1), bg(3, 1)], [Rgb(0x222222); 2], "inside");
-        assert_eq!(grid.row(0)[1].style.fg, Rgb(0x888888), "the border keeps its own color");
-        assert_eq!(bg(0, 1), Rgb(0x111111), "outside untouched");
     }
 }

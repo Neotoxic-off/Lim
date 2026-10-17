@@ -102,6 +102,7 @@ pub enum Toggle {
     Colors,
     Zen,
     IndentGuides,
+    MarkdownPreview,
 }
 
 /// `<Leader>bs…`: the key buffers are sorted by.
@@ -212,10 +213,9 @@ pub const BINDINGS: &[Binding] = &[
     b(LEADER_F, 'T', A::Picker(PickerKind::Todos), "Find TODOs"),
     b(LEADER_F, 'w', A::Picker(PickerKind::Grep { all: false }), "Find words"),
     b(LEADER_F, 'W', A::Picker(PickerKind::Grep { all: true }), "Find words in all files"),
-    b(LEADER_G, 'b', A::Picker(PickerKind::GitBranches), "Git branches"),
     b(LEADER_G, 'c', A::Picker(PickerKind::GitLog { file: false }), "Git commits (repository)"),
     b(LEADER_G, 'C', A::Picker(PickerKind::GitLog { file: true }), "Git commits (current file)"),
-    b(LEADER_G, 'g', A::Tool(&["lazygit"]), "ToggleTerm lazygit"),
+    b(LEADER_G, 'g', A::Picker(PickerKind::GitGraph), "Git graph (all branches)"),
     b(LEADER_G, 'o', A::GitBrowse, "Git browse (open)"),
     b(LEADER_G, 't', A::Picker(PickerKind::GitStatus), "Git status"),
     b(LEADER_G, 'T', A::Picker(PickerKind::GitStash), "Git stash"),
@@ -231,7 +231,6 @@ pub const BINDINGS: &[Binding] = &[
     b(LEADER_T, 'f', A::Shell, "ToggleTerm float"),
     b(LEADER_T, 'h', A::Shell, "ToggleTerm horizontal split"),
     b(LEADER_T, 'v', A::Shell, "ToggleTerm vertical split"),
-    b(LEADER_T, 'l', A::Tool(&["lazygit"]), "ToggleTerm lazygit"),
     b(LEADER_T, 'n', A::Tool(&["node"]), "ToggleTerm node"),
     b(LEADER_T, 'p', A::Tool(&["python3"]), "ToggleTerm python"),
     b(LEADER_T, 't', A::Tool(&["btm"]), "ToggleTerm btm"),
@@ -254,6 +253,7 @@ pub const BINDINGS: &[Binding] = &[
     b(LEADER_U, 'y', A::Toggle(Toggle::Syntax), "Toggle syntax highlight"),
     b(LEADER_U, 'z', A::Toggle(Toggle::Colors), "Toggle color highlight"),
     b(LEADER_U, 'Z', A::Toggle(Toggle::Zen), "Toggle zen mode"),
+    b(LEADER_U, 'm', A::Toggle(Toggle::MarkdownPreview), "Toggle Markdown preview"),
     b(LEADER_U, '|', A::Toggle(Toggle::IndentGuides), "Toggle indent guides"),
     b('g', 'g', A::Motion(Motion::FileStart), "First line"),
     b('g', 'c', A::Operator(Operator::Comment), "Toggle comment (gcc line, gco/gcO add)"),

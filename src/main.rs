@@ -16,6 +16,10 @@ mod buffer;
 mod config;
 mod editor;
 mod error;
+#[cfg(test)]
+mod fuzz;
+#[cfg(test)]
+mod perf;
 mod render;
 mod syntax;
 mod term;

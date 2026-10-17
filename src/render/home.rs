@@ -63,7 +63,7 @@ const BRAILLE: &[&str] = &[
     "⣾⣥⣤⣼⣿⣶⣶⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣾⣵⣾⡿",
 ];
 
-/// The same hydra, small and lettered, from twitchquotes.com's "[ASCII Art] Hydra".
+/// The same hydra, small, from twitchquotes.com's "[ASCII Art] Hydra". Its "HYDRA" lettering is left out.
 const SMALL: &[&str] = &[
     "⠀⠀⣴⣶⣤⡤⠦⣤⣀⣤⠆⠀⠀⠀⠀⠀⣈⣭⣭⣿⣶⣿⣦⣼⣆⠀⠀⠀⠀⠀⠀⠀⠀",
     "⠀⠀⠀⠉⠻⢿⣿⠿⣿⣿⣶⣦⠤⠀⡠⢾⣿⣿⡿⠋⠉⠉⠻⣿⣿⡛⣦⠀⠀⠀⠀⠀⠀",
@@ -76,9 +76,6 @@ const SMALL: &[&str] = &[
     "⠙⠃⠀⠀⠀⣼⣿⡟⠌⠀⠈⠻⣿⣿⣦⣌⡇⠻⣿⣿⣷⣿⣿⣿⠐⣿⣿⡇⠀⠛⠻⢷⣄",
     "⠀⠀⠀⠀⠀⢻⣿⣿⣄⠀⠀⠀⠈⠻⣿⣿⣿⣷⣿⣿⣿⣿⣿⡟⠀⠫⢿⣿⡆⠀⠀⠀⠁",
     "⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣶⣶⣾⣿⣿⣿⣿⣿⣿⣿⣿⡟⢀⣀⣤⣾⡿⠃⠀⠀⠀⠀",
-    "⠀⠀⠀⠀⢰⣶⠀⠀⣶⠀⢶⣆⢀⣶⠂⣶⡶⠶⣦⡄⢰⣶⠶⢶⣦⠀⠀⣴⣶⠀⠀⠀⠀",
-    "⠀⠀⠀⠀⢸⣿⠶⠶⣿⠀⠈⢻⣿⠁⠀⣿⡇⠀⢸⣿⢸⣿⢶⣾⠏⠀⣸⣟⣹⣧⠀⠀⠀",
-    "⠀⠀⠀⠀⠸⠿⠀⠀⠿⠀⠀⠸⠿⠀⠀⠿⠷⠶⠿⠃⠸⠿⠀⠙⠷⠤⠿⠉⠉⠿⠆⠀⠀",
 ];
 
 /// "lim" in figlet's standard font.
