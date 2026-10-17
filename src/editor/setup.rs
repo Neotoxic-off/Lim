@@ -77,6 +77,7 @@ pub const SETTINGS: &[Setting] = &[
     setting("Editing", "expandtab", "Indent with spaces", Values::Toggle),
     setting("Editing", "autoindent", "Keep the indent on new lines", Values::Toggle),
     setting("Editing", "autopairs", "Close brackets and quotes", Values::Toggle),
+    setting("Editing", "mouse", "Mouse: click, drag to select, wheel", Values::Toggle),
     setting("Editing", "completion", "Completion menu while typing", Values::Toggle),
     setting("Editing", "clipboard", "System clipboard (\"\": internal)", Values::Words(&["unnamedplus", ""])),
     setting("Editing", "scrolloff", "Lines kept above / below the cursor", Values::Range(0, 999)),

@@ -234,7 +234,7 @@ pub fn mode_group(mode: Mode) -> Group {
         Mode::Insert => Group::StatusModeInsert,
         Mode::Replace => Group::StatusModeReplace,
         Mode::Visual | Mode::VisualLine | Mode::VisualBlock => Group::StatusModeVisual,
-        Mode::Command | Mode::Search => Group::StatusModeCommand,
+        Mode::Command | Mode::Search | Mode::Confirm => Group::StatusModeCommand,
     }
 }
 

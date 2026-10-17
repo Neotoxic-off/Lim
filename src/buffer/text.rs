@@ -45,6 +45,18 @@ pub fn display_col(s: &str, col: usize) -> usize {
     s.chars().take(col).fold(0, |w, c| if c == '\t' { w + tab_cells(w) } else { w + char_width(c) })
 }
 
+/// The char at screen column `x` (the one whose cells cover it), or the line's length past its end.
+pub fn col_at_display(s: &str, x: usize) -> usize {
+    let mut width: usize = 0;
+    for (i, c) in s.chars().enumerate() {
+        width += if c == '\t' { tab_cells(width) } else { char_width(c) };
+        if width > x {
+            return i;
+        }
+    }
+    char_len(s)
+}
+
 pub fn str_width(s: &str) -> usize {
     s.chars().map(char_width).sum()
 }
@@ -295,6 +307,7 @@ mod tests {
     fn columns_and_matches() {
         assert_eq!(byte_index("héllo", 2), 3);
         assert_eq!(display_col("\tab", 2), 5);
+        assert_eq!([0, 3, 4, 5, 9].map(|x| col_at_display("\tab日", x)), [0, 0, 1, 2, 4]);
         assert_eq!(display_col("日本x", 2), 4);
         assert_eq!(str_width("e\u{301}🦀a"), 4);
         assert_eq!(char_width('\u{e7a8}'), 1); // Nerd Font icons are single-cell

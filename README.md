@@ -72,7 +72,7 @@ the start screen.
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) · Markdown preview beside the file, live as you type (`<Leader>um`) |
 | Git | signs against the index · hunk jumps · graph of every branch, log, file log, status and stash pickers with diffs · `git browse` · status colors in the file tree |
 | Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · sessions |
-| Windows | `\|` / `\` splits, `<C-h/j/k/l>`, `<C-arrows>` to resize, `<C-w>` family, zen mode, global statusline |
+| Windows | `\|` / `\` splits, `<C-h/j/k/l>`, `<C-arrows>` to resize, `<C-w>` family, zen mode, global statusline · mouse: click to place the cursor or focus a window, drag to select, wheel to scroll text and lists |
 | System | system clipboard (`clipboard=unnamedplus`, OSC 52 fallback over SSH) · `<F7>` shell, node, python, btm, gdu |
 | Config | settings screen (`<Leader>,`) to search and change every option live and save it · one JSON file: Neovim option names, colorscheme, astrotheme palette, Neovim highlight groups, keymaps per mode, icon set |
 | Plugins | a folder with a `plugin.json` that adds options, colors, keymaps and `:Commands` · a command pipes the lines through a program in any language and puts its output back or shows it |
@@ -257,7 +257,8 @@ offsets (`.,+3`, `$-1`). Commands that start with an uppercase letter come from 
 **Patterns** are Vim regexes (magic by default): `.` `*` `[a-z]` `[^…]` `^` `$` `\+` `\=` `\?` `\{n,m}`
 `\(…\)` `\|` `\<` `\>` `\d` `\w` `\s` `\a` `\l` `\u` (and `\D` `\W` `\S`…), `\v` for very magic (`(a|b)+`), `\c`/`\C`
 to ignore or match case. In `:s` replacements `&` or `\0` is the match and `\1`…`\9` its groups. `:s` flags: `g`
-every match, `i`/`I` case, `n` count only, `e` no error when nothing matches (`c` confirm is not supported). `:g`
+every match, `c` confirm each (`y` `n` `a` `q` `l`, one undo step for the session), `i`/`I` case, `n` count
+only, `e` no error when nothing matches; `\r` in the replacement splits the line. `:g`
 runs its command on marked lines, so deleting lines on the way is safe, and `u` undoes the whole `:g` or `:norm`.
 Live grep (`<Leader>fw`) stays plain text.
 
@@ -385,6 +386,7 @@ Names and defaults follow AstroNvim.
 | `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` |
 | `statusline_style` | `"rounded"` | Statusline section ends: `"rounded"`, `"slanted"`, `"arrow"` or `"flat"` (Nerd Font icon set only) |
 | `splash` | `"random"` | Start screen hydra: `"random"` (one that fits, each start), `"classic"`, `"braille"` or `"small"` |
+| `mouse` | `true` | Click, drag to select, wheel; `false` gives the terminal its own selection back (to copy) |
 | `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |
 | `highlighturl` `indentguides` `matchparen` `gitsigns` `wordhighlight` `colorhighlight` `todocomments` `notifications` `dashboard` `syntax` | `true` | Turn each feature off |
@@ -518,7 +520,7 @@ src/
 Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics, language-aware completion; buffer-word completion is there), debugger, treesitter (a keyword
 highlighter stands in), plugins that script the editor itself (they only filter text through a process), an
 embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
-line wrapping, mouse, folds, spell checking, persistent undo, `:s///c` confirm. A regex group repeats at
+line wrapping, folds, spell checking, persistent undo. A regex group repeats at
 most 100 times in one match. Visual-block columns count characters, so tabs and wide characters select
 unevenly.
 

@@ -350,7 +350,8 @@ impl Buffer {
             })
             .collect();
         let deleted: usize = marked.len();
-        let kept_last: usize = last_line - deleted;
+        // Every line may go: the buffer then keeps one empty line, 0.
+        let kept_last: usize = last_line.saturating_sub(deleted);
         let moved = |p: &mut Pos| -> bool {
             if p.line > last {
                 p.line -= deleted;

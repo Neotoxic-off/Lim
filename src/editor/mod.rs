@@ -7,6 +7,7 @@ mod clipboard;
 mod cmdhistory;
 mod command;
 mod complete;
+mod confirm;
 mod explorer;
 mod extras;
 mod global;
@@ -15,6 +16,7 @@ mod keymap;
 mod lines;
 mod manage;
 mod motion;
+mod mouse;
 mod normal;
 mod operator;
 mod picker;
@@ -47,6 +49,7 @@ use cmdhistory::CmdHistory;
 pub use complete::{Completion, MENU_HEIGHT, words_of};
 pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
 use motion::Motion;
+pub use mouse::Pane;
 use operator::Operator;
 pub use picker::{Item, Picker, Target};
 pub use prompt::Prompt;
@@ -79,6 +82,8 @@ pub enum Mode {
     Cheatsheet,
     /// The setup screen has the keyboard.
     Setup,
+    /// `:s///c` asks about each match.
+    Confirm,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,7 +109,7 @@ impl Mode {
             Self::Visual => "VISUAL",
             Self::VisualLine => "V-LINE",
             Self::VisualBlock => "V-BLOCK",
-            Self::Command | Self::Search => "COMMAND",
+            Self::Command | Self::Search | Self::Confirm => "COMMAND",
         }
     }
 }
@@ -189,6 +194,10 @@ pub struct Editor {
     pub highlight_search: bool,
     /// Text rows on screen, kept up to date by the renderer for page motions.
     pub view_height: usize,
+    /// Where each window's text was drawn in the last frame, for the mouse.
+    pub panes: Vec<Pane>,
+    /// The window and position a drag selects from; any key forgets it.
+    mouse_anchor: Option<(usize, Pos)>,
     pub quit: bool,
     pub windows: Vec<Window>,
     pub layout: Layout,
@@ -230,6 +239,8 @@ pub struct Editor {
     pub prompt: Option<Prompt>,
     pub cheatsheet: Option<Cheatsheet>,
     pub setup: Option<Setup>,
+    /// The `:s///c` session in progress.
+    confirm: Option<confirm::Confirm>,
     /// The insert-mode completion menu, when open.
     pub completion: Option<Completion>,
     /// Typing changed the word before the cursor: the menu is recomputed when next needed (a frame, a menu
@@ -280,6 +291,8 @@ impl Editor {
             search: String::new(),
             highlight_search: false,
             view_height: 1,
+            panes: Vec::new(),
+            mouse_anchor: None,
             quit: false,
             windows: vec![Window::new(0, 0, View::default())],
             layout: Layout::Leaf(WindowId::first()),
@@ -307,6 +320,7 @@ impl Editor {
             last_substitute: None,
             prompt: None,
             cheatsheet: None,
+            confirm: None,
             setup: None,
             completion: None,
             completion_stale: false,
@@ -382,6 +396,10 @@ impl Editor {
 
     /// One key as typed: goes through user keymaps first, then the modes.
     pub fn handle(&mut self, key: Key) {
+        if let Key::Mouse(event) = key {
+            return self.mouse(event);
+        }
+        self.mouse_anchor = None;
         let key: Key = self.translate_leader(key);
         if self.map_key(key) {
             return;
@@ -409,6 +427,7 @@ impl Editor {
             Mode::Prompt => self.prompt_key(key),
             Mode::Cheatsheet => self.cheatsheet_key(key),
             Mode::Setup => self.setup_key(key),
+            Mode::Confirm => self.confirm_key(key),
         }
         if let Some(window) = self.windows.get_mut(self.active) {
             window.buffer = self.current;

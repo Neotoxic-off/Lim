@@ -12,7 +12,7 @@ use super::theme::{Group, Highlight, Rgb, Style, theme};
 use crate::buffer::git::Sign;
 use crate::buffer::{Buffer, CharClass, Pos, text};
 use crate::config::Options;
-use crate::editor::{Editor, Mode, Rect, Selection};
+use crate::editor::{Editor, Mode, Pane, Rect, Selection};
 use crate::syntax::{self, Hl, Todo};
 
 /// Draws window `index` into `rect`; returns the cursor's screen cell when it is the focused window.
@@ -32,11 +32,15 @@ pub fn window(ed: &mut Editor, index: usize, rect: Rect, grid: &mut Grid) -> Opt
             grid.put(rect.x, rect.y, &winbar_cells(buf, rect.w, active, &ctx));
         }
         let top: usize = rect.y + usize::from(winbar);
-        let height: usize = rect.h - usize::from(winbar);
-        let (row, col): (usize, usize) = text_rows(buf, Rect { y: top, h: height, ..rect }, &ctx, grid);
-        active.then_some((top + row, rect.x + col))
+        let area: Rect = Rect { y: top, h: rect.h - usize::from(winbar), ..rect };
+        let (row, col, gutter): (usize, usize, usize) = text_rows(buf, area, &ctx, grid);
+        let pane: Pane = Pane { window: index, area, gutter, top: buf.top, left: buf.left };
+        (pane, active.then_some((top + row, rect.x + col)))
     })
-    .flatten()
+    .and_then(|(pane, cursor)| {
+        ed.panes.push(pane);
+        cursor
+    })
 }
 
 /// snacks.zen's window options: no numbers, signs, fold column or winbar.
@@ -87,8 +91,8 @@ fn winbar_cells(buf: &Buffer, width: usize, active: bool, ctx: &Context) -> Vec<
     row.finish(Style::new(style.fg, ctx.base))
 }
 
-/// Text rows inside `area`; returns the cursor's (row, col) relative to it.
-fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (usize, usize) {
+/// Text rows inside `area`; returns the cursor's (row, col) relative to it and the gutter's width.
+fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (usize, usize, usize) {
     let t: Arc<Theme> = theme();
     let o: &Options = &ctx.options;
     let numbers: bool = o.number || o.relativenumber;
@@ -146,7 +150,7 @@ fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (u
         }
         grid.put(area.x, area.y + r, &row.finish(blank));
     }
-    (cursor.line.saturating_sub(buf.top), (gutter + cursor_x).saturating_sub(buf.left))
+    (cursor.line.saturating_sub(buf.top), (gutter + cursor_x).saturating_sub(buf.left), gutter)
 }
 
 /// Per-line extras drawn over the syntax colors.

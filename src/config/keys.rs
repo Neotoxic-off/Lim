@@ -118,6 +118,7 @@ pub fn display(keys: &[Key]) -> String {
             Key::ShiftLeft => "<S-Left>".into(),
             Key::ShiftRight => "<S-Right>".into(),
             Key::Unknown => "?".into(),
+            Key::Mouse(_) => "<Mouse>".into(),
         })
         .collect()
 }

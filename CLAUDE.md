@@ -23,6 +23,7 @@ cargo fmt                       # rustfmt.toml: 120 columns
 cargo llvm-cov --summary-only   # per-file coverage
 cargo test --release perf -- --nocapture   # benchmark table (src/perf.rs): run before and after every change
 LIM_FUZZ=30 cargo test --release fuzz      # a long fuzz session; LIM_FUZZ_SEED=<n> replays one failing seed
+# in WSL, run long fuzz sessions from a copy outside /mnt (the pickers read the project files, slow over /mnt)
 # against Neovim (installed in WSL at ~/.local/nvim): lim must win every operation
 wsl -d Ubuntu --cd /mnt/d/Code/Github/Lim -e bash -lc 'LIM_NVIM=$HOME/.local/nvim/bin/nvim CARGO_TARGET_DIR=$HOME/.lim-target cargo test --release vs_neovim -- --ignored --nocapture'
 ```

@@ -893,8 +893,8 @@ fn regex_substitute_flags_and_registers() {
     assert_eq!(text(&ed), "1-X 22-bar\n3-FOO", "I matches case");
     keys(&mut ed, ":s/zzz/y/e\n");
     assert!(!ed.message_text().contains("E486"), "e: no error when nothing matches");
-    keys(&mut ed, ":s/a/b/c\n");
-    assert!(ed.message_text().starts_with("E488"));
+    keys(&mut ed, ":s/a/b/x\n");
+    assert!(ed.message_text().starts_with("E488"), "unknown flag");
     keys(&mut ed, "/\\(\n");
     assert!(ed.message_text().starts_with("E54"), "{}", ed.message_text());
 
@@ -1073,4 +1073,77 @@ fn global_delete_in_one_pass() {
     assert_eq!(ed.buf().line(ed.buf().cursor.line), "x2");
     keys(&mut ed, "uu");
     assert_eq!(text(&ed), "x1\nkeep a\nx2\nkeep b\nx3\nkeep c", "one undo step");
+    // Found by the fuzzer: every line deleted.
+    keys(&mut ed, "ma:g/./d\n");
+    assert_eq!((text(&ed).as_str(), ed.buf().cursor.line), ("", 0));
+}
+
+/// `:s///c`: `y` replaces, `n` skips, `l` replaces and stops, `a` does the rest, one undo step for it all.
+#[test]
+fn substitute_with_confirmation() {
+    let mut ed: Editor = editor("a a\na\na a");
+    keys(&mut ed, ":%s/a/X/gc\n");
+    assert_eq!(ed.mode, Mode::Confirm);
+    assert!(ed.message_text().starts_with("replace with X"));
+    keys(&mut ed, "yny");
+    assert_eq!(text(&ed), "X a\nX\na a");
+    keys(&mut ed, "a");
+    assert_eq!((ed.mode, text(&ed).as_str()), (Mode::Normal, "X a\nX\nX X"));
+    assert_eq!(ed.message_text(), "4 substitutions");
+    keys(&mut ed, "u");
+    assert_eq!(text(&ed), "a a\na\na a", "one undo step");
+    keys(&mut ed, ":%s/a/\\r/c\nl");
+    assert_eq!((ed.mode, text(&ed).as_str()), (Mode::Normal, "\n a\na\na a"), "l replaces one and stops; \\r splits");
+    keys(&mut ed, ":s/zz/y/c\n");
+    assert!(ed.message_text().starts_with("E486"));
+    keys(&mut ed, "u:%s/a/aa/gc\na");
+    assert_eq!(text(&ed), "aa aa\naa\naa aa", "a replacement containing the pattern is not matched again");
+}
+
+#[test]
+fn mouse_clicks_drags_and_scrolls() {
+    use crate::render::Screen;
+    use crate::term::{ColorDepth, Mouse, MouseKind, Size};
+    let mut ed: Editor = editor(&(0..100).map(|i| format!("line {i}")).collect::<Vec<String>>().join("\n"));
+    let mut screen: Screen = Screen::new(ColorDepth::TrueColor);
+    assert!(screen.draw(&mut ed, Size { cols: 80, rows: 20 }).contains("\x1b[?1002h\x1b[?1006h"));
+    let pane: Pane = ed.panes[0];
+    let at = |kind: MouseKind, col: usize, row: usize| {
+        Key::Mouse(Mouse { kind, col: pane.area.x + pane.gutter + col, row: pane.area.y + row })
+    };
+    ed.handle(at(MouseKind::Press, 2, 1));
+    assert_eq!(ed.buf().cursor, Pos::new(1, 2));
+    ed.handle(at(MouseKind::Drag, 40, 2));
+    assert_eq!((ed.mode, ed.anchor, ed.buf().cursor), (Mode::Visual, Pos::new(1, 2), Pos::new(2, 5)), "past the end");
+    ed.handle(at(MouseKind::Release, 40, 2));
+    keys(&mut ed, "d");
+    assert_eq!(ed.buf().line(1), "li");
+    ed.handle(at(MouseKind::ScrollDown, 0, 0));
+    assert_eq!(ed.buf().top, 3);
+    ed.handle(at(MouseKind::Drag, 0, 0));
+    assert_eq!(ed.mode, Mode::Normal, "a drag without a press selects nothing");
+    ed.handle(at(MouseKind::Press, 0, 0));
+    keys(&mut ed, "j");
+    ed.handle(at(MouseKind::Drag, 3, 0));
+    assert_eq!(ed.mode, Mode::Normal, "a key between press and drag (maybe :bnext) drops the anchor");
+    ed.options.mouse = false;
+    assert!(screen.draw(&mut ed, Size { cols: 80, rows: 20 }).contains("\x1b[?1002l"));
+    let before: Pos = ed.buf().cursor;
+    ed.handle(at(MouseKind::Press, 0, 5));
+    assert_eq!(ed.buf().cursor, before, "off: clicks are ignored");
+}
+
+#[test]
+fn mouse_in_another_window_ends_visual_mode() {
+    use crate::render::Screen;
+    use crate::term::{ColorDepth, Mouse, MouseKind, Size};
+    let mut ed: Editor = editor("one\ntwo\nthree");
+    keys(&mut ed, ":vsplit\n:enew\n");
+    ed.handle(Key::Ctrl('w'));
+    keys(&mut ed, "wGv");
+    Screen::new(ColorDepth::TrueColor).draw(&mut ed, Size { cols: 80, rows: 20 });
+    let other: Pane = *ed.panes.iter().find(|p| p.window != ed.active).expect("two windows");
+    ed.handle(Key::Mouse(Mouse { kind: MouseKind::ScrollDown, col: other.area.x, row: other.area.y }));
+    assert_eq!((ed.active, ed.mode), (other.window, Mode::Normal));
+    keys(&mut ed, "~");
 }

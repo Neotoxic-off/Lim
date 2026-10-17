@@ -5,8 +5,27 @@ use std::time::Instant;
 
 use super::sys;
 
+/// A mouse report (SGR mode, `\x1b[<b;x;yM`): what happened, at which 0-based screen cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mouse {
+    pub kind: MouseKind,
+    pub col: usize,
+    pub row: usize,
+}
+
+/// The left button and the wheel; other buttons are not reported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseKind {
+    Press,
+    Drag,
+    Release,
+    ScrollUp,
+    ScrollDown,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
+    Mouse(Mouse),
     Char(char),
     Ctrl(char),
     /// Function keys F1–F12.
@@ -137,6 +156,22 @@ fn decode(bytes: &[u8]) -> Option<(Key, usize)> {
     })
 }
 
+/// `<button;col;row` then `M` (press, drag, wheel) or `m` (release); 1-based cells.
+fn mouse(seq: &[u8]) -> Option<Key> {
+    let (&end, body): (&u8, &[u8]) = seq.split_last()?;
+    let mut fields = std::str::from_utf8(body.get(1..)?).ok()?.split(';').map(|f| f.parse::<usize>().ok());
+    let (button, col, row): (usize, usize, usize) = (fields.next()??, fields.next()??, fields.next()??);
+    let kind: MouseKind = match (button, end) {
+        (64, _) => MouseKind::ScrollUp,
+        (65, _) => MouseKind::ScrollDown,
+        (32, _) => MouseKind::Drag,
+        (0, b'M') => MouseKind::Press,
+        (0, b'm') => MouseKind::Release,
+        _ => return None,
+    };
+    Some(Key::Mouse(Mouse { kind, col: col.checked_sub(1)?, row: row.checked_sub(1)? }))
+}
+
 fn escape(bytes: &[u8]) -> Option<(Key, usize)> {
     match bytes.get(1)? {
         b'[' | b'O' => {
@@ -172,6 +207,7 @@ fn escape(bytes: &[u8]) -> Option<(Key, usize)> {
                 b"21~" => Key::F(10),
                 b"23~" => Key::F(11),
                 b"24~" => Key::F(12),
+                seq if seq.starts_with(b"<") => mouse(seq).unwrap_or(Key::Unknown),
                 _ => Key::Unknown,
             };
             Some((key, end + 1))
@@ -240,6 +276,12 @@ mod tests {
         assert_eq!(decode(&"é".as_bytes()[..1]), None);
         assert_eq!(decode(b"\x13"), Some((Key::Ctrl('s'), 1)));
         assert_eq!(decode(b"\x1e"), Some((Key::Ctrl('^'), 1)));
+        let click = |kind: MouseKind| Key::Mouse(Mouse { kind, col: 9, row: 4 });
+        assert_eq!(decode(b"\x1b[<0;10;5M"), Some((click(MouseKind::Press), 10)));
+        assert_eq!(decode(b"\x1b[<0;10;5m"), Some((click(MouseKind::Release), 10)));
+        assert_eq!(decode(b"\x1b[<32;10;5M"), Some((click(MouseKind::Drag), 11)));
+        assert_eq!(decode(b"\x1b[<65;10;5M"), Some((click(MouseKind::ScrollDown), 11)));
+        assert_eq!(decode(b"\x1b[<2;10;5M"), Some((Key::Unknown, 10)), "right button");
         assert_eq!(decode(b"\x1c"), Some((Key::Unknown, 1)));
     }
 

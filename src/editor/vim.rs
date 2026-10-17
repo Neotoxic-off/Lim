@@ -306,8 +306,8 @@ impl Editor {
     }
 }
 
-/// `&` / `\0` the whole match, `\1`…`\9` its groups (empty when unset), `\n` a line break, `\t` a tab.
-fn expand_replacement(replacement: &str, line: &[char], hit: &Match) -> String {
+/// `&` / `\0` the whole match, `\1`…`\9` its groups (empty when unset), `\r` or `\n` a line break, `\t` a tab.
+pub(super) fn expand_replacement(replacement: &str, line: &[char], hit: &Match) -> String {
     let text =
         |range: Option<&Range<usize>>| range.map(|r| line[r.clone()].iter().collect::<String>()).unwrap_or_default();
     let mut out: String = String::new();
@@ -315,7 +315,7 @@ fn expand_replacement(replacement: &str, line: &[char], hit: &Match) -> String {
     while let Some(c) = chars.next() {
         match c {
             '\\' => match chars.next() {
-                Some('n') => out.push('\n'),
+                Some('n' | 'r') => out.push('\n'),
                 Some('t') => out.push('\t'),
                 Some('0') => out.push_str(&text(Some(&hit.range))),
                 Some(d @ '1'..='9') => {

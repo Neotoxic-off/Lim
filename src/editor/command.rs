@@ -138,13 +138,23 @@ pub enum Command {
     },
 }
 
-/// `:s` flags: `g` every match of a line, `n` count only, `e` no error when nothing matches, `i`/`I` case.
+/// `:s` flags: `g` every match of a line, `n` count only, `c` confirm each, `e` no error when nothing matches,
+/// `i`/`I` case.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SubFlags {
     pub global: bool,
-    pub count_only: bool,
+    pub action: SubAction,
     pub quiet: bool,
     pub case: SubCase,
+}
+
+/// What `:s` does with the matches: replace them, only count them (`n`), or ask about each (`c`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SubAction {
+    #[default]
+    Replace,
+    Count,
+    Confirm,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -162,11 +172,11 @@ impl SubFlags {
         for c in flags.trim().chars() {
             match c {
                 'g' => parsed.global = true,
-                'n' => parsed.count_only = true,
+                'n' => parsed.action = SubAction::Count,
+                'c' => parsed.action = SubAction::Confirm,
                 'e' => parsed.quiet = true,
                 'i' => parsed.case = SubCase::Ignore,
                 'I' => parsed.case = SubCase::Match,
-                'c' => return Err(Error::Vim("E488: Trailing characters: c (confirm is not supported)".into())),
                 _ => return Err(Error::Vim(format!("E488: Trailing characters: {}", flags.trim()))),
             }
         }
@@ -562,16 +572,24 @@ impl Editor {
                 };
                 text::compile(&pattern).map_err(Error::Vim)?;
                 let plural = |n: usize| if n == 1 { "" } else { "s" };
-                if flags.count_only {
-                    let (matches, on): (usize, usize) = self.count_matches(lines, &pattern, flags.global);
-                    let es: &str = if matches == 1 { "" } else { "es" };
-                    self.info(format!("{matches} match{es} on {on} line{}", plural(on)));
-                } else {
-                    self.buf_mut().seal();
-                    match self.substitute(lines, &pattern, &replacement, flags.global) {
-                        0 if flags.quiet => {}
-                        0 => return Err(Error::PatternNotFound(pattern)),
-                        n => self.info(format!("{n} line{} changed", plural(n))),
+                match flags.action {
+                    SubAction::Count => {
+                        let (matches, on): (usize, usize) = self.count_matches(lines, &pattern, flags.global);
+                        let es: &str = if matches == 1 { "" } else { "es" };
+                        self.info(format!("{matches} match{es} on {on} line{}", plural(on)));
+                    }
+                    SubAction::Confirm => {
+                        if !self.start_confirm(lines, &pattern, &replacement, flags.global) && !flags.quiet {
+                            return Err(Error::PatternNotFound(pattern));
+                        }
+                    }
+                    SubAction::Replace => {
+                        self.buf_mut().seal();
+                        match self.substitute(lines, &pattern, &replacement, flags.global) {
+                            0 if flags.quiet => {}
+                            0 => return Err(Error::PatternNotFound(pattern)),
+                            n => self.info(format!("{n} line{} changed", plural(n))),
+                        }
                     }
                 }
             }
@@ -671,7 +689,6 @@ mod tests {
             panic!("s/a/b/gi")
         };
         assert_eq!(flags, SubFlags { global: true, case: SubCase::Ignore, ..SubFlags::default() });
-        assert!(matches!(Command::parse("s/a/b/c"), Err(Error::Vim(_))));
         assert!(matches!(Command::parse("s/a/b/x"), Err(Error::Vim(_))));
         assert_eq!(
             Command::parse("'<,'>d").unwrap(),

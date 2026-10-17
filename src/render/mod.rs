@@ -101,6 +101,8 @@ pub struct Screen {
     ctx: Context,
     size: Size,
     rows: Vec<String>,
+    /// Whether the terminal reports the mouse; None until the first frame tells it.
+    mouse: Option<bool>,
     /// Time from launch to the first frame, for the dashboard footer.
     startup: Option<Duration>,
 }
@@ -113,6 +115,7 @@ impl Screen {
             ctx: Context::detect(),
             size: Size::default(),
             rows: Vec::new(),
+            mouse: None,
             startup: None,
         }
     }
@@ -121,6 +124,7 @@ impl Screen {
     pub fn invalidate(&mut self) {
         self.size = Size::default();
         self.rows.clear();
+        self.mouse = None;
     }
 
     /// Escape sequences taking the terminal from the previous frame to this one.
@@ -133,6 +137,10 @@ impl Screen {
         }
         let (width, height): (usize, usize) = (size.cols.max(1), size.rows.max(1));
         let options: Options = ed.options.clone();
+        if self.mouse != Some(options.mouse) {
+            self.mouse = Some(options.mouse);
+            out.push_str(if options.mouse { "[?1002h[?1006h" } else { "[?1002l[?1006l" });
+        }
         // `truecolor` can change in `:settings`; every row is re-encoded in the new depth.
         let depth: ColorDepth = match options.truecolor {
             Some(true) => ColorDepth::TrueColor,
@@ -165,6 +173,7 @@ impl Screen {
     /// The frame as cells, and the cursor's screen cell if it shows.
     fn compose(&mut self, ed: &mut Editor, width: usize, height: usize) -> (Grid, Option<(usize, usize)>) {
         ed.refresh_completion();
+        ed.panes.clear();
         let t: Arc<Theme> = theme();
         let options: Options = ed.options.clone();
         let mut grid: Grid = Grid::new(width, height, t.style(Group::Normal));

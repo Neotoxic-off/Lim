@@ -82,6 +82,8 @@ pub struct Options {
     pub statusline_style: StatusStyle,
     /// Which drawing of the hydra the start screen shows.
     pub splash: Splash,
+    /// Clicks, drags and the wheel; off leaves the terminal's own selection (to copy) working.
+    pub mouse: bool,
 }
 
 /// The start screen's hydra: one of its drawings, or a random one that fits, different each start.
@@ -169,6 +171,7 @@ pub const OPTION_NAMES: &[&str] = &[
     "completion",
     "statusline_style",
     "splash",
+    "mouse",
 ];
 
 impl Default for Options {
@@ -213,6 +216,7 @@ impl Default for Options {
             completion: true,
             statusline_style: StatusStyle::Rounded,
             splash: Splash::Random,
+            mouse: true,
         }
     }
 }
@@ -269,6 +273,7 @@ impl Options {
             "completion" => Json::Bool(self.completion),
             "statusline_style" => Json::String(self.statusline_style.name().into()),
             "splash" => Json::String(self.splash.name().into()),
+            "mouse" => Json::Bool(self.mouse),
             _ => Json::Null,
         }
     }
@@ -566,6 +571,7 @@ impl Config {
                         .is_some(),
                     _ => false,
                 },
+                "mouse" => set_bool(&mut o.mouse, value),
                 "splash" => match value {
                     Json::String(s) => {
                         Splash::ALL.into_iter().find(|art| art.name() == s).map(|art| o.splash = art).is_some()

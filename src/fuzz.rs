@@ -13,7 +13,7 @@ use crate::buffer::{Buffer, text};
 use crate::config::{Config, json, keys};
 use crate::editor::Editor;
 use crate::render::{Screen, markdown};
-use crate::term::{ColorDepth, Key, Size};
+use crate::term::{ColorDepth, Key, Mouse, MouseKind, Size};
 
 /// A tiny deterministic generator (PCG-style), so a failing seed replays exactly.
 struct Rng(u64);
@@ -104,6 +104,12 @@ fn every_key() -> Vec<Key> {
         ])
         .chain((1..=12).map(Key::F))
         .chain(('a'..='z').map(Key::Ctrl))
+        .chain(
+            [MouseKind::Press, MouseKind::Drag, MouseKind::Release, MouseKind::ScrollUp, MouseKind::ScrollDown]
+                .into_iter()
+                .flat_map(|kind| [(0, 0), (3, 2), (12, 5), (60, 20), (500, 500)].map(|(col, row)| (kind, col, row)))
+                .map(|(kind, col, row)| Key::Mouse(Mouse { kind, col, row })),
+        )
         .collect()
 }
 
@@ -144,6 +150,8 @@ const PHRASES: &[&str] = &[
     ":%s/\\w\\+/[&]/g\n",
     ":%s/\\v(\\a)(\\d)/\\2\\1/gi\n",
     ":s/a/b/n\n",
+    ":%s/a/b/gc\nynyl",
+    ":%s/\\w/\\r/c\na",
     ":g/a/norm Ax\n",
     ":g/^$/d\n",
     ":v/x/d\n",

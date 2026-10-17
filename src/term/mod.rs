@@ -17,7 +17,7 @@ use std::{
     process::ExitStatus,
 };
 
-pub use input::{Event, Input, Key};
+pub use input::{Event, Input, Key, Mouse, MouseKind};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Size {
@@ -53,7 +53,7 @@ impl Terminal {
     /// exits.
     pub fn run(&self, command: &[String]) -> io::Result<()> {
         let mut out: io::Stdout = io::stdout();
-        out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l")?;
+        out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1002l\x1b[?1006l\x1b[?1049l")?;
         out.flush()?;
         sys::set_mode(&self.original)?;
         let (shell_var, fallback): (&str, &str) =
@@ -73,7 +73,7 @@ impl Terminal {
 impl Drop for Terminal {
     fn drop(&mut self) {
         let mut out: io::Stdout = io::stdout();
-        let _: Result<(), io::Error> = out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1049l");
+        let _: Result<(), io::Error> = out.write_all(b"\x1b[0m\x1b[0 q\x1b[?25h\x1b[?1002l\x1b[?1006l\x1b[?1049l");
         let _: Result<(), io::Error> = out.flush();
         let _: Result<(), io::Error> = sys::set_mode(&self.original);
     }
