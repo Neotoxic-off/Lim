@@ -165,8 +165,8 @@ impl Editor {
         }
     }
 
-    /// `<Leader>R`: renames the file on disk (if it exists) and the buffer.
-    fn rename_current(&mut self, input: &str) -> Result<String, String> {
+    /// `<Leader>R` and `:rename`: renames the file on disk (if it exists) and the buffer.
+    pub(super) fn rename_current(&mut self, input: &str) -> Result<String, String> {
         let to: PathBuf = PathBuf::from(input);
         let from: Option<PathBuf> = self.buf().path.clone();
         if to.exists() && from.as_deref() != Some(to.as_path()) {

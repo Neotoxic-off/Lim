@@ -30,34 +30,45 @@ pub struct State {
     region: Option<usize>,
 }
 
-/// Start state of each line, valid for a prefix of the buffer; edits truncate it.
-#[derive(Debug)]
-pub struct Cache {
-    starts: Vec<State>,
-}
+/// How far back the highlighter starts, from a neutral state, for a line far past the known states (Vim's
+/// `syntax sync minlines`), so `G` in a 3M-line file does not scan it all.
+/// shortcut: a comment or string opened more than this many lines above a far jump is missed there; scan from the
+/// top instead if that shows up in real files.
+const SYNC: usize = 2000;
 
-impl Default for Cache {
-    fn default() -> Self {
-        Self { starts: vec![State::default()] }
-    }
+/// Start state of the lines from `base` on, valid for a run of them; edits truncate it.
+#[derive(Debug, Default)]
+pub struct Cache {
+    base: usize,
+    starts: Vec<State>,
 }
 
 impl Cache {
     /// Forgets states after `line`: its own start state only depends on earlier lines.
     pub fn invalidate(&mut self, line: usize) {
-        self.starts.truncate(line + 1);
+        if line < self.base {
+            *self = Self::default();
+        } else {
+            self.starts.truncate(line - self.base + 1);
+        }
     }
 
-    /// Groups for line `y`, scanning forward from the last known state.
+    /// Groups for line `y`, scanning forward from the last known state, or from `SYNC` lines above it when that is
+    /// nearer.
     pub fn line(&mut self, lines: &[String], lang: &Lang, y: usize) -> Vec<Hl> {
-        while self.starts.len() <= y {
+        let known: usize = self.base + self.starts.len().saturating_sub(1);
+        if self.starts.is_empty() || y < self.base || y > known + SYNC {
+            self.base = y.saturating_sub(SYNC);
+            self.starts = vec![State::default()];
+        }
+        while self.base + self.starts.len() <= y {
             let i: usize = self.starts.len() - 1;
-            let chars: Vec<char> = lines[i].chars().collect();
+            let chars: Vec<char> = lines[self.base + i].chars().collect();
             let end: State = highlight(&chars, lang, self.starts[i]).1;
             self.starts.push(end);
         }
         let chars: Vec<char> = lines[y].chars().collect();
-        highlight(&chars, lang, self.starts[y]).0
+        highlight(&chars, lang, self.starts[y - self.base]).0
     }
 }
 
@@ -207,6 +218,21 @@ mod tests {
         assert_eq!(cache.line(&lines, rust, 2)[7], Hl::Keyword);
         let lua: &Lang = lang("x.lua");
         assert!(highlight(&lines[3].chars().collect::<Vec<_>>(), lua, State::default()).1 != State::default());
+    }
+
+    /// A far jump scans only `SYNC` lines above it; nearer lines, and the top after an edit, stay exact.
+    #[test]
+    fn syncs_near_a_far_line() {
+        let mut lines: Vec<String> = vec!["/* open".into()];
+        lines.extend((0..3 * SYNC).map(|_| "let x".to_owned()));
+        let rust: &Lang = lang("x.rs");
+        let mut cache: Cache = Cache::default();
+        assert_eq!(cache.line(&lines, rust, SYNC)[0], Hl::Comment, "within SYNC: exact");
+        assert_eq!(cache.line(&lines, rust, 3 * SYNC)[0], Hl::Keyword, "far: synced from a neutral state");
+        assert_eq!((cache.base, cache.starts.len()), (2 * SYNC, SYNC + 1), "only the window was scanned");
+        assert_eq!(cache.line(&lines, rust, 3 * SYNC - 1)[0], Hl::Keyword, "the window is reused");
+        cache.invalidate(5);
+        assert_eq!(cache.line(&lines, rust, 3)[0], Hl::Comment, "an edit above the window starts over");
     }
 
     #[test]

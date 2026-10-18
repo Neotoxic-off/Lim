@@ -1,4 +1,4 @@
-//! `:Name` commands from plugins and the config: the lines go to a program's stdin, and its stdout replaces them
+//! `:Name` commands from the config: the lines go to a program's stdin, and its stdout replaces them
 //! or shows as a message. Any language works, since lim only talks to the process.
 
 use std::io::{self, Read, Write};
@@ -13,7 +13,7 @@ use crate::buffer::Buffer;
 use crate::config::{CommandOutput, UserCommand};
 use crate::error::Error;
 
-/// shortcut: the editor waits for the program up to this long, run it in the background if plugins with long
+/// shortcut: the editor waits for the program up to this long, run it in the background if commands with long
 /// jobs show up.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -41,14 +41,9 @@ impl Editor {
             return Err(fail("cannot run programs here".into()));
         }
         let file: String = self.buf().path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-        let plugin: String = command.dir.display().to_string();
         let line: String = (self.buf().cursor.line + 1).to_string();
-        let words: Vec<String> = command
-            .run
-            .iter()
-            .chain(args)
-            .map(|a| a.replace("${file}", &file).replace("${line}", &line).replace("${plugin}", &plugin))
-            .collect();
+        let words: Vec<String> =
+            command.run.iter().chain(args).map(|a| a.replace("${file}", &file).replace("${line}", &line)).collect();
         let input: String = self.buf().lines()[lines.first..=lines.last].join("\n") + "\n";
         let output: String = pipe(&words, &input).map_err(fail)?;
         match command.output {
@@ -130,10 +125,7 @@ fn read_all(mut pipe: impl Read) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
-
     use super::*;
-    use crate::config::Config;
 
     #[test]
     fn pipes_through_a_program() {
@@ -142,41 +134,5 @@ mod tests {
         assert!(pipe(&[filter.into(), "b".into()], "a\n").is_err(), "no match exits with 1");
         assert!(pipe(&["lim-no-such-program".into()], "").unwrap_err().starts_with("lim-no-such-program"));
         assert!(pipe(&[], "").is_err());
-    }
-
-    /// The shipped example plugins load cleanly, and the text and info ones give the same answers on every system
-    /// (coreutils on Unix, `PowerShell` on Windows).
-    #[test]
-    fn example_plugins_work() {
-        let dir: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples").join("plugins");
-        let mut config: Config = Config::default();
-        let mut warnings: Vec<String> = Vec::new();
-        config.read_plugins(&dir, &mut warnings);
-        assert_eq!(warnings, Vec::<String>::new());
-        assert_eq!(config.commands.len(), 23);
-        let cases: [(&str, &str, &str); 9] = [
-            ("Sort", "b\na\n", "a\nb\n"),
-            ("Uniq", "a\na\nb\n", "a\nb\n"),
-            ("Reverse", "a\nb\n", "b\na\n"),
-            ("Upper", "ab\n", "AB\n"),
-            ("Trim", "a  \n", "a\n"),
-            ("B64", "hi\n", "aGkK\n"),
-            ("B64d", "aGkK\n", "hi\n"),
-            ("Wc", "a b\nc\n", "2 lines, 3 words, 6 chars\n"),
-            ("Sha", "hi\n", "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4\n"),
-        ];
-        let run = |name: &str, input: &str| -> String {
-            let command: &UserCommand = config.commands.iter().find(|c| c.name == name).unwrap();
-            let plugin: String = command.dir.display().to_string();
-            let words: Vec<String> = command.run.iter().map(|a| a.replace("${plugin}", &plugin)).collect();
-            pipe(&words, input).unwrap_or_else(|e| panic!("{name}: {e}"))
-        };
-        // PowerShell takes a while to start, so the cases run side by side.
-        thread::scope(|s| {
-            for (name, input, expected) in cases {
-                s.spawn(move || assert_eq!(run(name, input), expected, "{name}"));
-            }
-            s.spawn(|| assert_eq!(run("Calc", "2*(3+4)/7\n").trim().parse::<f64>().ok(), Some(2.0)));
-        });
     }
 }

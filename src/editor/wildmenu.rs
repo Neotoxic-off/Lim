@@ -22,7 +22,7 @@ pub struct CmdCompletion {
     pub selected: Option<usize>,
 }
 
-/// Where the word to complete starts in `line`, and its candidates; `user` adds the plugins' commands.
+/// Where the word to complete starts in `line`, and its candidates; `user` adds the config's commands.
 pub fn candidates(line: &str, user: &[UserCommand]) -> (usize, Vec<(String, String)>) {
     let Some((name, _)): Option<(&str, &str)> = line.split_once(' ') else {
         let items: Vec<(String, String)> = COMMANDS

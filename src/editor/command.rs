@@ -8,6 +8,8 @@ use super::lines::SortKey;
 use super::motion::{Motion, Span};
 use super::operator::Operator;
 use super::picker::PickerKind;
+use super::re::PackType;
+use super::textops::TextOp;
 use super::vim::LineRange;
 use super::{Editor, Mode};
 use crate::buffer::{Buffer, Pos, text};
@@ -16,25 +18,41 @@ use crate::term::Key;
 
 /// Every ex command by its full name, for command-line completion and `<Leader>fC`.
 pub const COMMANDS: &[(&str, &str)] = &[
+    ("base32", "Base32-encode the lines (! decodes)"),
+    ("base64", "Base64-encode the lines (! decodes)"),
     ("bdelete", "Delete buffer"),
     ("bnext", "Next buffer"),
     ("bprevious", "Previous buffer"),
+    ("calc", "Evaluate the arithmetic of the lines"),
     ("close", "Close window"),
+    ("detect", "File type, architecture, entropy, packer of the bytes"),
     ("edit", "Edit a file"),
     ("enew", "New empty buffer"),
     ("help", "Cheatsheet"),
+    ("hex", "Hex-encode the lines (! decodes)"),
+    ("hexedit", "Toggle the hex view of the buffer"),
+    ("inspect", "The bytes at the cursor as every number type"),
     ("nohlsearch", "Clear search highlight"),
     ("only", "Close other windows"),
+    ("pack", "Write a number at the cursor: :pack u32le 0x1234"),
     ("qall", "Quit"),
     ("quit", "Close the window or quit"),
+    ("rename", "Rename the file on disk and the buffer"),
+    ("rot13", "ROT13 the lines"),
     ("settings", "Settings: every option, searchable (also :setup)"),
+    ("sha256", "SHA-256 of the lines"),
     ("split", "Split window"),
+    ("strings", "Printable strings of the bytes, with offsets"),
+    ("uniq", "Drop repeated adjacent lines"),
+    ("url", "Percent-encode each line (! decodes)"),
     ("vsplit", "Split window vertically"),
     ("wall", "Write all buffers"),
+    ("wc", "Count lines, words and chars"),
     ("wq", "Write and quit"),
     ("wqall", "Write all and quit"),
     ("write", "Write the buffer"),
     ("xit", "Write if changed and quit"),
+    ("xor", "XOR the bytes with a key: :xor 0x41 or :xor key"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,6 +112,11 @@ pub enum Command {
         reverse: bool,
         unique: bool,
     },
+    /// `:[range]uniq`, `base64[!]`, `sha256`, `wc`, `calc`: the whole buffer without a range.
+    Text {
+        range: String,
+        op: TextOp,
+    },
     /// `:[range]m {address}`, or `:t` / `:co` with `copy`.
     MoveLines {
         range: String,
@@ -112,6 +135,23 @@ pub enum Command {
         path: PathBuf,
         force: bool,
     },
+    /// `:hexedit`, `:detect`, `:inspect`, `:strings`: the reverse-engineering views of the buffer's bytes.
+    HexEdit,
+    Detect,
+    Inspect,
+    Strings,
+    /// `:pack {type} {value}` at the cursor of a hex buffer.
+    Pack {
+        ty: PackType,
+        value: String,
+    },
+    /// `:[range]xor {key}` in a hex buffer.
+    Xor {
+        range: String,
+        key: String,
+    },
+    /// `:rename file`: the file on disk and the buffer, as `<Leader>R`.
+    Rename(String),
     /// `:ls`: the buffer list (the buffers picker).
     ListBuffers,
     /// `:b N` / `:b name`
@@ -130,7 +170,7 @@ pub enum Command {
     },
     Help,
     Setup,
-    /// `:[range]Name args`: a plugin or config command, by Vim's rule that user commands start uppercase.
+    /// `:[range]Name args`: a config command, by Vim's rule that user commands start uppercase.
     User {
         range: String,
         name: String,
@@ -328,6 +368,35 @@ impl Command {
                 let unique: bool = arg.contains('u');
                 return Ok(Some(Self::Sort { range: range.to_owned(), key, reverse: force, unique }));
             }
+            "uniq" | "base64" | "base32" | "hex" | "url" | "rot13" | "sha256" | "wc" | "calc" if arg.is_empty() => {
+                let op: TextOp = match bare {
+                    "uniq" => TextOp::Uniq,
+                    "base64" => TextOp::Base64 { decode: force },
+                    "base32" => TextOp::Base32 { decode: force },
+                    "hex" => TextOp::Hex { decode: force },
+                    "url" => TextOp::Url { decode: force },
+                    "rot13" => TextOp::Rot13,
+                    "sha256" => TextOp::Sha256,
+                    "wc" => TextOp::Wc,
+                    _ => TextOp::Calc,
+                };
+                return Ok(Some(Self::Text { range: range.to_owned(), op }));
+            }
+            "hexedit" | "detect" | "inspect" | "strings" if arg.is_empty() && range.is_empty() => {
+                return Ok(Some(match bare {
+                    "hexedit" => Self::HexEdit,
+                    "detect" => Self::Detect,
+                    "inspect" => Self::Inspect,
+                    _ => Self::Strings,
+                }));
+            }
+            "pack" if range.is_empty() => {
+                let (ty, value): (&str, &str) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
+                let ty: PackType =
+                    PackType::parse(ty).ok_or_else(|| Error::Vim(format!("E475: Invalid argument: {ty}")))?;
+                return Ok(Some(Self::Pack { ty, value: value.trim().to_owned() }));
+            }
+            "xor" if !arg.is_empty() => return Ok(Some(Self::Xor { range: range.to_owned(), key: arg.to_owned() })),
             "m" | "mo" | "move" | "t" | "co" | "copy" if !arg.is_empty() => {
                 let copy: bool = !bare.starts_with('m');
                 return Ok(Some(Self::MoveLines { range: range.to_owned(), address: arg.to_owned(), copy }));
@@ -386,6 +455,7 @@ impl Command {
             "e" | "edit" if force && path.is_none() => Self::Reload,
             "e" | "edit" => Self::Edit(path.ok_or(Error::NoFileName)?),
             "sav" | "saveas" => Self::SaveAs { path: path.ok_or(Error::NoFileName)?, force },
+            "rename" if !arg.is_empty() => Self::Rename(arg.to_owned()),
             "ls" | "buffers" | "files" => Self::ListBuffers,
             "b" | "bu" | "buf" | "buffer" => Self::Buffer(arg.to_owned()),
             b if b.len() > 1 && b.starts_with('b') && b[1..].bytes().all(|c| c.is_ascii_digit()) => {
@@ -536,6 +606,19 @@ impl Editor {
                 let lines: LineRange = self.range_or_all(&range)?;
                 self.sort_lines(lines, key, reverse, unique);
             }
+            Command::HexEdit => self.buf_mut().toggle_hex()?,
+            Command::Detect => self.detect()?,
+            Command::Inspect => self.inspect()?,
+            Command::Strings => self.strings()?,
+            Command::Pack { ty, value } => self.pack(ty, &value)?,
+            Command::Xor { range, key } => {
+                let lines: LineRange = self.range_or_all(&range)?;
+                self.xor(lines, &key)?;
+            }
+            Command::Text { range, op } => {
+                let lines: LineRange = self.range_or_all(&range)?;
+                self.text_op(lines, op)?;
+            }
             Command::MoveLines { range, address, copy } => {
                 let lines: LineRange = self.parse_range(&range).ok_or_else(|| Error::NotACommand(range.clone()))?;
                 self.move_lines(lines, &address, copy)?;
@@ -556,6 +639,10 @@ impl Editor {
                 buf.set_path(path);
                 let summary: String = buf.save(None, false)?;
                 self.info(summary);
+            }
+            Command::Rename(name) => {
+                let done: String = self.rename_current(&name).map_err(Error::Vim)?;
+                self.info(done);
             }
             Command::ListBuffers => self.open_picker(PickerKind::Buffers),
             Command::Buffer(name) => self.switch_to_named(&name)?,
@@ -696,6 +783,17 @@ mod tests {
         );
         assert_eq!(Command::parse("$").unwrap(), Some(Command::GotoAddress("$".into())));
         assert_eq!(Command::parse("2,4>").unwrap(), Some(Command::LineOp { range: "2,4".into(), op: LineOp::Indent }));
+        assert_eq!(
+            Command::parse("'<,'>base64!").unwrap(),
+            Some(Command::Text { range: "'<,'>".into(), op: TextOp::Base64 { decode: true } })
+        );
+        assert_eq!(Command::parse("uniq").unwrap(), Some(Command::Text { range: String::new(), op: TextOp::Uniq }));
+        assert_eq!(Command::parse(".calc").unwrap(), Some(Command::Text { range: ".".into(), op: TextOp::Calc }));
+        // The text commands take no argument, and `:b64` stays buffer 64.
+        for bad in ["uniq x", "wc -l", "sha256 file", "rename"] {
+            assert!(matches!(Command::parse(bad), Err(Error::NotACommand(_))), "{bad}");
+        }
+        assert_eq!(Command::parse("b64").unwrap(), Some(Command::Buffer("64".into())));
         assert_eq!(
             Command::parse("'<,'>Sort -r  -u").unwrap(),
             Some(Command::User { range: "'<,'>".into(), name: "Sort".into(), args: vec!["-r".into(), "-u".into()] })

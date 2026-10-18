@@ -544,7 +544,7 @@ fn command_line_completion() {
     ed.handle(Key::Tab);
     ed.handle(Key::Tab);
     ed.handle(Key::BackTab);
-    assert_eq!(ed.cmdline, "bdelete");
+    assert_eq!(ed.cmdline, "base32");
     ed.handle(Key::Esc);
     assert!(ed.cmd_completion.is_none());
 }
@@ -971,6 +971,42 @@ fn gn_line_commands_files_and_block_end() {
     keys(&mut ed, ":1,2m1\n");
     assert!(ed.message_text().starts_with("E134"));
 
+    // The built-in text commands, on the buffer or a range.
+    let mut ed: Editor = editor("a\na\nb\n2*(3+4)");
+    keys(&mut ed, ":1,3uniq\n");
+    assert_eq!(text(&ed), "a\nb\n2*(3+4)");
+    keys(&mut ed, ":$calc\n");
+    assert_eq!(ed.message_text(), "14");
+    keys(&mut ed, ":1calc\n");
+    assert!(ed.message_text().starts_with("E15"));
+    keys(&mut ed, ":wc\n");
+    assert_eq!(ed.message_text(), "3 lines, 3 words, 12 chars");
+    keys(&mut ed, ":base64\n");
+    assert_eq!(text(&ed), "YQpiCjIqKDMrNCkK");
+    keys(&mut ed, ":base64!\n");
+    assert_eq!(text(&ed), "a\nb\n2*(3+4)");
+    keys(&mut ed, "u");
+    assert_eq!(text(&ed), "YQpiCjIqKDMrNCkK");
+    keys(&mut ed, ":base64!\n:1sha256\n");
+    assert_eq!(ed.message_text(), "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7");
+
+    // A range leaves the other lines alone; a fraction keeps its decimals; bad input changes nothing.
+    let mut ed: Editor = editor("@\nhi\n@\n1/4");
+    keys(&mut ed, ":2base64\n");
+    assert_eq!(text(&ed), "@\naGkK\n@\n1/4");
+    keys(&mut ed, ":$calc\n");
+    assert_eq!(ed.message_text(), "0.25");
+    keys(&mut ed, ":1base64!\n");
+    assert!(ed.message_text().starts_with("E475"), "@ is not base64");
+    let mut ed: Editor = editor("/w==");
+    keys(&mut ed, ":base64!\n");
+    assert!(ed.message_text().starts_with("E475"), "byte 0xff is not UTF-8");
+    assert_eq!(text(&ed), "/w==");
+    keys(&mut ed, "cc=\x1b:base64!\n");
+    assert_eq!(text(&ed), "", "nothing decodes to one empty line");
+    keys(&mut ed, ":wc\n");
+    assert_eq!(ed.message_text(), "1 lines, 0 words, 1 chars");
+
     let dir: PathBuf = std::env::temp_dir().join(format!("lim-ex-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let (one, two): (PathBuf, PathBuf) = (dir.join("one.txt"), dir.join("two.txt"));
@@ -991,6 +1027,15 @@ fn gn_line_commands_files_and_block_end() {
     assert_eq!(ed.buf().path.as_deref(), Some(one.as_path()));
     keys(&mut ed, ":b 9\n");
     assert!(ed.message_text().starts_with("E86"));
+    // `:rename` moves the file on disk and keeps the buffer on it; it never overwrites another file.
+    let three: PathBuf = dir.join("sub").join("three.txt");
+    keys(&mut ed, &format!(":rename {}\n", three.display()));
+    assert_eq!(ed.buf().path.as_deref(), Some(three.as_path()));
+    assert!(!one.exists());
+    assert_eq!(std::fs::read_to_string(&three).unwrap(), "x\ny\n");
+    keys(&mut ed, &format!(":rename {}\n", two.display()));
+    assert!(ed.message_text().starts_with("E13"));
+    assert!(three.exists());
     keys(&mut ed, ":ls\n");
     assert_eq!(ed.mode, Mode::Picker);
     ed.handle(Key::Esc);
@@ -1146,4 +1191,55 @@ fn mouse_in_another_window_ends_visual_mode() {
     ed.handle(Key::Mouse(Mouse { kind: MouseKind::ScrollDown, col: other.area.x, row: other.area.y }));
     assert_eq!((ed.active, ed.mode), (other.window, Mode::Normal));
     keys(&mut ed, "~");
+}
+
+/// A binary file opens as a hex dump, its edits and `:pack`/`:xor` are written back as bytes, and a dump that is
+/// not hex is refused instead of written.
+#[test]
+fn hex_buffers_and_reverse_engineering() {
+    let path: PathBuf = std::env::temp_dir().join(format!("lim-hex-{}.bin", std::process::id()));
+    let mut bytes: Vec<u8> = vec![0; 32];
+    bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
+    (bytes[16], bytes[18]) = (2, 0x3e);
+    bytes[20..26].copy_from_slice(b"hello\xff");
+    std::fs::write(&path, &bytes).unwrap();
+    let mut ed: Editor = editor("");
+    keys(&mut ed, &format!(":e {}\n", path.display()));
+    assert!(ed.buf().hex);
+    assert!(text(&ed).starts_with("00000000: 7f 45 4c 46 02 01 00 00"), "{}", text(&ed));
+    keys(&mut ed, ":detect\n");
+    assert_eq!(ed.message_text(), "ELF 64-bit LSB executable x86-64 · 32 bytes · entropy 2.53");
+    keys(&mut ed, "j022l:inspect\n");
+    assert!(ed.message_text().starts_with("0x14: u8 104 i8 104 · u16 25960/26725"), "{}", ed.message_text());
+    keys(&mut ed, ":pack u16be 0x4142\n:pack u24le 1\n");
+    assert!(ed.message_text().starts_with("E475"));
+    keys(&mut ed, "gg010lr0lr0:w\n");
+    let written: Vec<u8> = std::fs::read(&path).unwrap();
+    assert_eq!((written[0], &written[20..22]), (0, &b"AB"[..]));
+    keys(&mut ed, ":2xor 0x01\n:w\n");
+    assert_eq!(std::fs::read(&path).unwrap()[16..21], [3, 1, 0x3f, 1, b'@']);
+    keys(&mut ed, "u:w\n");
+    assert_eq!(std::fs::read(&path).unwrap(), written, "undo restores the bytes");
+    keys(&mut ed, "gg010liz\x1b:w\n");
+    assert!(ed.message_text().starts_with("E513"), "{}", ed.message_text());
+    assert_eq!(std::fs::read(&path).unwrap(), written, "a broken dump is never written");
+    keys(&mut ed, "u:strings\n");
+    assert_eq!(text(&ed), "00000014: ABllo");
+    let _: std::io::Result<()> = std::fs::remove_file(&path);
+
+    let mut ed: Editor = editor("hi");
+    keys(&mut ed, ":inspect\n");
+    assert!(ed.message_text().starts_with("E21"));
+    keys(&mut ed, ":hexedit\n");
+    assert_eq!(text(&ed), format!("00000000: 68 69 0a{}|hi.|", " ".repeat(42)));
+    keys(&mut ed, ":hexedit\n");
+    assert_eq!(text(&ed), "hi");
+    keys(&mut ed, ":hex\n");
+    assert_eq!(text(&ed), "68690a");
+    keys(&mut ed, ":hex!\n:base32\n");
+    assert_eq!(text(&ed), "NBUQU===");
+    keys(&mut ed, ":base32!\ncca b\x1b:url\n");
+    assert_eq!(text(&ed), "a%20b");
+    keys(&mut ed, ":url!\n:rot13\n");
+    assert_eq!(text(&ed), "n o");
 }

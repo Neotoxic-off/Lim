@@ -67,62 +67,51 @@ pub fn prompt(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
     Some((y + 1, x + 2 + text::str_width(&before) - skip))
 }
 
-/// The cheat sheet: cards laid out in columns (shortest column first), scrolled as one.
+/// The cheat sheet over the whole window, laid out as the settings screen: a search line, then each card's title
+/// and one row per key, scrolled as one list.
 pub fn cheatsheet(ed: &Editor, grid: &mut Grid) {
     let Some(sheet): &Option<Cheatsheet> = &ed.cheatsheet else { return };
     let t: Arc<Theme> = theme();
     let fill: Style = t.style(Group::NormalFloat);
     let border: Style = t.style(Group::FloatBorder);
-    let (w, h): (usize, usize) =
-        ((grid.width * 9 / 10).max(grid.width.min(30)), (grid.height * 9 / 10).max(grid.height.min(8)));
-    if w < 24 || h < 6 {
+    let (w, h): (usize, usize) = (grid.width, grid.height);
+    if w < 30 || h < 7 {
         return;
     }
-    let (x, y): (usize, usize) = ((grid.width - w) / 2, (grid.height - h) / 2);
-    let title: String =
-        if sheet.filter.is_empty() { "Cheatsheet".to_owned() } else { format!("Cheatsheet: {}", sheet.filter) };
-    grid.float(Rect { x, y, w, h }, border, fill, &title);
-    let inner: Rect = Rect { x: x + 2, y: y + 1, w: w - 4, h: h - 2 };
-    // As many columns as fit at 46 cells, sharing the width.
-    let columns: usize = (inner.w / 46).max(1);
-    let column_width: usize = inner.w / columns;
-    let accents: [Group; 6] = [
-        Group::StatusModeNormal,
-        Group::StatusModeInsert,
-        Group::StatusModeVisual,
-        Group::StatusModeCommand,
-        Group::StatusCwd,
-        Group::StatusModeReplace,
-    ];
-    // Lay every card into the shortest column, as virtual rows.
-    let mut heights: Vec<usize> = vec![0usize; columns];
-    let mut placed: Vec<(usize, usize, usize, Card)> = Vec::new();
-    for (i, card) in ed.cheatsheet_cards().into_iter().enumerate() {
-        let column: usize = (0..columns).min_by_key(|&c| heights[c]).unwrap_or(0);
-        placed.push((column, heights[column], i, card));
-        heights[column] += placed.last().map_or(0, |p: &(usize, usize, usize, Card)| p.3.rows.len() + 3);
+    let area: Rect = Rect { x: 0, y: 0, w, h };
+    grid.float(area, border, fill, "Cheatsheet");
+    let hint: Style = Style { fg: t.fg(Group::Comment), ..fill };
+    let (search, field): (String, Style) = if sheet.filter.is_empty() {
+        (" / Search keys and commands".into(), hint)
+    } else {
+        (format!(" / {}█", sheet.filter), fill)
+    };
+    grid.text(area.x + 2, area.y + 1, w - 4, field, &search);
+    let inner: Rect = Rect { x: area.x + 2, y: area.y + 3, w: w - 4, h: h.saturating_sub(5) };
+    // A title row before each card, then one row per key.
+    let cards: Vec<Card> = ed.cheatsheet_cards();
+    let mut rows: Vec<(Option<&str>, &str)> = Vec::new();
+    for card in &cards {
+        rows.push((None, &card.title));
+        rows.extend(card.rows.iter().map(|(keys, desc)| (Some(keys.as_str()), desc.as_str())));
     }
-    let scroll: usize = sheet.scroll.min(heights.iter().max().copied().unwrap_or(0).saturating_sub(inner.h));
-    for (column, top, i, card) in placed {
-        let cx: usize = inner.x + column * column_width;
-        let width: usize = column_width.saturating_sub(2);
-        let row_at = |r: usize| (top + r).checked_sub(scroll).filter(|&v| v < inner.h).map(|v| inner.y + v);
-        if let Some(ry) = row_at(0) {
-            let chip: Style = t.style(accents[i % accents.len()]);
-            let mut row: Row = Row::new(width);
-            row.text(chip, &format!(" {} ", card.title));
-            grid.put(cx, ry, &row.finish(fill));
-        }
-        for (r, (keys, desc)) in card.rows.iter().enumerate() {
-            let Some(ry): Option<usize> = row_at(r + 2) else { continue };
-            let mut row: Row = Row::new(width);
-            row.text(t.on(Group::CheatsheetKey, fill.bg), keys);
-            row.pad_to(fill, 18.min(width));
-            row.text(fill, " ");
-            row.text(t.on(Group::CheatsheetDesc, fill.bg), desc);
-            grid.put(cx, ry, &row.finish(fill));
-        }
+    if rows.is_empty() {
+        grid.text(inner.x, inner.y, inner.w, hint, " Nothing matches");
     }
+    let scroll: usize = sheet.scroll.min(rows.len().saturating_sub(inner.h));
+    for (y, (keys, text)) in rows.iter().skip(scroll).take(inner.h).enumerate() {
+        let mut row: Row = Row::new(inner.w);
+        match keys {
+            None => row.text(t.style(Group::StatusModeNormal), &format!(" {text} ")),
+            Some(keys) => {
+                row.text(Style { fg: t.fg(Group::CheatsheetKey), ..fill }, &format!(" {keys}"));
+                row.pad_to(fill, 26);
+                row.text(Style { fg: t.fg(Group::CheatsheetDesc), ..fill }, &format!(" {text}"));
+            }
+        }
+        grid.put(inner.x, inner.y + y, &row.finish(fill));
+    }
+    grid.text(inner.x, area.y + h - 2, inner.w, hint, " type to search · ↑/↓ PgUp/PgDn scroll · Esc close");
 }
 
 /// The settings screen over the whole window, as VS Code's settings tab; it is drawn in the theme it changes.

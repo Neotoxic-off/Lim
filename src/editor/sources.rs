@@ -197,7 +197,7 @@ impl Editor {
     }
 
     /// Opens git output (a commit, a stash) in a read-only scratch buffer.
-    fn show_scratch(&mut self, title: &str, text: Option<String>) {
+    pub(super) fn show_scratch(&mut self, title: &str, text: Option<String>) {
         let Some(text): Option<String> = text else { return self.info("git produced no output") };
         let mut buf: Buffer = Buffer::from_text(None, &text);
         buf.title = Some(title.to_owned());

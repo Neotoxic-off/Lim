@@ -342,6 +342,9 @@ mod tests {
         press(&mut ed, &[Key::Char(' '), Key::Char('f'), Key::Char('b')], "other.rs");
         press(&mut ed, &[Key::Char(' '), Key::Char('f'), Key::Char('b'), Key::Char('o'), Key::Char('t')], "other.rs");
         press(&mut ed, &[Key::F(1)], "Operators");
+        press(&mut ed, &[Key::F(1)], "/ Search keys and commands");
+        press(&mut ed, &[Key::F(1), Key::Char('x'), Key::Char('o'), Key::Char('r')], " Reverse engineering ");
+        press(&mut ed, &[Key::F(1), Key::Char('x'), Key::Char('o'), Key::Char('r')], ":xor 0x41 :xor key");
         press(&mut ed, &[Key::Char(' '), Key::Char('R')], "other.rs");
         press(&mut ed, &[Key::Char(' ')], "+Find");
         let setup: Vec<Key> = ":settings".chars().map(Key::Char).chain([Key::Enter]).collect();

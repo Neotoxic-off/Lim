@@ -109,9 +109,32 @@ const VIM: &[(&str, &[(&str, &str)])] = &[
             (":norm keys :sort", "Type keys on lines; sort lines"),
             (":m :t :r file", "Move, copy lines; read a file in"),
             (":{range}d y > <", "Delete, yank, indent lines"),
+            (":rename {file}", "Rename the file on disk and the buffer"),
             (":settings  <Leader>,", "Settings: theme, icons, every option"),
             (":noh", "Clear search highlight"),
             (":{n}", "Go to line"),
+        ],
+    ),
+    (
+        "Text tools",
+        &[
+            (":uniq", "Drop repeated adjacent lines"),
+            (":base64 :base32 :hex", "Encode the lines; with ! decode them"),
+            (":url :url!", "Percent-encode / decode each line"),
+            (":rot13", "ROT13 each line"),
+            (":sha256 :wc", "Hash; count lines, words, chars"),
+            (":calc", "Arithmetic of the lines (+ - * / % ^)"),
+        ],
+    ),
+    (
+        "Reverse engineering",
+        &[
+            (":hexedit", "Toggle the hex view (binary files open in it)"),
+            (":detect", "File type, architecture, entropy, packer"),
+            (":strings", "Printable strings (ASCII, UTF-16) with offsets"),
+            (":inspect", "Bytes at the cursor as every number type"),
+            (":pack u32le 0x10", "Write a number at the cursor"),
+            (":xor 0x41 :xor key", "XOR the bytes of the lines with a key"),
         ],
     ),
 ];

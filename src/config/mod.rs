@@ -359,17 +359,15 @@ pub enum CommandOutput {
     Message,
 }
 
-/// `:Name` from a plugin or the config: the lines go to `run`'s stdin.
+/// `:Name` from the config: the lines go to `run`'s stdin.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UserCommand {
     pub name: String,
-    /// Program and arguments (`windows` instead of `run` on Windows when given); `${file}`, `${line}` and `${plugin}`
-    /// are expanded when it runs.
+    /// Program and arguments (`windows` instead of `run` on Windows when given); `${file}` and `${line}` are expanded
+    /// when it runs.
     pub run: Vec<String>,
     pub output: CommandOutput,
     pub desc: String,
-    /// The plugin's folder, empty for the config's own commands.
-    pub dir: PathBuf,
     pub on: Trigger,
     /// File extensions (`"js"`, `"*.ts"`) an automatic run is limited to; empty for every file.
     pub files: Vec<String>,
@@ -416,16 +414,18 @@ fn user_dir(xdg: &str, windows: &str, home: &[&str]) -> Option<PathBuf> {
     Some(base.join("lim"))
 }
 
-/// The plugins, then the config over them, and every problem found. A missing file is not a problem.
+/// The config and every problem found. A missing file is not a problem.
 pub fn load() -> (Config, Vec<String>) {
     let mut config: Config = Config::default();
     let mut warnings: Vec<String> = Vec::new();
     let Some(path): Option<PathBuf> = path() else { return (config, warnings) };
-    if let Some(dir) = path.parent() {
-        config.read_plugins(&dir.join("plugins"), &mut warnings);
-    }
     match fs::read_to_string(&path) {
-        Ok(text) => config.read_file(&path, &text, None, &mut warnings),
+        Ok(text) => {
+            config.read(&text, &mut warnings);
+            for w in &mut warnings {
+                *w = format!("{}: {w}", path.display());
+            }
+        }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => warnings.push(format!("{}: {e}", path.display())),
     }
@@ -437,33 +437,12 @@ impl Config {
     pub fn from_str(text: &str) -> (Self, Vec<String>) {
         let mut config: Config = Self::default();
         let mut warnings: Vec<String> = Vec::new();
-        config.read(text, None, &mut warnings);
+        config.read(text, &mut warnings);
         (config, warnings)
     }
 
-    /// Every `<dir>/<name>/plugin.json`, in name order. A plugin holds the same sections as the config, plus
-    /// `name`, `version` and `description`.
-    pub fn read_plugins(&mut self, dir: &Path, warnings: &mut Vec<String>) {
-        let Ok(entries): io::Result<fs::ReadDir> = fs::read_dir(dir) else { return };
-        let mut manifests: Vec<PathBuf> =
-            entries.filter_map(|e| Some(e.ok()?.path().join("plugin.json"))).filter(|p| p.is_file()).collect();
-        manifests.sort();
-        for manifest in manifests {
-            match fs::read_to_string(&manifest) {
-                Ok(text) => self.read_file(&manifest, &text, manifest.parent(), warnings),
-                Err(e) => warnings.push(format!("{}: {e}", manifest.display())),
-            }
-        }
-    }
-
-    fn read_file(&mut self, path: &Path, text: &str, plugin: Option<&Path>, warnings: &mut Vec<String>) {
-        let mut found: Vec<String> = Vec::new();
-        self.read(text, plugin, &mut found);
-        warnings.extend(found.into_iter().map(|w| format!("{}: {w}", path.display())));
-    }
-
-    /// Merges one config.json, or the plugin.json of the folder `plugin`, over what was read before.
-    fn read(&mut self, text: &str, plugin: Option<&Path>, warnings: &mut Vec<String>) {
+    /// Merges one config.json over what was read before.
+    fn read(&mut self, text: &str, warnings: &mut Vec<String>) {
         match json::parse(text) {
             Ok(Json::Object(sections)) => {
                 for (name, value) in sections {
@@ -472,9 +451,8 @@ impl Config {
                         "palette" => self.read_palette(&value, warnings),
                         "highlights" => self.read_highlights(&value, warnings),
                         "keymaps" => self.read_keymaps(&value, warnings),
-                        "commands" => self.read_commands(&value, plugin.unwrap_or(Path::new("")), warnings),
+                        "commands" => self.read_commands(&value, warnings),
                         "$schema" | "_comment" => {}
-                        "name" | "version" | "description" if plugin.is_some() => {}
                         other => warnings.push(format!("unknown section \"{other}\"")),
                     }
                 }
@@ -484,12 +462,12 @@ impl Config {
         }
     }
 
-    fn read_commands(&mut self, value: &Json, dir: &Path, warnings: &mut Vec<String>) {
+    fn read_commands(&mut self, value: &Json, warnings: &mut Vec<String>) {
         let Json::Object(commands): &Json = value else {
             return warnings.push("\"commands\" must be an object".into());
         };
         for (name, spec) in commands {
-            match user_command(name, spec, dir) {
+            match user_command(name, spec) {
                 Ok(command) => {
                     self.commands.retain(|c| c.name != command.name);
                     self.commands.push(command);
@@ -723,7 +701,7 @@ impl Config {
     }
 }
 
-fn user_command(name: &str, spec: &Json, dir: &Path) -> Result<UserCommand, String> {
+fn user_command(name: &str, spec: &Json) -> Result<UserCommand, String> {
     if !name.starts_with(|c: char| c.is_ascii_uppercase()) || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("a name starts with an uppercase letter, then letters or digits, as in Vim".into());
     }
@@ -768,7 +746,7 @@ fn user_command(name: &str, spec: &Json, dir: &Path) -> Result<UserCommand, Stri
         Some(_) => return Err("\"on\" can only be \"save\"".into()),
     };
     let files: Vec<String> = words("files")?.unwrap_or_default();
-    Ok(UserCommand { name: name.to_owned(), run, output, desc, dir: dir.to_owned(), on, files })
+    Ok(UserCommand { name: name.to_owned(), run, output, desc, on, files })
 }
 
 fn set_bool(slot: &mut bool, value: &Json) -> bool {
@@ -836,29 +814,15 @@ mod tests {
         assert!(OPTION_NAMES.iter().all(|name| *name == "colorscheme" || Options::default().get(name) != Json::Null));
     }
 
-    /// Plugins merge in name order, later ones win, and bad commands are reported with their file.
+    /// A command defined twice keeps the last one, and bad commands are reported.
     #[test]
-    fn plugins_contribute_sections() {
-        let dir: PathBuf = env::temp_dir().join(format!("lim-plugins-{}", std::process::id()));
-        for (name, manifest) in [
-            ("a", r#"{ "name": "a", "options": { "tabstop": 2 }, "commands": { "Sort": { "run": ["sort"] } } }"#),
-            (
-                "b",
-                r#"{ "commands": { "Sort": { "run": ["sort", "-r"], "output": "replace" }, "bad": { "run": [] } } }"#,
-            ),
-        ] {
-            fs::create_dir_all(dir.join(name)).unwrap();
-            fs::write(dir.join(name).join("plugin.json"), manifest).unwrap();
-        }
-        let mut config: Config = Config::default();
-        let mut warnings: Vec<String> = Vec::new();
-        config.read_plugins(&dir, &mut warnings);
-        let _: io::Result<()> = fs::remove_dir_all(&dir);
-        assert_eq!(config.options.tabstop, 2);
+    fn reads_commands() {
+        let (config, warnings): (Config, Vec<String>) = Config::from_str(
+            r#"{ "commands": { "Sort": { "run": ["sort"] }, "Sort": { "run": ["sort", "-r"], "output": "replace" }, "bad": { "run": [] } } }"#,
+        );
         assert_eq!(config.commands.len(), 1);
         assert_eq!(config.commands[0].run, ["sort", "-r"]);
         assert_eq!(config.commands[0].output, CommandOutput::Replace);
-        assert_eq!(config.commands[0].dir, dir.join("b"));
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("commands.bad"), "{warnings:?}");
     }

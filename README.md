@@ -20,15 +20,17 @@ updates.
 lim is that editor with all of it **built in**:
 
 - **No Lua.** One JSON file for options, colors and keymaps, or the `<Leader>,` settings screen.
-- **No plugin manager, no plugins to update.** File tree, pickers, live grep, which-key, git signs,
-  completion, sessions, 30 themes: part of the binary, tested together.
+- **No plugins.** File tree, pickers, live grep, which-key, git signs, completion, sessions, 30 themes,
+  text tools: part of the binary, tested together. `lim --update` gets the latest release.
 - **No dependencies.** Zero crates, nothing to install beside the binary; it runs the same on Linux, macOS
   and Windows.
 - **Nothing breaks after an update.** There is no ecosystem to drift out of sync.
 - **Vim inside.** Operators, text objects, registers, macros, marks, regex `:s` and `:g`, `:norm`, visual
   block: your muscle memory works.
-- **Still extensible.** [Plugins](#plugins) add commands, keymaps and colors with a JSON file and any
-  program you like (format on save, git, text tools), without an embedded language to learn.
+- **A hex editor for reverse engineering.** Binaries open as an editable hex dump; `:detect`, `:strings`,
+  `:inspect`, `:pack`, `:xor` and the encodings (`:base64`, `:hex`, `:url`…) need no other tool.
+- **Still extensible.** [Commands](#commands) in the config pipe text through any program you like
+  (format on save, git), without an embedded language to learn.
 
 **The symbol.** lim's emblem is the Lernaean Hydra, the many-headed serpent of the lake (λίμνη, *limnē*)
 of Lerna: one body, many heads, like one editor working many windows. It greets you, in plain ASCII, on
@@ -55,7 +57,8 @@ the start screen.
 - [Keymaps](#keymaps)
 - [Themes and icons](#themes-and-icons)
 - [Configuration](#configuration)
-- [Plugins](#plugins)
+- [Hex editing and reverse engineering](#hex-editing-and-reverse-engineering)
+- [Commands](#commands)
 - [How it is built](#how-it-is-built)
 - [Limits](#limits)
 - [Development](#development)
@@ -71,12 +74,15 @@ the start screen.
 | Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) · Markdown preview beside the file, live as you type (`<Leader>um`) |
 | Git | signs against the index · hunk jumps · graph of every branch, log, file log, status and stash pickers with diffs · `git browse` · status colors in the file tree |
-| Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · sessions |
+| Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · `:rename` · sessions |
 | Windows | `\|` / `\` splits, `<C-h/j/k/l>`, `<C-arrows>` to resize, `<C-w>` family, zen mode, global statusline · mouse: click to place the cursor or focus a window, drag to select, wheel to scroll text and lists |
 | System | system clipboard (`clipboard=unnamedplus`, OSC 52 fallback over SSH) · `<F7>` shell, node, python, btm, gdu |
 | Config | settings screen (`<Leader>,`) to search and change every option live and save it · one JSON file: Neovim option names, colorscheme, astrotheme palette, Neovim highlight groups, keymaps per mode, icon set |
-| Plugins | a folder with a `plugin.json` that adds options, colors, keymaps and `:Commands` · a command pipes the lines through a program in any language and puts its output back or shows it |
-| Robustness | atomic saves · refuses to clobber other files · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
+| Text tools | `:uniq` `:base64[!]` `:base32[!]` `:hex[!]` `:url[!]` `:rot13` `:sha256` `:wc` `:calc` on the buffer or a range, built in (no process) |
+| Hex & RE | binary files open as an editable hex dump, written back as bytes · `:hexedit` · `:detect` (ELF/PE/Mach-O and 20 formats, architecture, entropy, UPX) · `:strings` · `:inspect` · `:pack` · `:xor` |
+| Commands | `:Commands` in the config pipe the lines through a program in any language and put its output back or show it · format on save |
+| Robustness | atomic saves · refuses to clobber other files · a broken hex dump is never written · files too big for memory are refused, not half-loaded · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
+| Updates | `lim --update` checks the latest GitHub release and rebuilds lim from it |
 
 ## Install
 
@@ -101,8 +107,12 @@ curl -fsSLo %TEMP%\lim-install.bat https://raw.githubusercontent.com/Neotoxic-of
 curl.exe -fsSLo $env:TEMP\lim-install.bat https://raw.githubusercontent.com/Neotoxic-off/Lim/master/install.bat; & $env:TEMP\lim-install.bat
 ```
 
-Run the same line again to update. Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim --locked`,
-or from a clone `cargo build --release` and copy `target/release/lim` (`lim.exe`) onto your `PATH`.
+**Update** with `lim --update`: it asks GitHub for the latest release and, when it is newer than yours, rebuilds
+lim from that tag with cargo (it needs `curl`, present on Linux, macOS and Windows 10+); otherwise it says you are
+up to date. Running the installer again also updates.
+
+Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim --locked`, or from a clone
+`cargo build --release` and copy `target/release/lim` (`lim.exe`) onto your `PATH`.
 
 Runs on Linux, macOS and Windows 10+ (Windows Terminal or the console, not mintty). A
 [Nerd Font](https://www.nerdfonts.com) for the default icons (or `"iconset": "unicode"` / `"ascii"`). Truecolor is
@@ -117,6 +127,8 @@ Optional, picked up when installed: `wl-copy`/`xclip`/`xsel`/`pbcopy` (clipboard
 lim                    # start screen
 lim src/main.rs a.lua  # open files
 lim ../project         # work in that folder (explorer, finder, git, sessions)
+lim app.exe            # a binary opens as a hex dump
+lim --update           # update to the latest GitHub release
 lim --print-config     # the documented default config
 lim --config-path      # where lim looks for config.json
 lim --help | --version
@@ -127,8 +139,9 @@ borrow a line while you type, pushing the statusline up as Neovim does.
 
 The `:` line completes as you type: command names, then file paths for `:e`, `:w`, `:sp`,
 `:vs`. `<Tab>`/`<C-n>` and `<S-Tab>`/`<C-p>`
-cycle through the menu, writing the choice into the line; `<CR>` runs it. Press `<F1>` (or `<Leader>fh`, `:help`) for the cheat sheet, or press
-`<Space>` and wait for which-key.
+cycle through the menu, writing the choice into the line; `<CR>` runs it. Press `<F1>` (or `<Leader>fh`, `:help`)
+for the cheat sheet, laid out as the settings screen: type to search every key and command, arrows to scroll. Or
+press `<Space>` and wait for which-key.
 
 ## Keymaps
 
@@ -252,7 +265,22 @@ Commands: `:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:e!` `:enew` `:save
 `:bn` `:bp` `:bd` `:sp` `:vs` `:only` `:close` `:noh` `:help` `:settings` (or `:setup`); on line ranges
 `:s/pat/rep/[flags]`, `:g/pat/cmd` and `:v/pat/cmd`, `:norm[!] keys`, `:sort[!] [i] [n] [u]`, `:m {address}`,
 `:t {address}`, `:r file`, `:d` `:y` `:>` `:<` `:j`. Addresses: `N`, `.`, `$`, `%`, `'a`, `'<,'>`, with `+N`/`-N`
-offsets (`.,+3`, `$-1`). Commands that start with an uppercase letter come from [plugins](#plugins).
+offsets (`.,+3`, `$-1`). `:rename file` moves the file on disk and the buffer with it. Commands that start with an
+uppercase letter come from the config's [commands](#commands).
+
+**Text tools**, on the whole buffer or a range (`:'<,'>base64`), built in so they never start a process:
+
+| Command | Does |
+|---|---|
+| `:uniq` | Drops repeated adjacent lines |
+| `:base64` `:base32` `:hex` | Encode the lines (newlines included) on one line; with `!` decode them (`:hex!` also reads `0x41, 0x42` and `\x41`) |
+| `:url` `:url!` | Percent-encode / decode each line |
+| `:rot13` | ROT13 each line |
+| `:sha256` | SHA-256 of the lines, as a file would hold them |
+| `:wc` | Lines, words and chars |
+| `:calc` | Arithmetic of the lines: `+ - * / % ^`, parentheses, decimals (`:.calc`) |
+
+Sorting, case, trailing blanks and reversing are Vim's own: `:sort`, `gU`/`gu`, `:%s/\s\+$//`, `:g/^/m0`.
 
 **Patterns** are Vim regexes (magic by default): `.` `*` `[a-z]` `[^…]` `^` `$` `\+` `\=` `\?` `\{n,m}`
 `\(…\)` `\|` `\<` `\>` `\d` `\w` `\s` `\a` `\l` `\u` (and `\D` `\W` `\S`…), `\v` for very magic (`(a|b)+`), `\c`/`\C`
@@ -426,55 +454,67 @@ Key notation: plain characters, `<Leader>`, `<CR>`, `<Esc>`, `<BS>`, `<Tab>`, `<
 `<C-Up>`…, `<F1>`…`<F12>`, `<Up>` `<Down>` `<Left>` `<Right>`, `<Home>` `<End>`, `<Del>`, `<PageUp>`
 `<PageDown>`, `<lt>`, `<Bar>`, `<Bslash>`.
 
-## Plugins
+## Hex editing and reverse engineering
 
-A plugin is a folder in `plugins/` next to the config file (`~/.config/lim/plugins/<name>/plugin.json`,
-`%APPDATA%\lim\plugins\…` on Windows). Its `plugin.json` holds the same sections as the config (`options`,
-`palette`, `highlights`, `keymaps`), plus `commands` and the informative `name`, `version`, `description`.
-Plugins load in folder-name order, then the config, so a later one wins and your config wins over all.
-Problems are reported with the file they come from.
+A file that is not UTF-8 opens as a hex dump, 16 bytes a line:
+`00000010: 02 00 3e 00 68 65 6c 6c  6f ff 00 00 00 00 00 00  |..>.hello.......|`. Edit the hex digits between `:`
+and `|` with any Vim key (`r`, `x`, `i`, `.`); bytes can be changed, inserted or deleted, and `:w` writes them back.
+The offsets and the ASCII column are only for reading. A line that is not hex (an odd digit, a `z`) is refused with
+E513 and the file is left as it was. `:hexedit` switches any buffer to this view and back.
 
-Each command is `:Name`, uppercase first as Vim user commands. Its program gets the lines on stdin: the whole
-buffer, or a range (`:'<,'>Name`, `:%Name`, `:3,9Name`). Words typed after the name are added to `run`.
-`output` is `"message"` (default: stdout is shown) or `"replace"` (stdout replaces the lines, as one undo
-step). A program that fails (non-zero exit), prints nothing, or runs more than 10 seconds leaves the text as it
-was and its first stderr line is shown. In `run`, `${file}` is the buffer's path, `${line}` the cursor's line
-and `${plugin}` the plugin's folder, so a plugin can ship its own scripts. An optional `windows` array replaces
-`run` on Windows, where coreutils are missing. Commands appear in `:` completion and the commands picker
-(`<Leader>fC`); bind them with a keymap. `commands` also works in the config itself.
+| Command | Does |
+|---|---|
+| `:detect` | File type from its magic bytes (ELF, PE, Mach-O, DEX, wasm, zip, gzip, xz, zstd, 7z, PDF, PNG…), with bitness, endianness, architecture, DLL and .NET for executables, size and entropy; UPX is named, and entropy over 7.2 is flagged as packed, compressed or encrypted |
+| `:strings` | Printable runs of 4+ chars, ASCII and UTF-16LE, with their offsets, in a new buffer |
+| `:inspect` | The bytes at the cursor as u8/i8, u16/i16, u32/i32, u64/i64 (little / big endian), f32 and f64 |
+| `:pack {type} {value}` | Writes a number at the cursor: `u8` `i8`, `u16` … `i64` with `le`/`be`, `f32le` `f64be`…; `0x` hex or decimal |
+| `:[range]xor {key}` | XORs the bytes of the lines with a repeating key: `0x41ff` in hex, anything else as text |
+
+`:inspect`, `:pack` and `:xor` work in a hex buffer; `:detect` and `:strings` on any buffer. A typical first look:
+
+```
+lim sample.exe        opens as hex
+:detect               PE32+ executable x86-64 · 182272 bytes · entropy 7.61 · UPX packed
+:strings              every string with its offset, searchable with / and the lines picker
+<C-^>  then  /4d 5a   back to the dump, find bytes
+:inspect              what the bytes at the cursor read as
+:5,8xor 0x5a  :w      decode a block and save
+```
+
+Binaries up to 64 MB open (their dump takes about 7 times their size in memory); a 64 MB one opens in
+under half a second, and jumping, scrolling and editing a byte stay under 3 ms. `:xor`, `:pack` and `:w` rebuild the whole
+file, about 1 s at 64 MB.
+
+## Commands
+
+The config's `commands` section adds `:Name` commands, uppercase first as Vim user commands. Its program gets the
+lines on stdin: the whole buffer, or a range (`:'<,'>Name`, `:%Name`, `:3,9Name`). Words typed after the name are
+added to `run`. `output` is `"message"` (default: stdout is shown) or `"replace"` (stdout replaces the lines, as
+one undo step). A program that fails (non-zero exit), prints nothing, or runs more than 10 seconds leaves the
+text as it was and its first stderr line is shown. In `run`, `${file}` is the buffer's path and `${line}` the
+cursor's line. An optional `windows` array replaces `run` on Windows. Commands appear in `:` completion and the
+commands picker (`<Leader>fC`); bind them with a keymap.
 
 **Format on save**: `"on": "save"` runs a `"replace"` command on the whole buffer before every `:w`, limited to
 the extensions in `"files"` (`["js", "ts"]`; none means every file). A tool that fails or is missing is reported
 after the write, and the file is written unchanged.
 
-**Ready-made plugins** in [`examples/plugins`](examples/plugins): copy a folder into your `plugins/` to use it.
-Text and info work out of the box on Linux, macOS and Windows (coreutils or PowerShell, checked by a test).
-
-| Plugin | Commands | Keys |
-|---|---|---|
-| `format` | `:Prettier` `:Rustfmt` `:Black` `:Gofmt` (each also on save, for its file types) `:Jq` (the tool must be on `PATH`) | `<Leader>lf` Prettier |
-| `text` | `:Sort` `:Uniq` `:Reverse` `:Upper` `:Lower` `:Trim` (trailing blanks) `:B64` `:B64d` | |
-| `info` | `:Wc` (lines, words, chars) `:Sha` (SHA-256) `:Calc` (arithmetic of the line or selection) | `<Leader>=` in visual: Calc |
-| `git` | `:Blame` (cursor line) `:Log` `:Diff` `:Stage` `:Unstage` `:Branch` `:Status` (on the saved file) | `<Leader>gl` blame · `gL` log · `gd` diff · `gs` stage · `gu` unstage |
-
-Every command takes the whole buffer, or a range: `:'<,'>Sort` from visual mode, `:.Calc` for one line.
-
 ```jsonc
-// ~/.config/lim/plugins/format/plugin.json
+// ~/.config/lim/config.json
 {
-  "name": "format",
-  "description": "Prettier, sorting, word count",
   "commands": {
-    "Prettier": { "run": ["prettier", "--stdin-filepath", "${file}"], "output": "replace", "desc": "Format with Prettier" },
-    "Sort": {
-      "run": ["sort"],
-      "windows": ["powershell", "-NoProfile", "-Command", "$input | Sort-Object"],
+    "Prettier": {
+      "run": ["prettier", "--stdin-filepath", "${file}"],
+      "windows": ["cmd", "/c", "prettier", "--stdin-filepath", "${file}"],
       "output": "replace",
-      "desc": "Sort lines"
+      "on": "save",
+      "files": ["js", "ts", "css", "json", "md"],
+      "desc": "Format with Prettier"
     },
-    "Words": { "run": ["python3", "${plugin}/count.py"], "desc": "Count words" }
+    "Rustfmt": { "run": ["rustfmt", "--edition", "2024", "--emit", "stdout", "--quiet"], "output": "replace", "on": "save", "files": ["rs"] },
+    "Blame": { "run": ["git", "blame", "-L", "${line},${line}", "--", "${file}"], "desc": "Who changed this line" }
   },
-  "keymaps": { "n": { "<Leader>lf": { "rhs": ":Prettier<CR>", "desc": "Format" } }, "v": { "<Leader>s": ":Sort<CR>" } }
+  "keymaps": { "n": { "<Leader>lf": { "rhs": ":Prettier<CR>", "desc": "Format" } } }
 }
 ```
 
@@ -490,13 +530,15 @@ sequences to one key decoder. The Windows clipboard is user32. Everything else i
 ```
 src/
 ├── main.rs        startup, event loop, panic recovery
+├── update.rs      --update: the latest GitHub release, rebuilt with cargo
 ├── error.rs       Vim-worded errors (E32, E37, E492…)
 ├── term/          raw mode, window size, resize events, key decoding (sys/unix.rs, sys/windows.rs)
-├── buffer/        lines, undo history, motions, text objects, git signs, file I/O
+├── buffer/        lines, undo history, motions, text objects, git signs, file I/O, hex dumps
 ├── editor/        modes, operators, registers, keymaps, the built-in binding table, windows, picker,
-│                  file tree, which-key, cheat sheet, completion, sessions, prompts, clipboard, macros
+│                  file tree, which-key, cheat sheet, completion, sessions, prompts, clipboard, macros,
+│                  text tools, reverse-engineering commands, config commands
 ├── syntax/        keyword highlighter with multi-line state, language tables, todo-comments
-├── config/        JSON reader, key notation, options/palette/highlights/keymaps, plugin manifests
+├── config/        JSON reader, key notation, options/palette/highlights/keymaps/commands
 └── render/        cell grid, themes and palettes, icon sets, windows, bars, floats, picker, tree, start screen
 ```
 
@@ -507,7 +549,11 @@ src/
 - **Undo** stores the lines an edit replaced, not copies of the file, and keeps 1000 steps. The same
   line-range changes move marks and jump-list anchors, so they follow the text.
 - **Completion** words are cached per buffer and re-read only when that buffer's text changed.
-- **Highlighting** state at each line start is cached and invalidated from the first edited line.
+- **Highlighting** state at each line start is cached and invalidated from the first edited line. A jump far
+  past the cached lines starts 2000 lines above the target instead of at the top (Vim's `syntax sync`), so `G`
+  in a 3-million-line file takes about a millisecond.
+- **Hex buffers** are ordinary lines in a dump format; only the hex digits count when writing, so every Vim edit
+  works on bytes and a broken line is refused before anything touches the disk.
 - **Git signs** read the index once per open/save and diff in memory when the text changes.
 - **Saving** writes a temp file next to the target, syncs it, keeps permissions, then renames it over the
   original; writing over another existing file needs `!`.
@@ -518,20 +564,23 @@ src/
 ## Limits
 
 Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics, language-aware completion; buffer-word completion is there), debugger, treesitter (a keyword
-highlighter stands in), plugins that script the editor itself (they only filter text through a process), an
+highlighter stands in), plugins, scripting the editor (config commands only filter text through a process), an
 embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
 line wrapping, folds, spell checking, persistent undo. A regex group repeats at
 most 100 times in one match. Visual-block columns count characters, so tabs and wide characters select
-unevenly.
+unevenly. Files are read whole into memory, as in Vim: text files over 512 MB and binaries over 64 MB (their hex dump
+takes about 7 times their size) are refused with a message. A comment or string opened more than 2000 lines above a
+far jump is not seen there until you scroll from above. There is no disassembler.
 
 ## Development
 
 ```sh
-cargo test                     # 110+ tests: behaviour, fuzzers on every input, perf budgets
+cargo test                     # 125+ tests: behaviour, fuzzers on every input, perf budgets
 cargo clippy --all-targets     # pedantic, zero warnings; unwrap/expect/panic are denied
 cargo fmt --check              # rustfmt.toml, 120 columns
 cargo test --release perf -- --nocapture   # the benchmark table: run it before and after a change
 LIM_FUZZ=30 cargo test --release fuzz      # a long fuzz session (LIM_FUZZ_SEED=<n> replays a failure)
+cargo test --release big_files -- --ignored --nocapture   # 100 MB text + 64 MB binary: open, jump, search, edit, write
 LIM_NVIM=nvim cargo test --release vs_neovim -- --ignored --nocapture   # lim against Neovim
 ```
 
@@ -548,19 +597,34 @@ sessions found and fixed real bugs: a crash in line ranges (`:co-x` on non-ASCII
 typing with a frame per key, regex search, `:%s`, `:g`, `:g … norm`, undo, the Markdown preview and the lines
 picker. Each has a budget of about 3-5x its debug time, so `cargo test` fails on a real slowdown.
 
+**Big files** (`big_files`): a 100 MB, 3-million-line Rust file and a 64 MB binary (the hex limit), opened,
+browsed, edited and written back, with the bytes on disk checked. It found `G` scanning the whole file for
+highlighting (1.2 s, now 1.3 ms). Linux in WSL, release build:
+
+| Operation | 100 MB text | 64 MB binary (hex) |
+|---|---|---|
+| Open + first frame | 176 ms | 487 ms |
+| `G` + frame | 2.7 ms | 2.1 ms |
+| Search to the last line | 872 ms | |
+| Type at the top / edit a byte, + frame | 2.0 ms | 2.8 ms |
+| Undo + redo | 2.0 ms | |
+| `:detect` · `:strings` | | 301 ms · 309 ms |
+| `:xor` one line | | 983 ms |
+| `:w` | 253 ms | 380 ms |
+
 **Against Neovim** (`vs_neovim`): the same operations on the same 10 000-line file, timed inside each editor, best
 of 5, Neovim 0.12 with `-u NONE` (no config, no plugins: its fastest). lim must win every row:
 
 | Operation | lim | Neovim | lim is |
 |---|---|---|---|
-| Open the file | 0.28 ms | 0.56 ms | 2.0x faster |
-| `:%s/\v(\w+): (\w+)/\2 \1/g` | 6.7 ms | 15.2 ms | 2.3x |
-| `:g/TODO/d` | 0.44 ms | 1.34 ms | 3.0x |
-| `:g/item/norm Ax` | 3.7 ms | 32.0 ms | 8.6x |
-| Regex search, `n` x50 | 0.29 ms | 0.79 ms | 2.8x |
-| Type 500 chars | 0.04 ms | 0.08 ms | 1.8x |
-| Undo + redo 300 steps | 0.93 ms | 52.0 ms | 56x |
-| `:sort` | 0.84 ms | 12.1 ms | 14x |
+| Open the file | 0.28 ms | 0.57 ms | 2.0x faster |
+| `:%s/\v(\w+): (\w+)/\2 \1/g` | 6.4 ms | 13.9 ms | 2.2x |
+| `:g/TODO/d` | 0.43 ms | 1.34 ms | 3.1x |
+| `:g/item/norm Ax` | 3.8 ms | 29.1 ms | 7.7x |
+| Regex search, `n` x50 | 0.28 ms | 0.77 ms | 2.8x |
+| Type 500 chars | 0.05 ms | 0.07 ms | 1.3x |
+| Undo + redo 300 steps | 0.82 ms | 45.2 ms | 55x |
+| `:sort` | 0.73 ms | 10.4 ms | 14x |
 
 (Linux in WSL, release build.)
 

@@ -69,6 +69,17 @@ fn perf() {
             }),
         ),
         (
+            "hex: dump + read back 256 KB binary",
+            ms(100),
+            Box::new(|| {
+                let bytes: Vec<u8> = (0..1 << 18).map(|i: u32| u8::try_from(i * 7 % 251).unwrap_or(0)).collect();
+                timed(|| {
+                    let lines: Vec<String> = crate::buffer::hex::dump(&bytes, 0);
+                    assert_eq!(crate::buffer::hex::undump(&lines).unwrap().len(), bytes.len());
+                })
+            }),
+        ),
+        (
             "open 10k-line file + draw",
             ms(100),
             Box::new(|| {
@@ -200,6 +211,111 @@ fn perf() {
         }
     }
     assert!(slow.is_empty(), "over budget: {slow:?}");
+}
+
+/// Prints the timings as `perf` does and fails on any over its budget.
+fn check_budgets(rows: &[(&str, Duration, Duration)]) {
+    eprintln!("\n{:<42} {:>10} {:>10}", "big file case", "time", "budget");
+    for (name, took, budget) in rows {
+        let mark: &str = if took > budget { "  SLOW" } else { "" };
+        eprintln!("{name:<42} {:>8.1}ms {:>8}ms{mark}", took.as_secs_f64() * 1000.0, budget.as_millis());
+    }
+    let slow: Vec<&str> = rows.iter().filter(|(_, took, budget)| took > budget).map(|(name, _, _)| *name).collect();
+    assert!(slow.is_empty(), "over budget: {slow:?}");
+}
+
+/// A 100 MB text file and a 64 MB binary (the hex limit), opened, browsed, edited and written back: every step
+/// stays usable and the bytes on disk are right. Writes ~170 MB to the temp dir and needs a release build:
+/// `cargo test --release big_files -- --ignored --nocapture`.
+#[test]
+#[ignore = "writes ~170 MB to the temp dir; run with --release"]
+fn big_files() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("lim-big-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let mut rows: Vec<(&str, Duration, Duration)> = Vec::new();
+    let mut screen: Screen = Screen::new(ColorDepth::TrueColor);
+
+    // Text: 300 copies of the 10k-line Rust sample, 3M lines, and one marker line at the end for the search.
+    let text_path: PathBuf = dir.join("big.rs");
+    let text: String = big_rust().repeat(300) + "// the only end marker\n";
+    let (size, line_count): (usize, usize) = (text.len(), text.lines().count());
+    assert!(size > 100_000_000, "{size}");
+    fs::write(&text_path, &text).unwrap();
+    drop(text);
+    let mut ed: Editor = Editor::new(&[]);
+    ed.dashboard = false;
+    let open: String = format!(":e {}\n", text_path.display());
+    rows.push((
+        "text 100 MB: open + draw",
+        timed(|| {
+            keys(&mut ed, &open);
+            screen.draw(&mut ed, SCREEN);
+        }),
+        ms(3000),
+    ));
+    assert_eq!(ed.buf().line_count(), line_count);
+    rows.push(("text 100 MB: G + draw", timed(|| draw_after(&mut ed, &mut screen, "G")), ms(50)));
+    rows.push((
+        "text 100 MB: search to the end",
+        timed(|| draw_after(&mut ed, &mut screen, "gg/end marker\n")),
+        ms(3000),
+    ));
+    assert_eq!(ed.buf().cursor.line, line_count - 1, "the marker is on the last line");
+    rows.push((
+        "text 100 MB: type at the top + draw",
+        timed(|| draw_after(&mut ed, &mut screen, "ggihello \x1b")),
+        ms(50),
+    ));
+    rows.push(("text 100 MB: undo + redo", timed(|| draw_after(&mut ed, &mut screen, "u\x12")), ms(100)));
+    rows.push(("text 100 MB: :w", timed(|| keys(&mut ed, ":w\n")), ms(3000)));
+    assert_eq!(fs::metadata(&text_path).unwrap().len(), u64::try_from(size + "hello ".len()).unwrap());
+    drop(ed);
+
+    // Binary: exactly the 64 MB hex limit, 4 KB blocks of non-UTF-8 noise with two strings each.
+    let bin_path: PathBuf = dir.join("big.bin");
+    let mut block: Vec<u8> =
+        (0..4096_u32).map(|i| 0x80 | u8::try_from(i.wrapping_mul(2_654_435_761) >> 25).unwrap()).collect();
+    block[100..112].copy_from_slice(b"hello world!");
+    block[2000..2008].copy_from_slice(b"Kernel32");
+    let bytes: Vec<u8> = block.repeat((64 << 20) / 4096);
+    fs::write(&bin_path, &bytes).unwrap();
+    let mut ed: Editor = Editor::new(&[]);
+    ed.dashboard = false;
+    let open: String = format!(":e {}\n", bin_path.display());
+    rows.push((
+        "hex 64 MB: open + draw",
+        timed(|| {
+            keys(&mut ed, &open);
+            screen.draw(&mut ed, SCREEN);
+        }),
+        ms(5000),
+    ));
+    assert!(ed.buf().hex);
+    assert_eq!(ed.buf().line_count(), bytes.len() / 16);
+    rows.push(("hex 64 MB: G + draw", timed(|| draw_after(&mut ed, &mut screen, "G")), ms(50)));
+    rows.push(("hex 64 MB: :detect", timed(|| keys(&mut ed, ":detect\n")), ms(3000)));
+    assert!(ed.message_text().starts_with("data · 67108864 bytes"), "{}", ed.message_text());
+    rows.push(("hex 64 MB: :strings", timed(|| keys(&mut ed, ":strings\n")), ms(5000)));
+    assert_eq!(ed.buf().line_count(), 2 * (64 << 20) / 4096);
+    assert_eq!(ed.buf().line(1), "000007d0: Kernel32");
+    keys(&mut ed, "\x1e");
+    assert!(ed.buf().hex, "back on the binary");
+    rows.push(("hex 64 MB: edit a byte + draw", timed(|| draw_after(&mut ed, &mut screen, "gg010lr0lr0")), ms(50)));
+    rows.push(("hex 64 MB: :xor one line", timed(|| keys(&mut ed, ":2xor 0xff\n")), ms(5000)));
+    rows.push(("hex 64 MB: :w", timed(|| keys(&mut ed, ":w\n")), ms(5000)));
+    let written: Vec<u8> = fs::read(&bin_path).unwrap();
+    assert_eq!(written.len(), bytes.len());
+    assert_eq!(written[0], 0);
+    assert!(written[16..32].iter().zip(&bytes[16..32]).all(|(w, b)| *w == b ^ 0xff));
+    assert_eq!(written[32..], bytes[32..], "nothing else moved");
+    drop(ed);
+    let _: std::io::Result<()> = fs::remove_dir_all(&dir);
+    check_budgets(&rows);
+}
+
+fn draw_after(ed: &mut Editor, screen: &mut Screen, typed: &str) {
+    keys(ed, typed);
+    screen.draw(ed, SCREEN);
 }
 
 /// The same operations on the same file in Neovim (`-u NONE`: no config, no plugins, its fastest) and timed inside

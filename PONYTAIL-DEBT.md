@@ -24,9 +24,9 @@ Regenerate with `git grep -nE '(#|//|/[*]) ?(shortcut|ponytail):'`.
 
 - `src/editor/picker.rs:260`, files scanned on each keystroke. ceiling: fine for project-sized trees. upgrade: use an index for huge monorepos.
 
-## src/editor/plugin.rs
+## src/editor/usercmd.rs
 
-- `src/editor/plugin.rs:16`, plugin commands run synchronously with a 10 s timeout. ceiling: the editor freezes while the program runs (format on save included). upgrade: run it in the background if plugins with long jobs show up.
+- `src/editor/usercmd.rs:16`, config commands run synchronously with a 10 s timeout. ceiling: the editor freezes while the program runs (format on save included). upgrade: run it in the background if commands with long jobs show up.
 
 ## src/render/view.rs
 

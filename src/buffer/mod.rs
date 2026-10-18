@@ -1,6 +1,7 @@
 //! A text buffer: lines, cursor, file I/O and undo.
 
 pub mod git;
+pub mod hex;
 mod history;
 mod motion;
 pub mod regex;
@@ -12,7 +13,6 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::string::FromUtf8Error;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use crate::error::Error;
@@ -46,6 +46,8 @@ pub struct Buffer {
     pub marks: HashMap<char, Pos>,
     /// Name shown for buffers without a file (`git show` output…).
     pub title: Option<String>,
+    /// The lines are a hex dump (`hex.rs`) of the file's bytes: binary files open this way.
+    pub hex: bool,
     /// Positions the jump list points at, kept in step with edits like marks.
     anchors: HashMap<u64, Pos>,
     /// See `revision()`.
@@ -74,6 +76,7 @@ impl Buffer {
             lang: path.as_deref().and_then(syntax::lang_for),
             marks: HashMap::new(),
             title: None,
+            hex: false,
             anchors: HashMap::new(),
             revision: next_revision(),
             word_cache: (u64::MAX, Vec::new()),
@@ -97,13 +100,62 @@ impl Buffer {
         if fs::metadata(path).is_ok_and(|m| !m.is_file()) {
             return Err(Error::NotAFile(path.into()));
         }
+        // shortcut: the whole file is read into memory, so huge ones are refused; page it in if lim must edit them.
+        if fs::metadata(path).is_ok_and(|m| m.len() > MAX_TEXT) {
+            return Err(too_big(path, MAX_TEXT));
+        }
         match fs::read(path) {
-            Ok(bytes) => {
-                let text: String = String::from_utf8(bytes).map_err(|_| Error::NotUtf8(path.into()))?;
-                Ok(Self::from_text(Some(path.into()), &text))
-            }
+            Ok(bytes) => Self::from_bytes(path, bytes),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::from_text(Some(path.into()), "")),
             Err(e) => Err(Error::Io(path.into(), e)),
+        }
+    }
+
+    /// A file's buffer: its text, or the hex dump of anything that is not UTF-8 (refused over `MAX_HEX`).
+    fn from_bytes(path: &Path, bytes: Vec<u8>) -> Result<Self, Error> {
+        match String::from_utf8(bytes) {
+            Ok(text) => Ok(Self::from_text(Some(path.into()), &text)),
+            Err(e) if u64::try_from(e.as_bytes().len()).unwrap_or(u64::MAX) > MAX_HEX => Err(too_big(path, MAX_HEX)),
+            Err(e) => {
+                let mut buf: Self = Self::from_text(Some(path.into()), "");
+                buf.lines = hex::dump(e.as_bytes(), 0);
+                buf.hex = true;
+                buf.lang = None;
+                Ok(buf)
+            }
+        }
+    }
+
+    /// `:hexedit`: shows the bytes as a hex dump, or the dump as text again (when it is UTF-8), as one undo step.
+    pub fn toggle_hex(&mut self) -> Result<(), Error> {
+        let lines: Vec<String> = if self.hex {
+            let bytes: Vec<u8> = hex::undump(&self.lines).map_err(Error::Vim)?;
+            let text: String =
+                String::from_utf8(bytes).map_err(|_| Error::Vim("E475: the bytes are not UTF-8".into()))?;
+            Self::from_text(None, &text).lines
+        } else {
+            let text: String = self.contents();
+            if u64::try_from(text.len()).unwrap_or(u64::MAX) > MAX_HEX {
+                return Err(too_big(self.path.as_deref().unwrap_or(Path::new("[No Name]")), MAX_HEX));
+            }
+            hex::dump(text.as_bytes(), 0)
+        };
+        self.history.seal();
+        self.splice(0..self.lines.len(), lines);
+        self.history.seal();
+        self.hex = !self.hex;
+        self.lang = if self.hex { None } else { self.path.as_deref().and_then(syntax::lang_for) };
+        self.syntax.invalidate(0);
+        self.cursor = Pos::default();
+        Ok(())
+    }
+
+    /// What `:w` writes: the text, or the bytes of a hex dump.
+    pub fn bytes(&self) -> Result<Vec<u8>, Error> {
+        if self.hex {
+            hex::undump(&self.lines).map_err(|why| Error::Vim(format!("E513: hex dump not written: {why}")))
+        } else {
+            Ok(self.contents().into_bytes())
         }
     }
 
@@ -120,8 +172,8 @@ impl Buffer {
         if !path.starts_with(std::env::temp_dir()) {
             return Err(Error::Io(path, io::Error::other("tests only write under the temp dir")));
         }
-        let out: String = self.contents();
-        write_atomic(&path, out.as_bytes()).map_err(|e| Error::Io(path.clone(), e))?;
+        let out: Vec<u8> = self.bytes()?;
+        write_atomic(&path, &out).map_err(|e| Error::Io(path.clone(), e))?;
         let summary: String = format!("\"{}\" {}L, {}B written", path.display(), self.lines.len(), out.len());
         if self.path.is_none() {
             self.lang = syntax::lang_for(&path);
@@ -172,6 +224,7 @@ impl Buffer {
     pub fn revert(&mut self) -> Result<String, Error> {
         let path: PathBuf = self.path.clone().ok_or(Error::NoFileName)?;
         let fresh: Buffer = Self::open(&path)?;
+        self.hex = fresh.hex;
         let all: Range<usize> = 0..self.lines.len();
         self.history.seal();
         self.splice(all, fresh.lines);
@@ -194,10 +247,12 @@ impl Buffer {
         if self.is_dirty() {
             return;
         }
+        if fs::metadata(&path).is_ok_and(|m| m.len() > MAX_TEXT) {
+            return;
+        }
         let Ok(bytes): Result<Vec<u8>, io::Error> = fs::read(&path) else { return };
-        let Ok(text): Result<String, FromUtf8Error> = String::from_utf8(bytes) else { return };
-        let fresh: Buffer = Self::from_text(None, &text);
-        if fresh.lines != self.lines {
+        let Ok(fresh): Result<Buffer, Error> = Self::from_bytes(&path, bytes) else { return };
+        if fresh.hex == self.hex && fresh.lines != self.lines {
             let all: Range<usize> = 0..self.lines.len();
             self.splice(all, fresh.lines);
             self.history.seal();
@@ -480,6 +535,18 @@ impl Buffer {
 /// Source of `Buffer::revision`: one counter for all buffers, so a revision never repeats between them.
 static REVISIONS: AtomicU64 = AtomicU64::new(0);
 
+/// Largest file opened as text, and as a hex dump (which takes about 7 times its size in memory).
+const MAX_TEXT: u64 = 512 << 20;
+const MAX_HEX: u64 = 64 << 20;
+
+fn too_big(path: &Path, limit: u64) -> Error {
+    Error::Vim(format!(
+        "\"{}\" is over {} MB, not opened (lim keeps the whole file in memory)",
+        path.display(),
+        limit >> 20
+    ))
+}
+
 fn next_revision() -> u64 {
     REVISIONS.fetch_add(1, Relaxed) + 1
 }
@@ -556,6 +623,24 @@ fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions;
+
+    /// Files too big to hold in memory are refused before they are read (text) or dumped (binary).
+    #[test]
+    fn refuses_huge_files() {
+        let path: PathBuf = std::env::temp_dir().join(format!("lim-huge-{}.bin", std::process::id()));
+        let file: File = File::create(&path).unwrap();
+        // Sparse: no gigabyte is written, and the size check means none is read either.
+        file.set_len(MAX_TEXT + 1).unwrap();
+        let err: String = Buffer::open(&path).err().unwrap().to_string();
+        assert!(err.ends_with("is over 512 MB, not opened (lim keeps the whole file in memory)"), "{err}");
+        fs::write(&path, b"\xff").unwrap();
+        OpenOptions::new().write(true).open(&path).unwrap().set_len(MAX_HEX + 1).unwrap();
+        assert!(Buffer::open(&path).err().unwrap().to_string().contains("is over 64 MB"));
+        fs::write(&path, b"\xff").unwrap();
+        assert!(Buffer::open(&path).unwrap().hex);
+        let _: io::Result<()> = fs::remove_file(&path);
+    }
 
     fn joined(b: &Buffer) -> String {
         b.lines().join("\n")

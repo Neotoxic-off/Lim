@@ -20,8 +20,8 @@ mod mouse;
 mod normal;
 mod operator;
 mod picker;
-mod plugin;
 mod prompt;
+mod re;
 mod recent;
 mod registers;
 mod repeat;
@@ -30,7 +30,9 @@ mod setup;
 mod sources;
 #[cfg(test)]
 mod tests;
+mod textops;
 mod ui;
+mod usercmd;
 mod vim;
 mod visual;
 mod wildmenu;
@@ -55,6 +57,7 @@ pub use picker::{Item, Picker, Target};
 pub use prompt::Prompt;
 pub use setup::{SETTINGS, Setup};
 pub use ui::MenuEntry;
+pub use usercmd::pipe;
 pub use wildmenu::CmdCompletion;
 pub use window::{Layout, Rect, Separator, View, Window, WindowId};
 
