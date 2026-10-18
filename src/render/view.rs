@@ -136,15 +136,19 @@ fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (u
                 row.text(t.on(group, ctx.base), "\u{258e}");
             }
             row.pad_to(blank, gutter);
+            // Only the shown part of a line (and a little past it, for tokens cut by the right edge) is scanned.
+            let shown_chars: usize = text::col_at_display(buf.line(y), buf.left + area.w) + LOOKAHEAD;
+            let shown: usize = text::byte_index(buf.line(y), shown_chars);
             let decor: Decor = Decor {
-                groups: if o.syntax { buf.highlight_line(y) } else { None },
+                groups: if o.syntax { buf.highlight_line(y, shown_chars) } else { None },
+                shown,
                 guide_to: if o.indentguides { guide_indent(buf, y) } else { 0 },
                 indent_width: o.indent_width(),
-                urls: if o.highlighturl { text::find_urls(buf.line(y)) } else { Vec::new() },
-                words: word.as_deref().map(|w| text::find_word(buf.line(y), w)).unwrap_or_default(),
+                urls: if o.highlighturl { text::find_urls(&buf.line(y)[..shown]) } else { Vec::new() },
+                words: word.as_deref().map(|w| text::find_word(&buf.line(y)[..shown], w)).unwrap_or_default(),
                 parens: parens.map(|p| p.filter(|p| p.line == y).map(|p| p.col)),
-                colors: if o.colorhighlight { text::find_hex_colors(buf.line(y)) } else { Vec::new() },
-                todo: if o.todocomments { syntax::todo(buf.line(y)) } else { None },
+                colors: if o.colorhighlight { text::find_hex_colors(&buf.line(y)[..shown]) } else { Vec::new() },
+                todo: if o.todocomments { syntax::todo(&buf.line(y)[..shown]) } else { None },
             };
             draw_line(&mut row, buf, y, &decor, ctx);
         }
@@ -156,6 +160,8 @@ fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (u
 /// Per-line extras drawn over the syntax colors.
 struct Decor {
     groups: Option<Vec<Hl>>,
+    /// Byte length of the line's scanned part.
+    shown: usize,
     /// Indent guides are drawn in leading blanks left of this screen column.
     guide_to: usize,
     indent_width: usize,
@@ -237,10 +243,12 @@ fn scroll(buf: &mut Buffer, cursor_x: usize, height: usize, width: usize, o: &Op
     }
 }
 
-// shortcut: highlights the whole line even when only part is visible; slice to the view for huge lines.
+/// Chars scanned past the right edge, so a word, URL, color or match cut by it is still recognized.
+const LOOKAHEAD: usize = 256;
+
 fn draw_line(row: &mut Row, buf: &Buffer, y: usize, decor: &Decor, ctx: &Context) {
     let t: Arc<Theme> = theme();
-    let line: &str = buf.line(y);
+    let line: &str = &buf.line(y)[..decor.shown];
     let matches: Vec<Range<usize>> = text::find_all(line, &ctx.pattern);
     let cursor: Pos = buf.cursor;
     let bg: Rgb = match t.get(Group::CursorLine).bg {
@@ -295,7 +303,7 @@ fn draw_line(row: &mut Row, buf: &Buffer, y: usize, decor: &Decor, ctx: &Context
             style.bold |= paren.bold;
         }
         if let Some(selection) = ctx.selection
-            && selection.contains(Pos::new(y, x))
+            && selection.contains(Pos::new(y, x), screen_x)
         {
             style.bg = t.bg(Group::Visual);
         } else if hit.is_some() {

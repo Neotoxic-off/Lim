@@ -190,6 +190,10 @@ fn which_key_has_the_editor_background() {
     let menu_rows: Vec<usize> = (0..14).filter(|&y| grid.row(y).iter().any(|c| c.ch == '╭' || c.ch == '╰')).collect();
     assert_eq!(menu_rows.len(), 2, "the menu's top and bottom borders are on screen");
     for y in menu_rows[0]..=menu_rows[1] {
-        assert!(grid.row(y).iter().all(|c| c.style.bg == editor), "row {y} has another background");
+        let pill: Rgb = theme().bg(Group::FloatTitle);
+        assert!(
+            grid.row(y).iter().all(|c| c.style.bg == editor || c.style.bg == pill),
+            "row {y} has another background"
+        );
     }
 }

@@ -38,6 +38,8 @@ impl Editor {
                 self.insert_register = true;
                 return;
             }
+            // In a tool window `<CR>` answers the line instead of splitting it.
+            Key::Enter if self.tool_enter() => return,
             Key::Ctrl('o') => {
                 self.insert_once = true;
                 self.mode = Mode::Normal;

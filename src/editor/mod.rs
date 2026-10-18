@@ -31,6 +31,7 @@ mod sources;
 #[cfg(test)]
 mod tests;
 mod textops;
+pub mod tools;
 mod ui;
 mod usercmd;
 mod vim;
@@ -127,7 +128,7 @@ pub enum Message {
 pub enum Selection {
     Chars(Pos, Pos),
     Lines(usize, usize),
-    /// Lines `top..=bottom`, char columns `left..=right`.
+    /// Lines `top..=bottom`, screen cells `left..=right`.
     Block {
         top: usize,
         bottom: usize,
@@ -137,12 +138,13 @@ pub enum Selection {
 }
 
 impl Selection {
-    pub fn contains(self, p: Pos) -> bool {
+    /// Whether the char at `p`, drawn from screen cell `cell`, is selected.
+    pub fn contains(self, p: Pos, cell: usize) -> bool {
         match self {
             Self::Chars(start, end) => start <= p && p <= end,
             Self::Lines(first, last) => (first..=last).contains(&p.line),
             Self::Block { top, bottom, left, right } => {
-                (top..=bottom).contains(&p.line) && (left..=right).contains(&p.col)
+                (top..=bottom).contains(&p.line) && (left..=right).contains(&cell)
             }
         }
     }
@@ -265,6 +267,12 @@ pub struct Editor {
     /// `<Leader>um`: the rendered Markdown beside Markdown buffers.
     pub markdown_preview: bool,
     block_insert: Option<block::BlockInsert>,
+    /// The calculator's last result, its `ans`.
+    calc_ans: Option<f64>,
+    /// `:Name` commands still running.
+    jobs: Vec<usercmd::Job>,
+    /// Stands in for the process runner (tests), so config commands run without starting a program.
+    runner: Option<usercmd::Runner>,
     /// `$` in visual block: every line's block reaches its own end.
     block_to_eol: bool,
     /// `<C-r>` in insert mode: the next key names the register to insert.
@@ -336,6 +344,9 @@ impl Editor {
             zen: false,
             markdown_preview: false,
             block_insert: None,
+            calc_ans: None,
+            jobs: Vec::new(),
+            runner: None,
             block_to_eol: false,
             insert_register: false,
             anchor: Pos::default(),
@@ -368,12 +379,10 @@ impl Editor {
         match self.mode {
             Mode::Visual => Some(Selection::Chars(start, end)),
             Mode::VisualLine => Some(Selection::Lines(start.line, end.line)),
-            Mode::VisualBlock => Some(Selection::Block {
-                top: start.line,
-                bottom: end.line,
-                left: a.col.min(b.col),
-                right: if self.block_to_eol { usize::MAX - 1 } else { a.col.max(b.col) },
-            }),
+            Mode::VisualBlock => {
+                let (top, bottom, left, right): (usize, usize, usize, usize) = self.block_bounds();
+                Some(Selection::Block { top, bottom, left, right })
+            }
             _ => None,
         }
     }
@@ -399,6 +408,7 @@ impl Editor {
 
     /// One key as typed: goes through user keymaps first, then the modes.
     pub fn handle(&mut self, key: Key) {
+        self.poll_jobs();
         if let Key::Mouse(event) = key {
             return self.mouse(event);
         }
@@ -419,6 +429,7 @@ impl Editor {
         let motion_key: bool = matches!(mode, Mode::Normal | Mode::Visual | Mode::VisualLine | Mode::VisualBlock)
             && self.pending.prefix.is_none();
         match mode {
+            Mode::Normal if key == Key::Enter && self.pending.is_empty() && self.tool_enter() => {}
             Mode::Normal => self.normal(key),
             Mode::Insert => self.insert(key),
             Mode::Visual | Mode::VisualLine | Mode::VisualBlock => self.visual(key),
@@ -523,11 +534,14 @@ impl Editor {
             (self.message.is_some() && self.options.cmdheight == 0).then(|| self.message_at + NOTIFY_TIMEOUT);
         let mapping: Option<Instant> =
             (!self.typeahead.is_empty()).then(|| self.typeahead_at + Duration::from_millis(self.options.timeoutlen));
-        notify.into_iter().chain(mapping).min()
+        // Background commands are checked for output every 50 ms.
+        let jobs: Option<Instant> = (!self.jobs.is_empty()).then(|| Instant::now() + Duration::from_millis(50));
+        notify.into_iter().chain(mapping).chain(jobs).min()
     }
 
     /// Called when `deadline` passes.
     pub fn tick(&mut self) {
+        self.poll_jobs();
         if self.notification_expired() && self.options.cmdheight == 0 {
             self.message = None;
         }

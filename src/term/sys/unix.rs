@@ -178,3 +178,52 @@ pub fn watch_resize() {
 pub fn take_resized() -> bool {
     RESIZED.swap(false, Ordering::Relaxed)
 }
+
+/// `struct tm` as glibc and macOS lay it out (`tm_gmtoff` and `tm_zone` follow the POSIX fields).
+#[repr(C)]
+struct Tm {
+    sec: i32,
+    min: i32,
+    hour: i32,
+    mday: i32,
+    mon: i32,
+    year: i32,
+    wday: i32,
+    yday: i32,
+    isdst: i32,
+    gmtoff: i64,
+    zone: *const u8,
+}
+
+unsafe extern "C" {
+    fn tzset();
+    fn localtime_r(time: *const i64, result: *mut Tm) -> *mut Tm;
+}
+
+/// Seconds the local time zone is ahead of UTC at unix time `ts` (daylight saving included).
+pub fn utc_offset(ts: i64) -> i64 {
+    let mut tm: Tm = Tm {
+        sec: 0,
+        min: 0,
+        hour: 0,
+        mday: 0,
+        mon: 0,
+        year: 0,
+        wday: 0,
+        yday: 0,
+        isdst: 0,
+        gmtoff: 0,
+        zone: ptr::null(),
+    };
+    let done: *mut Tm = unsafe {
+        tzset();
+        localtime_r(&raw const ts, &raw mut tm)
+    };
+    if done.is_null() { 0 } else { tm.gmtoff }
+}
+
+/// Fills `buf` from the kernel's random source; false if it cannot be read.
+pub fn random(buf: &mut [u8]) -> bool {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(buf)).is_ok()
+}

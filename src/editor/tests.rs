@@ -381,6 +381,20 @@ fn visual_block() {
     ed.handle(Key::Ctrl('v'));
     keys(&mut ed, "jjI> \x1b");
     assert_eq!(text(&ed), "> bcad\n> fgeh\n> ijkl");
+    // Columns are screen cells: a tab and 4 spaces line up (tabstop 4), a CJK char is two cells wide.
+    let mut ed: Editor = editor("\tab\n    cd");
+    ed.handle(Key::Char('l'));
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jfcd");
+    assert_eq!(text(&ed), "\tb\n    d");
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jfdI|\x1b");
+    assert_eq!(text(&ed), "\t|b\n    |d");
+    let mut ed: Editor = editor("日本\nabcd");
+    ed.handle(Key::Char('l'));
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jld");
+    assert_eq!(text(&ed), "日\nab");
 }
 
 #[test]
@@ -1242,4 +1256,141 @@ fn hex_buffers_and_reverse_engineering() {
     assert_eq!(text(&ed), "a%20b");
     keys(&mut ed, ":url!\n:rot13\n");
     assert_eq!(text(&ed), "n o");
+}
+
+/// A `:Name` command runs in the background: its output lands when it arrives, unless the text changed meanwhile.
+#[test]
+fn background_commands_apply_when_done() {
+    use crate::config::CommandOutput;
+    use std::sync::mpsc::{self, Receiver, Sender};
+    type Outcome = Result<String, String>;
+    let mut ed: Editor = editor("b\na");
+    let all: vim::LineRange = vim::LineRange { first: 0, last: 1 };
+    let (send, result): (Sender<Outcome>, Receiver<Outcome>) = mpsc::channel();
+    ed.start_job("Sort", CommandOutput::Replace, all, result);
+    keys(&mut ed, "l");
+    assert_eq!(text(&ed), "b\na", "still running");
+    assert!(ed.deadline().is_some(), "the loop wakes up to check it");
+    send.send(Ok("a\nb\n".into())).unwrap();
+    ed.tick();
+    assert_eq!(text(&ed), "a\nb");
+    let (send, result): (Sender<Outcome>, Receiver<Outcome>) = mpsc::channel();
+    ed.start_job("Sort", CommandOutput::Replace, all, result);
+    keys(&mut ed, "x");
+    send.send(Ok("z\n".into())).unwrap();
+    ed.tick();
+    assert_eq!(text(&ed), "\nb");
+    assert!(ed.message_text().contains("output dropped"), "{}", ed.message_text());
+    let (send, result): (Sender<Outcome>, Receiver<Outcome>) = mpsc::channel();
+    ed.start_job("Count", CommandOutput::Message, all, result);
+    drop(send);
+    ed.tick();
+    assert!(ed.message_text().contains("stopped"));
+}
+
+/// `<Leader>x`: tools are windows whose buffer keeps every question and answer; `<CR>` answers the line under the
+/// cursor (again, after an edit), answers are yanked, and `:q` closes the window without asking to save.
+#[test]
+fn leader_tools() {
+    let mut ed: Editor = editor("fooBar x");
+    keys(&mut ed, " xc2+3\nans*2\n1/0\n");
+    assert_eq!((ed.mode, ed.windows.len(), ed.buf().title.as_deref()), (Mode::Insert, 2, Some("[Calculator]")));
+    assert_eq!(text(&ed), "2+3\n= 5\nans*2\n= 10\n1/0\n! infinite result (a division by zero or an overflow)\n");
+    keys(&mut ed, "\x1bggA*2\x1b\n");
+    assert_eq!(ed.buf().line(1), "= 8", "an edited question is answered again, in place");
+    keys(&mut ed, "gg+\n");
+    assert_eq!(ed.buf().line(1), "= 8", "<CR> on an answer answers the question above");
+    let history: usize = ed.buf().line_count();
+    keys(&mut ed, "G\n");
+    assert_eq!(ed.buf().line_count(), history, "an empty line asks nothing");
+    keys(&mut ed, "ggi= 1\x1b\n");
+    assert_eq!(ed.buf().line(0), "= 12+3*2", "an answer on the first line has no question to answer");
+    keys(&mut ed, "u");
+    keys(&mut ed, ":q\n");
+    assert_eq!((ed.windows.len(), ed.buf().title.as_deref()), (1, None), "closed without E37");
+    keys(&mut ed, "p");
+    assert_eq!(text(&ed), "f8ooBar x", "the last answer was yanked");
+    keys(&mut ed, "u xc\x1b");
+    assert_eq!(ed.buf().line_count(), history, "the window comes back with its history");
+    keys(&mut ed, ":q\n xu5 ft to cm\n\x1b:q\n xt\n\x1b");
+    assert!(ed.buf().line(1).starts_with("= "), "an empty line in Time is now: {}", ed.buf().line(1));
+    keys(&mut ed, ":q\n");
+    let convert: usize = ed.buffers.iter().position(|b| b.title.as_deref() == Some("[Convert]")).unwrap();
+    assert_eq!(ed.buffers[convert].line(1), "= 152.4 cm");
+    keys(&mut ed, " xksn\n");
+    assert_eq!(text(&ed), "foo_bar x");
+    assert_eq!(ed.mode, Mode::Normal);
+    keys(&mut ed, "0 xi");
+    assert_eq!(text(&ed).len(), "foo_bar x".len() + 36);
+    keys(&mut ed, "u:%case constant\n");
+    assert_eq!(text(&ed), "FOO_BAR_X");
+    let mut ed: Editor = editor("{\"a\":[1,2],\"b\":{}}");
+    keys(&mut ed, " xj");
+    assert_eq!(text(&ed), "{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": {}\n}");
+    keys(&mut ed, " xJ");
+    assert_eq!(text(&ed), "{\"a\":[1,2],\"b\":{}}");
+    keys(&mut ed, "A,\x1b xj");
+    assert!(ed.message_text().contains("E474"), "invalid JSON is left alone");
+}
+
+/// Block edits on ragged lines: `A` pads short lines, `r` skips them, a put runs past the last line.
+#[test]
+fn visual_block_ragged_lines() {
+    let mut ed: Editor = editor("ab\nx\nabc");
+    ed.handle(Key::Char('l'));
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jjA!\x1b");
+    assert_eq!(text(&ed), "ab!\nx !\nab!c");
+    let mut ed: Editor = editor("abc\nx\nabc");
+    ed.handle(Key::Char('l'));
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jjlr*");
+    assert_eq!(text(&ed), "a**\nx\na**");
+    let mut ed: Editor = editor("ab\ncd");
+    ed.handle(Key::Ctrl('v'));
+    keys(&mut ed, "jyG$p");
+    assert_eq!(text(&ed), "ab\ncda\n  c");
+}
+
+/// Config commands end to end, through a stand-in for the process runner (no program starts in tests).
+#[test]
+fn user_commands_with_a_stand_in_runner() {
+    let (config, warnings): (Config, Vec<String>) = Config::from_str(
+        r#"{ "commands": {
+            "Up": { "run": ["up", "${line}"], "output": "replace" },
+            "Say": { "run": ["say"] },
+            "Quiet": { "run": ["quiet"] },
+            "Empty": { "run": ["empty"], "output": "replace" },
+            "Fail": { "run": ["fail"] } } }"#,
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let mut ed: Editor = editor("a\nb");
+    ed.configure(&config);
+    ed.runner = Some(|argv: &[String], input: &str, _| match argv[0].as_str() {
+        "up" => Ok(format!("{}{}", input.to_uppercase(), argv[1])),
+        "say" => Ok(format!("{} lines\nok\n", input.lines().count())),
+        "quiet" | "empty" => Ok(String::new()),
+        _ => Err("it failed".into()),
+    });
+    ed.run_user_command("", "Up", &[], false).unwrap();
+    assert_eq!(text(&ed), "A\nB\n1", "replaced; the cursor line number expanded");
+    ed.run_user_command("", "Say", &[], false).unwrap();
+    assert_eq!(ed.message_text(), "3 lines | ok");
+    ed.run_user_command("", "Quiet", &[], false).unwrap();
+    assert_eq!(ed.message_text(), "Quiet: done");
+    assert!(ed.run_user_command("", "Empty", &[], false).unwrap_err().to_string().contains("no output"));
+    assert!(ed.run_user_command("", "Fail", &[], false).unwrap_err().to_string().contains("it failed"));
+    assert!(matches!(ed.run_user_command("zz", "Up", &[], false), Err(Error::NotACommand(_))));
+    assert!(matches!(ed.run_user_command("", "Nope", &[], false), Err(Error::NotACommand(_))));
+    // Typed by hand they run in the background, and land on a later tick.
+    keys(&mut ed, ":Say\n");
+    assert_eq!(ed.message_text(), "Say: running");
+    for _ in 0..200 {
+        ed.tick();
+        if ed.jobs.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(ed.message_text(), "3 lines | ok");
 }

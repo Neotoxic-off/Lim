@@ -1,7 +1,7 @@
 //! snacks.picker: a fuzzy finder over files, git files, text (grep), buffers, recent files,
 //! keymaps, commands and lines, with a preview.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -125,8 +125,8 @@ pub struct Picker {
     pub selected: usize,
     /// Files to search, for grep (whose items depend on the query).
     files: Vec<PathBuf>,
-    /// Their text, read on the first search and kept while the picker is open: later keys search memory.
-    texts: Option<Vec<(PathBuf, String)>>,
+    /// Their text and its index, built on the first search and kept while the picker is open.
+    corpus: Option<Corpus>,
     pub preview: Option<Preview>,
     /// Colorscheme before the theme picker opened, restored on `<Esc>`.
     pub(super) original_theme: Option<String>,
@@ -143,7 +143,7 @@ impl Picker {
                 Vec::new()
             } else {
                 let files: &[PathBuf] = &self.files;
-                grep(self.texts.get_or_insert_with(|| searchable(files)), &self.query)
+                self.corpus.get_or_insert_with(|| Corpus::new(searchable(files))).grep(&self.query)
             };
             self.matches = self
                 .items
@@ -261,8 +261,6 @@ fn git_files() -> Option<Vec<PathBuf>> {
     )
 }
 
-/// Literal search (following ignorecase/smartcase) in text files.
-// shortcut: scans files on each keystroke; fine for project-sized trees, use an index for huge monorepos.
 /// The text files among `files`: not too big, not binary, valid UTF-8.
 fn searchable(files: &[PathBuf]) -> Vec<(PathBuf, String)> {
     files
@@ -278,20 +276,63 @@ fn searchable(files: &[PathBuf]) -> Vec<(PathBuf, String)> {
         .collect()
 }
 
-fn grep(texts: &[(PathBuf, String)], query: &str) -> Vec<Item> {
-    let mut items: Vec<Item> = Vec::new();
-    for (path, content) in texts {
-        for (y, line) in content.lines().enumerate() {
-            if let Some(hit) = text::find_literal(line, query).first() {
-                let label: String = format!("{}:{}:{}  {}", path.display(), y + 1, hit.start + 1, line.trim());
-                items.push(Item { label, target: Target::File(path.clone(), Some(Pos::new(y, hit.start))) });
-                if items.len() >= MAX_HITS {
-                    return items;
+/// The searchable files' text and a trigram index over its case-folded chars: a key only greps the files that
+/// hold every trigram of the query, so a long query in a big tree reads a few files instead of all of them.
+#[derive(Clone, Debug)]
+struct Corpus {
+    texts: Vec<(PathBuf, String)>,
+    trigrams: HashMap<[char; 3], Vec<usize>>,
+}
+
+impl Corpus {
+    fn new(texts: Vec<(PathBuf, String)>) -> Self {
+        let mut trigrams: HashMap<[char; 3], Vec<usize>> = HashMap::new();
+        for (file, (_, content)) in texts.iter().enumerate() {
+            let folded: Vec<char> = text::fold(content).chars().collect();
+            for w in folded.windows(3) {
+                let files: &mut Vec<usize> = trigrams.entry([w[0], w[1], w[2]]).or_default();
+                if files.last() != Some(&file) {
+                    files.push(file);
                 }
             }
         }
+        Self { texts, trigrams }
     }
-    items
+
+    /// The files that can match `query` (all of them below 3 chars), in order.
+    fn candidates(&self, query: &str) -> Vec<usize> {
+        let folded: Vec<char> = text::fold(query).chars().collect();
+        let mut lists: Vec<&[usize]> = Vec::new();
+        for w in folded.windows(3) {
+            match self.trigrams.get(&[w[0], w[1], w[2]]) {
+                Some(files) => lists.push(files),
+                None => return Vec::new(),
+            }
+        }
+        lists.sort_by_key(|l| l.len());
+        let Some((first, rest)): Option<(&&[usize], &[&[usize]])> = lists.split_first() else {
+            return (0..self.texts.len()).collect();
+        };
+        first.iter().copied().filter(|f| rest.iter().all(|l| l.binary_search(f).is_ok())).collect()
+    }
+
+    /// Literal search (following ignorecase/smartcase) in the candidate files.
+    fn grep(&self, query: &str) -> Vec<Item> {
+        let mut items: Vec<Item> = Vec::new();
+        for file in self.candidates(query) {
+            let (path, content): &(PathBuf, String) = &self.texts[file];
+            for (y, line) in content.lines().enumerate() {
+                if let Some(hit) = text::find_literal(line, query).first() {
+                    let label: String = format!("{}:{}:{}  {}", path.display(), y + 1, hit.start + 1, line.trim());
+                    items.push(Item { label, target: Target::File(path.clone(), Some(Pos::new(y, hit.start))) });
+                    if items.len() >= MAX_HITS {
+                        return items;
+                    }
+                }
+            }
+        }
+        items
+    }
 }
 
 impl Editor {
@@ -359,7 +400,7 @@ impl Editor {
             matches: Vec::new(),
             selected: 0,
             files,
-            texts: None,
+            corpus: None,
             preview: None,
             original_theme,
         };
@@ -530,6 +571,21 @@ pub(super) fn file_items(files: Vec<PathBuf>) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only files holding every trigram of the folded query are grepped; short queries search them all.
+    #[test]
+    fn trigram_index_narrows_grep() {
+        let corpus: Corpus = Corpus::new(
+            [("a", "fn Hello() {}"), ("b", "hel lo"), ("c", "say hello\nbye")]
+                .map(|(p, t)| (PathBuf::from(p), t.to_owned()))
+                .into(),
+        );
+        assert_eq!(corpus.candidates("hello"), [0, 2]);
+        assert_eq!(corpus.candidates("HELLO"), [0, 2], "folded like ignorecase");
+        assert_eq!(corpus.candidates("he"), [0, 1, 2]);
+        assert_eq!(corpus.candidates("zzz"), [0usize; 0]);
+        assert_eq!(corpus.grep("bye").len(), 1);
+    }
 
     #[test]
     fn fuzzy_scores_name_and_runs() {

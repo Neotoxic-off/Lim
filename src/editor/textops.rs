@@ -1,11 +1,12 @@
 //! Ex commands that compute over lines, built in so they never wait on a process: `:uniq`, the encodings
-//! (`:base64`, `:base32`, `:hex`, `:url`, `:rot13`), `:sha256`, `:wc` and `:calc`. Sort, case, trim and reverse are
+//! (`:base64`, `:base32`, `:hex`, `:url`, `:rot13`), `:sha256`, `:wc`, `:calc`, `:case` and `:json`. Sort, case, trim and reverse are
 //! already `:sort`, `gU`/`gu`, `:s` and `:g/^/m0`.
 
 use std::fmt::{self, Write};
 
 use super::Editor;
 use super::re::hex_bytes;
+use super::tools::{WordCase, evaluate, format_number, json};
 use super::vim::LineRange;
 use crate::buffer::{Buffer, Pos};
 use crate::error::Error;
@@ -29,8 +30,12 @@ pub enum TextOp {
     Sha256,
     /// `:wc`: lines, words and chars.
     Wc,
-    /// `:calc`: the arithmetic of the lines (`+ - * / % ^`, parentheses).
+    /// `:calc`: the arithmetic of the lines (the calculator's syntax, `tools::calc`).
     Calc,
+    /// `:case snake` (camel, pascal, kebab, constant, title, lower, upper) on each line.
+    Case(WordCase),
+    /// `:json` lays the lines out as indented JSON, `:json!` minifies them.
+    Json { minify: bool },
 }
 
 impl Editor {
@@ -87,14 +92,15 @@ impl Editor {
             TextOp::Calc => {
                 let expr: String = lines.join(" ");
                 let value: f64 =
-                    calc(&expr).ok_or_else(|| Error::Vim(format!("E15: Invalid expression: \"{expr}\"")))?;
-                // Whole results print without the `.0`, as bc does.
-                self.info(if value.fract() == 0.0 && value.abs() < 1e15 {
-                    format!("{value:.0}")
-                } else {
-                    value.to_string()
-                });
+                    evaluate(&expr, self.calc_ans).map_err(|e| Error::Vim(format!("E15: {e}: \"{expr}\"")))?;
+                self.calc_ans = Some(value);
+                self.info(format_number(value));
                 return Ok(());
+            }
+            TextOp::Case(case) => lines.iter().map(|l| case.apply(l)).collect(),
+            TextOp::Json { minify } => {
+                let laid_out: String = json(&text, minify).map_err(|e| Error::Vim(format!("E474: {e}")))?;
+                laid_out.lines().map(str::to_owned).collect()
             }
         };
         let buf: &mut Buffer = self.buf_mut();
@@ -318,80 +324,6 @@ fn sha256(data: &[u8]) -> String {
     })
 }
 
-/// `expr` evaluated as arithmetic, None when it is not (or not finite).
-fn calc(expr: &str) -> Option<f64> {
-    let mut parser: Calc = Calc { tokens: expr.chars().filter(|c| !c.is_whitespace()).collect(), pos: 0, depth: 0 };
-    let value: f64 = parser.sum()?;
-    (parser.pos == parser.tokens.len() && value.is_finite()).then_some(value)
-}
-
-struct Calc {
-    tokens: Vec<char>,
-    pos: usize,
-    /// Nesting so far: `((((…` or `----…` must not overflow the stack.
-    depth: usize,
-}
-
-impl Calc {
-    fn eat(&mut self, ops: &str) -> Option<char> {
-        let c: char = *self.tokens.get(self.pos).filter(|c| ops.contains(**c))?;
-        self.pos += 1;
-        Some(c)
-    }
-
-    fn sum(&mut self) -> Option<f64> {
-        let mut value: f64 = self.product()?;
-        while let Some(op) = self.eat("+-") {
-            let rhs: f64 = self.product()?;
-            value = if op == '+' { value + rhs } else { value - rhs };
-        }
-        Some(value)
-    }
-
-    fn product(&mut self) -> Option<f64> {
-        let mut value: f64 = self.power()?;
-        while let Some(op) = self.eat("*/%") {
-            let rhs: f64 = self.power()?;
-            value = match op {
-                '*' => value * rhs,
-                '/' => value / rhs,
-                _ => value % rhs,
-            };
-        }
-        Some(value)
-    }
-
-    /// `^` binds right: `2^3^2` is `2^9`.
-    fn power(&mut self) -> Option<f64> {
-        let base: f64 = self.unary()?;
-        if self.eat("^").is_some() {
-            return Some(base.powf(self.power()?));
-        }
-        Some(base)
-    }
-
-    fn unary(&mut self) -> Option<f64> {
-        self.depth += 1;
-        if self.depth > 64 {
-            return None;
-        }
-        let value: Option<f64> = match self.eat("+-(") {
-            Some('-') => self.unary().map(|v| -v),
-            Some('+') => self.unary(),
-            Some(_) => self.sum().filter(|_| self.eat(")").is_some()),
-            None => {
-                let start: usize = self.pos;
-                while self.tokens.get(self.pos).is_some_and(|c| c.is_ascii_digit() || *c == '.') {
-                    self.pos += 1;
-                }
-                self.tokens[start..self.pos].iter().collect::<String>().parse().ok()
-            }
-        };
-        self.depth -= 1;
-        value
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,11 +353,12 @@ mod tests {
             assert_eq!(url_decode(bad), None, "{bad}");
         }
         assert_eq!("Hello, World".chars().map(rot13).collect::<String>(), "Uryyb, Jbeyq");
-        assert_eq!(calc("2*(3+4)/7"), Some(2.0));
-        assert_eq!(calc("-2^2 + 10 % 4 - .5"), Some(5.5));
-        assert_eq!(calc("2^3^2"), Some(512.0));
-        for bad in ["", "1/0", "(1", "1)", "2..3", "x", &"(".repeat(10_000), &"-".repeat(10_000)] {
-            assert_eq!(calc(bad), None, "{bad:.20}");
+        assert_eq!(evaluate("2*(3+4)/7", None).ok(), Some(2.0));
+        assert_eq!(evaluate("-2^2 + 10 % 4 - .5", None).ok(), Some(-2.5));
+        assert_eq!(evaluate("2^3^2", None).ok(), Some(512.0));
+        assert_eq!(evaluate("(1", None).ok(), Some(1.0), "a parenthesis left open is closed");
+        for bad in ["", "1/0", "1)", "2..3", "x", &"(".repeat(10_000), &"-".repeat(10_000)] {
+            assert_eq!(evaluate(bad, None).ok(), None, "{bad:.20}");
         }
     }
 }

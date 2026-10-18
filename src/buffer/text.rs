@@ -7,6 +7,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 
 use super::regex::{Match, Regex};
+use super::width::{WIDE, ZERO};
 
 // Text-level options (`tabstop`, `ignorecase`, `smartcase`), shared by buffers and the renderer.
 static TAB_STOP: AtomicUsize = AtomicUsize::new(4);
@@ -62,84 +63,7 @@ pub fn str_width(s: &str) -> usize {
 }
 
 /// Terminal cells taken by `c`: 0 for combining marks, 2 for East Asian wide chars and emoji, else 1.
-// shortcut: compact range table (wcwidth + Unicode wide emoji), not the full EastAsianWidth data; generate it from
-// EastAsianWidth.txt if CJK or symbol users report misaligned columns.
 pub fn char_width(c: char) -> usize {
-    const ZERO: &[(u32, u32)] = &[
-        (0x0300, 0x036F),
-        (0x0483, 0x0489),
-        (0x0591, 0x05BD),
-        (0x0610, 0x061A),
-        (0x064B, 0x065F),
-        (0x1AB0, 0x1AFF),
-        (0x1DC0, 0x1DFF),
-        (0x200B, 0x200F),
-        (0x20D0, 0x20FF),
-        (0xFE00, 0xFE0F),
-        (0xFE20, 0xFE2F),
-        (0xE0100, 0xE01EF),
-    ];
-    const WIDE: &[(u32, u32)] = &[
-        (0x1100, 0x115F),
-        (0x231A, 0x231B),
-        (0x2329, 0x232A),
-        (0x23E9, 0x23EC),
-        (0x23F0, 0x23F0),
-        (0x23F3, 0x23F3),
-        (0x25FD, 0x25FE),
-        (0x2614, 0x2615),
-        (0x2648, 0x2653),
-        (0x267F, 0x267F),
-        (0x2693, 0x2693),
-        (0x26A1, 0x26A1),
-        (0x26AA, 0x26AB),
-        (0x26BD, 0x26BE),
-        (0x26C4, 0x26C5),
-        (0x26CE, 0x26CE),
-        (0x26D4, 0x26D4),
-        (0x26EA, 0x26EA),
-        (0x26F2, 0x26F3),
-        (0x26F5, 0x26F5),
-        (0x26FA, 0x26FA),
-        (0x26FD, 0x26FD),
-        (0x2705, 0x2705),
-        (0x270A, 0x270B),
-        (0x2728, 0x2728),
-        (0x274C, 0x274C),
-        (0x274E, 0x274E),
-        (0x2753, 0x2755),
-        (0x2757, 0x2757),
-        (0x2795, 0x2797),
-        (0x27B0, 0x27B0),
-        (0x27BF, 0x27BF),
-        (0x2B1B, 0x2B1C),
-        (0x2B50, 0x2B50),
-        (0x2B55, 0x2B55),
-        (0x2E80, 0x303E),
-        (0x3040, 0xA4CF),
-        (0xAC00, 0xD7A3),
-        (0xF900, 0xFAFF),
-        (0xFE10, 0xFE19),
-        (0xFE30, 0xFE6F),
-        (0xFF00, 0xFF60),
-        (0xFFE0, 0xFFE6),
-        (0x1F004, 0x1F004),
-        (0x1F0CF, 0x1F0CF),
-        (0x1F18E, 0x1F18E),
-        (0x1F191, 0x1F19A),
-        (0x1F200, 0x1F202),
-        (0x1F210, 0x1F23B),
-        (0x1F240, 0x1F248),
-        (0x1F250, 0x1F251),
-        (0x1F260, 0x1F265),
-        (0x1F300, 0x1F64F),
-        (0x1F680, 0x1F6FF),
-        (0x1F7E0, 0x1F7EB),
-        (0x1F90C, 0x1F9FF),
-        (0x1FA70, 0x1FAFF),
-        (0x20000, 0x2FFFD),
-        (0x30000, 0x3FFFD),
-    ];
     let u: u32 = u32::from(c);
     if u < 0x300 {
         return 1;
@@ -272,9 +196,12 @@ pub fn find_hex_colors(line: &str) -> Vec<(Range<usize>, u32)> {
     found
 }
 
+/// One lowercase char per char, so columns in the folded text are the original's ('İ' lowercases to two chars).
+pub fn fold(s: &str) -> String {
+    s.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect()
+}
+
 /// Literal matches of `pattern` (live grep, where the query is plain text), following the case options.
-// shortcut: lowercasing that changes char counts (e.g. 'İ') shifts columns; fold char by char if live grep is
-// used on Turkish or other such text.
 pub fn find_literal(line: &str, pattern: &str) -> Vec<Range<usize>> {
     if pattern.is_empty() {
         return Vec::new();
@@ -282,8 +209,8 @@ pub fn find_literal(line: &str, pattern: &str) -> Vec<Range<usize>> {
     let smart_sensitive: bool = SMART_CASE.load(Relaxed) && pattern.chars().any(char::is_uppercase);
     let (lowered_line, lowered_pattern);
     let (hay, pattern): (&str, &str) = if IGNORE_CASE.load(Relaxed) && !smart_sensitive {
-        lowered_line = line.to_lowercase();
-        lowered_pattern = pattern.to_lowercase();
+        lowered_line = fold(line);
+        lowered_pattern = fold(pattern);
         (lowered_line.as_str(), lowered_pattern.as_str())
     } else {
         (line, pattern)
@@ -311,11 +238,15 @@ mod tests {
         assert_eq!(display_col("日本x", 2), 4);
         assert_eq!(str_width("e\u{301}🦀a"), 4);
         assert_eq!(char_width('\u{e7a8}'), 1); // Nerd Font icons are single-cell
+        // Full Unicode 16 tables: kana voicing mark, medial jamo, fullwidth Latin, a 2022 emoji, box drawing.
+        assert_eq!(['\u{3099}', '\u{11A1}', 'Ａ', '\u{1FAE8}', '─'].map(char_width), [0, 0, 2, 2, 1]);
         assert_eq!(find_all("Foo bar foo", "foo"), vec![0..3, 8..11]);
         assert_eq!(find_all("Foo bar foo", "Foo"), vec![0..3]);
         assert_eq!(find_all("é foo", "foo"), vec![2..5]);
         assert_eq!(find_all("foo food _foo foo", "\\<foo\\>"), vec![0..3, 14..17]);
         assert_eq!(find_word("Foo foo food", "foo"), vec![4..7]);
+        assert_eq!(fold("İa Foo"), "ia foo", "one char per char: live grep columns stay aligned");
+        assert_eq!(fold("İa Foo").match_indices("foo").next().map(|(b, _)| char_len(&fold("İa Foo")[..b])), Some(3));
         assert_eq!(find_hex_colors("a #1A1D23 #12345 #abcdefg"), vec![(2..9, 0x1A1D23)]);
         assert_eq!(find_urls("see https://x.io/a?b=1). and http://y"), vec![4..22, 29..37]);
     }

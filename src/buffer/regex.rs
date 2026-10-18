@@ -3,17 +3,16 @@
 //! Magic mode (Vim's default): `.` `*` `[]` `^` `$` are special; `\+` `\=` `\?` `\{n,m}` `\(` `\)` `\|` `\<` `\>`
 //! need a backslash. `\v` (very magic) makes `+ = ? { ( ) | < >` special without it. Classes: `\d \w \s \a \l \u`
 //! and their negations `\D \W \S \A \L \U`, plus `\t`. `\c` / `\C` force ignoring or matching case.
-//! A backtracking matcher: runs of single characters repeat in a loop, and a step budget stops runaway patterns.
+//! The pattern compiles to a small program run by a backtracking machine with its own stack, so repeated groups
+//! never deepen the call stack; runs of single characters repeat in a loop, and a step budget stops runaway patterns.
 
 use std::cell::Cell;
 use std::ops::Range;
 
 /// Steps one search may take before giving up (`(a*)*b` on a long line would otherwise never end).
 const BUDGET: usize = 1_000_000;
-/// Nested repetitions of a group, so `\(ab\)*` on a huge line fails instead of overflowing the stack.
-// shortcut: a `\(…\)` repeats at most 100 times in one match (single chars repeat without limit); make the
-// matcher iterative if longer group runs are needed.
-const MAX_DEPTH: usize = 100;
+/// Instructions one pattern may compile to: `\{n,m}` on a group copies it, so `\(ab\)\{99999}` is refused.
+const MAX_PROGRAM: usize = 100_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Node {
@@ -36,9 +35,53 @@ enum Node {
     },
 }
 
+/// One step of the compiled pattern.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Inst {
+    /// One char matching a `Char`, `Any` or `Class` node.
+    One(Node),
+    /// An anchor: `LineStart`, `LineEnd`, `WordStart` or `WordEnd`.
+    Assert(Node),
+    /// A greedy run of the one-char node, `min..=max` long, given back one char at a time.
+    Run {
+        node: Node,
+        min: usize,
+        max: usize,
+    },
+    /// Go on at the next instruction; on failure, come back and jump to the target instead.
+    Split(usize),
+    Jmp(usize),
+    /// Record the position in capture slot n: `2 * group` for a group's start, `2 * group + 1` for its end.
+    Save(usize),
+    /// Record where a round of a repeated group starts, in register n.
+    Mark(usize),
+    /// Fail unless the round since `Mark(n)` consumed something (a group matching empty would loop forever).
+    Moved(usize),
+    Match,
+}
+
+/// What a failure goes back to: a choice to retry, or a write to undo on the way.
+enum Back {
+    Branch {
+        pc: usize,
+        pos: usize,
+    },
+    /// A `Run` that can give back more chars: resume after it with `count` chars from `start`.
+    Fewer {
+        pc: usize,
+        start: usize,
+        count: usize,
+        min: usize,
+    },
+    Slot(usize, Option<usize>),
+    Reg(usize, usize),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Regex {
-    branches: Vec<Vec<Node>>,
+    prog: Vec<Inst>,
+    /// Registers the program's `Mark`s use.
+    regs: usize,
     groups: usize,
     ignore_case: bool,
     /// Text every match contains (the longest run of plain chars): a line without it is skipped whole.
@@ -53,8 +96,6 @@ pub struct Match {
     pub range: Range<usize>,
     pub groups: Vec<Option<Range<usize>>>,
 }
-
-type Caps = Vec<Option<(usize, usize)>>;
 
 struct Parser<'a> {
     chars: &'a [char],
@@ -87,7 +128,10 @@ impl Regex {
             }
             _ => (None, None),
         };
-        Ok(Self { branches, groups: parser.groups, ignore_case, required, first })
+        let mut compiler: Compiler = Compiler { prog: Vec::new(), regs: 0 };
+        compiler.alternatives(&branches)?;
+        compiler.prog.push(Inst::Match);
+        Ok(Self { prog: compiler.prog, regs: compiler.regs, groups: parser.groups, ignore_case, required, first })
     }
 
     /// Every non-overlapping match in `line`, left to right.
@@ -97,10 +141,10 @@ impl Regex {
         }
         let chars: Vec<char> = line.chars().collect();
         let budget: Cell<usize> = Cell::new(BUDGET);
-        let matcher: Matcher<'_> =
-            Matcher { chars: &chars, ignore_case: self.ignore_case, budget: &budget, depth: Cell::new(0) };
+        let matcher: Matcher<'_> = Matcher { chars: &chars, ignore_case: self.ignore_case, budget: &budget };
         let mut found: Vec<Match> = Vec::new();
-        let mut caps: Caps = vec![None; self.groups + 1];
+        let mut state: State =
+            State { slots: vec![None; 2 * (self.groups + 1)], regs: vec![0; self.regs], stack: Vec::new() };
         let mut start: usize = 0;
         while start <= chars.len() {
             if let Some(c) = self.first {
@@ -109,7 +153,7 @@ impl Regex {
                     None => break,
                 }
             }
-            let Some(m): Option<Match> = self.match_at(&matcher, start, &mut caps) else {
+            let Some(m): Option<Match> = self.match_at(&matcher, start, &mut state) else {
                 start += 1;
                 continue;
             };
@@ -129,19 +173,194 @@ impl Regex {
         Self { required: None, first: None, ..self.clone() }
     }
 
-    /// The match starting at `start`, if any; `caps` is scratch space reused across positions.
-    fn match_at(&self, matcher: &Matcher<'_>, start: usize, caps: &mut Caps) -> Option<Match> {
-        caps.fill(None);
-        let mut end: Option<usize> = None;
-        self.branches.iter().any(|branch| {
-            matcher.seq(branch, start, caps, &mut |pos: usize, _: &mut Caps| {
-                end = Some(pos);
-                true
-            })
-        });
-        let end: usize = end?;
-        let groups: Vec<Option<Range<usize>>> = caps.iter().skip(1).map(|c| c.map(|(a, b)| a..b)).collect();
+    /// The match starting at `start`, if any; `state` is scratch space reused across positions.
+    fn match_at(&self, matcher: &Matcher<'_>, start: usize, state: &mut State) -> Option<Match> {
+        state.slots.fill(None);
+        state.stack.clear();
+        let end: usize = self.run(matcher, start, state)?;
+        let groups: Vec<Option<Range<usize>>> =
+            (1..=self.groups).map(|g| state.slots[2 * g].zip(state.slots[2 * g + 1]).map(|(a, b)| a..b)).collect();
         Some(Match { range: start..end, groups })
+    }
+
+    /// Runs the program from `start`: the end of the first match in priority order (alternatives left to right,
+    /// repetitions longest first), or None.
+    fn run(&self, matcher: &Matcher<'_>, start: usize, state: &mut State) -> Option<usize> {
+        let State { slots, regs, stack }: &mut State = state;
+        let (mut pc, mut pos): (usize, usize) = (0, start);
+        loop {
+            if !matcher.step() {
+                return None;
+            }
+            let ok: bool = match &self.prog[pc] {
+                Inst::Match => return Some(pos),
+                Inst::One(node) => {
+                    let hit: bool = matcher.one(node, pos);
+                    (pc, pos) = (pc + 1, pos + 1);
+                    hit
+                }
+                Inst::Assert(node) => {
+                    pc += 1;
+                    matcher.holds(node, pos)
+                }
+                Inst::Run { node, min, max } => {
+                    let mut count: usize = 0;
+                    while count < *max && matcher.one(node, pos + count) {
+                        count += 1;
+                    }
+                    if count > *min {
+                        stack.push(Back::Fewer { pc: pc + 1, start: pos, count: count - 1, min: *min });
+                    }
+                    (pc, pos) = (pc + 1, pos + count);
+                    count >= *min
+                }
+                Inst::Split(alt) => {
+                    stack.push(Back::Branch { pc: *alt, pos });
+                    pc += 1;
+                    true
+                }
+                Inst::Jmp(to) => {
+                    pc = *to;
+                    true
+                }
+                Inst::Save(slot) => {
+                    stack.push(Back::Slot(*slot, slots[*slot]));
+                    slots[*slot] = Some(pos);
+                    pc += 1;
+                    true
+                }
+                Inst::Mark(reg) => {
+                    stack.push(Back::Reg(*reg, regs[*reg]));
+                    regs[*reg] = pos;
+                    pc += 1;
+                    true
+                }
+                Inst::Moved(reg) => {
+                    pc += 1;
+                    pos > regs[*reg]
+                }
+            };
+            if ok {
+                continue;
+            }
+            // Undo writes back to the latest choice, and take it.
+            loop {
+                match stack.pop()? {
+                    Back::Slot(slot, old) => slots[slot] = old,
+                    Back::Reg(reg, old) => regs[reg] = old,
+                    Back::Branch { pc: to, pos: at } => {
+                        (pc, pos) = (to, at);
+                        break;
+                    }
+                    Back::Fewer { pc: to, start, count, min } => {
+                        if count > min {
+                            stack.push(Back::Fewer { pc: to, start, count: count - 1, min });
+                        }
+                        (pc, pos) = (to, start + count);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The machine's scratch space: capture slots, round registers and the backtrack stack.
+struct State {
+    slots: Vec<Option<usize>>,
+    regs: Vec<usize>,
+    stack: Vec<Back>,
+}
+
+/// Turns parsed nodes into a program.
+struct Compiler {
+    prog: Vec<Inst>,
+    regs: usize,
+}
+
+impl Compiler {
+    fn emit(&mut self, inst: Inst) -> Result<usize, String> {
+        if self.prog.len() >= MAX_PROGRAM {
+            return Err("E363: pattern uses more memory than 'maxmempattern'".into());
+        }
+        self.prog.push(inst);
+        Ok(self.prog.len() - 1)
+    }
+
+    /// Points the `Split` or `Jmp` at `at` to the next instruction.
+    fn land(&mut self, at: usize) {
+        let here: usize = self.prog.len();
+        if let Some(Inst::Split(to) | Inst::Jmp(to)) = self.prog.get_mut(at) {
+            *to = here;
+        }
+    }
+
+    /// `a\|b\|c`: each branch is tried in order.
+    fn alternatives(&mut self, branches: &[Vec<Node>]) -> Result<(), String> {
+        let mut ends: Vec<usize> = Vec::new();
+        for (i, branch) in branches.iter().enumerate() {
+            let last: bool = i + 1 == branches.len();
+            let split: Option<usize> = if last { None } else { Some(self.emit(Inst::Split(0))?) };
+            for node in branch {
+                self.node(node)?;
+            }
+            if let Some(split) = split {
+                ends.push(self.emit(Inst::Jmp(0))?);
+                self.land(split);
+            }
+        }
+        for end in ends {
+            self.land(end);
+        }
+        Ok(())
+    }
+
+    fn node(&mut self, node: &Node) -> Result<(), String> {
+        match node {
+            Node::Char(_) | Node::Any | Node::Class { .. } => self.emit(Inst::One(node.clone())).map(drop),
+            Node::LineStart | Node::LineEnd | Node::WordStart | Node::WordEnd => {
+                self.emit(Inst::Assert(node.clone())).map(drop)
+            }
+            Node::Group(branches, index) => {
+                self.emit(Inst::Save(2 * index))?;
+                self.alternatives(branches)?;
+                self.emit(Inst::Save(2 * index + 1)).map(drop)
+            }
+            Node::Repeat { node, min, max } if is_single(node) => {
+                self.emit(Inst::Run { node: (**node).clone(), min: *min, max: *max }).map(drop)
+            }
+            Node::Repeat { node, min, max } => self.repeat(node, *min, *max),
+        }
+    }
+
+    /// A repeated group: `min` rounds, then optional ones, each tried before stopping and each consuming something.
+    fn repeat(&mut self, node: &Node, min: usize, max: usize) -> Result<(), String> {
+        let reg: usize = self.regs;
+        self.regs += 1;
+        let round = |me: &mut Self| -> Result<(), String> {
+            me.emit(Inst::Mark(reg))?;
+            me.node(node)?;
+            me.emit(Inst::Moved(reg)).map(drop)
+        };
+        for _ in 0..min {
+            round(self)?;
+        }
+        if max == usize::MAX {
+            let top: usize = self.emit(Inst::Split(0))?;
+            round(self)?;
+            self.emit(Inst::Jmp(top))?;
+            self.land(top);
+            return Ok(());
+        }
+        let mut exits: Vec<usize> = Vec::new();
+        for _ in min..max {
+            exits.push(self.emit(Inst::Split(0))?);
+            round(self)?;
+        }
+        for exit in exits {
+            self.land(exit);
+        }
+        Ok(())
     }
 }
 
@@ -349,8 +568,6 @@ struct Matcher<'a> {
     ignore_case: bool,
     /// Steps left for the whole line (shared by every start position).
     budget: &'a Cell<usize>,
-    /// Nested group repetitions in progress, capped so a long line cannot overflow the stack.
-    depth: Cell<usize>,
 }
 
 impl Matcher<'_> {
@@ -361,97 +578,30 @@ impl Matcher<'_> {
         left > 0
     }
 
-    /// Matches `nodes` from `pos`, then hands the end to `k`; true as soon as `k` accepts.
-    fn seq(&self, nodes: &[Node], pos: usize, caps: &mut Caps, k: &mut dyn FnMut(usize, &mut Caps) -> bool) -> bool {
-        let Some((first, rest)): Option<(&Node, &[Node])> = nodes.split_first() else { return k(pos, caps) };
-        if !self.step() {
-            return false;
-        }
-        match first {
-            Node::Repeat { node, min, max } if is_single(node) => {
-                // Greedy: take as many as possible, then give back one at a time.
-                let mut count: usize = 0;
-                while count < *max && self.one(node, pos + count) {
-                    count += 1;
-                }
-                (*min..=count).rev().any(|n| self.seq(rest, pos + n, caps, k))
-            }
-            Node::Repeat { node, min, max } => self.repeat(node, *min, *max, pos, rest, caps, k),
-            Node::Group(branches, index) => {
-                let index: usize = *index;
-                branches.iter().any(|branch| {
-                    let saved: Option<(usize, usize)> = caps[index];
-                    let ok: bool = self.seq(branch, pos, caps, &mut |end: usize, caps: &mut Caps| {
-                        let inner: Option<(usize, usize)> = caps[index];
-                        caps[index] = Some((pos, end));
-                        let ok: bool = self.seq(rest, end, caps, k);
-                        if !ok {
-                            caps[index] = inner;
-                        }
-                        ok
-                    });
-                    if !ok {
-                        caps[index] = saved;
-                    }
-                    ok
-                })
-            }
-            node => match self.zero_width(node, pos) {
-                Some(holds) => holds && self.seq(rest, pos, caps, k),
-                None => self.one(node, pos) && self.seq(rest, pos + 1, caps, k),
-            },
-        }
-    }
-
-    /// A repeated group, tried longest first; each round must consume something.
-    #[expect(clippy::too_many_arguments, reason = "the matcher's state threaded through the recursion")]
-    fn repeat(
-        &self,
-        node: &Node,
-        min: usize,
-        max: usize,
-        pos: usize,
-        rest: &[Node],
-        caps: &mut Caps,
-        k: &mut dyn FnMut(usize, &mut Caps) -> bool,
-    ) -> bool {
-        if !self.step() || self.depth.get() >= MAX_DEPTH {
-            return false;
-        }
-        self.depth.set(self.depth.get() + 1);
-        let more: bool = max > 0
-            && self.seq(std::slice::from_ref(node), pos, caps, &mut |end: usize, caps: &mut Caps| {
-                end > pos && self.repeat(node, min.saturating_sub(1), max - 1, end, rest, caps, k)
-            });
-        self.depth.set(self.depth.get() - 1);
-        more || (min == 0 && self.seq(rest, pos, caps, k))
-    }
-
     /// Whether the one-char node `node` matches the char at `pos`.
     fn one(&self, node: &Node, pos: usize) -> bool {
         let Some(&c): Option<&char> = self.chars.get(pos) else { return false };
         match node {
-            Node::Any => true,
             Node::Char(want) => c == *want || (self.ignore_case && fold(c) == fold(*want)),
             Node::Class { ranges, negated } => {
                 let within = |c: char| ranges.iter().any(|&(lo, hi)| (lo..=hi).contains(&c));
                 let hit: bool = within(c) || (self.ignore_case && (within(fold(c)) || within(upper(c))));
                 hit != *negated
             }
-            _ => false,
+            // `Any`, the only other node a single char is matched against.
+            _ => true,
         }
     }
 
-    /// For anchors: whether it holds at `pos`; None for nodes that consume a char.
-    fn zero_width(&self, node: &Node, pos: usize) -> Option<bool> {
+    /// Whether the anchor `node` (`^`, `$`, `\<` or, for anything else, `\>`) holds at `pos`.
+    fn holds(&self, node: &Node, pos: usize) -> bool {
         let word_at = |i: usize| self.chars.get(i).is_some_and(|&c| is_word(c));
         let word_before: bool = pos > 0 && word_at(pos - 1);
         match node {
-            Node::LineStart => Some(pos == 0),
-            Node::LineEnd => Some(pos == self.chars.len()),
-            Node::WordStart => Some(!word_before && word_at(pos)),
-            Node::WordEnd => Some(word_before && !word_at(pos)),
-            _ => None,
+            Node::LineStart => pos == 0,
+            Node::LineEnd => pos == self.chars.len(),
+            Node::WordStart => !word_before && word_at(pos),
+            _ => word_before && !word_at(pos),
         }
     }
 }
@@ -531,12 +681,22 @@ mod tests {
         let line: String = "a".repeat(5000);
         assert!(spans("\\(a*\\)*b", &line).is_empty());
         assert_eq!(spans(".*", &line), vec![0..5000]);
-        // Repeated groups nest one call per round: capped, so a huge line fails safely instead of overflowing.
-        // Half of Windows' 1 MB main-thread stack, for headroom.
-        let small_stack = std::thread::Builder::new().stack_size(512 * 1024).spawn(|| {
+        // Repeated groups run on the machine's own stack: any number of rounds, even on a small thread stack.
+        let small_stack = std::thread::Builder::new().stack_size(128 * 1024).spawn(|| {
             let pairs: String = "ab".repeat(100_000);
-            spans("\\(ab\\)*c", &pairs).is_empty()
+            (spans("\\(ab\\)*c", &pairs).is_empty(), spans("\\(ab\\)\\+", &pairs).pop())
         });
-        assert!(small_stack.unwrap().join().unwrap());
+        assert_eq!(small_stack.unwrap().join().unwrap(), (true, Some(0..200_000)));
+        assert_eq!(spans("\\v(a|ab)(c|bcd)", "abcd"), vec![0..4], "alternatives backtrack in order");
+        assert_eq!(spans("\\v(a*)+b", "aab"), vec![0..3], "a group matching empty does not loop");
+        assert_eq!(spans("\\v(ab){2,3}", "abababab"), vec![0..6]);
+        assert!(Regex::new("\\v(ab){99999}", false).unwrap_err().starts_with("E363"), "too big to compile");
+        // The line holds the `b` the pattern requires, so it is searched: exponential, until the budget ends it.
+        let line: String = "a".repeat(40) + "cb";
+        let start: std::time::Instant = std::time::Instant::now();
+        assert!(spans("\\(a\\|a\\)*c\\(a\\|a\\)*\\(a\\|a\\)*d\\|\\(a\\|a\\)*xb", &line).is_empty());
+        assert!(start.elapsed() < std::time::Duration::from_secs(2), "{:?}", start.elapsed());
+        assert_eq!(spans("\\v(a)\\m\\(b\\)\\M.\\Vc", "abxc"), vec![0..4], "back to magic, nomagic, very nomagic");
+        assert_eq!(spans("\\l\\+", "ABcdE"), vec![2..4]);
     }
 }

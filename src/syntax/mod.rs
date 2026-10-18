@@ -30,45 +30,135 @@ pub struct State {
     region: Option<usize>,
 }
 
-/// How far back the highlighter starts, from a neutral state, for a line far past the known states (Vim's
-/// `syntax sync minlines`), so `G` in a 3M-line file does not scan it all.
-/// shortcut: a comment or string opened more than this many lines above a far jump is missed there; scan from the
-/// top instead if that shows up in real files.
+/// A jump further than this past the window of known states moves the window instead of growing it.
 const SYNC: usize = 2000;
+/// Lines between the saved start states a far jump scans from.
+const CHECKPOINT: usize = 4096;
 
-/// Start state of the lines from `base` on, valid for a run of them; edits truncate it.
+/// Start states of a window of lines (from `base` on), and of every `CHECKPOINT`-th line scanned so far; edits
+/// truncate both. States between are found with `end_state`, which only tracks regions, so a jump to the end of
+/// a 3M-line file stays exact (a comment opened on line 1 still colors it) and fast.
 #[derive(Debug, Default)]
 pub struct Cache {
     base: usize,
     starts: Vec<State>,
+    checkpoints: Vec<State>,
 }
 
 impl Cache {
     /// Forgets states after `line`: its own start state only depends on earlier lines.
     pub fn invalidate(&mut self, line: usize) {
         if line < self.base {
-            *self = Self::default();
+            (self.base, self.starts) = (0, Vec::new());
         } else {
             self.starts.truncate(line - self.base + 1);
         }
+        self.checkpoints.truncate(line / CHECKPOINT + 1);
     }
 
-    /// Groups for line `y`, scanning forward from the last known state, or from `SYNC` lines above it when that is
-    /// nearer.
-    pub fn line(&mut self, lines: &[String], lang: &Lang, y: usize) -> Vec<Hl> {
+    /// Groups for the first `limit` chars of line `y` (a long line is drawn only in part).
+    pub fn line(&mut self, lines: &[String], lang: &Lang, y: usize, limit: usize) -> Vec<Hl> {
         let known: usize = self.base + self.starts.len().saturating_sub(1);
         if self.starts.is_empty() || y < self.base || y > known + SYNC {
-            self.base = y.saturating_sub(SYNC);
-            self.starts = vec![State::default()];
+            let base: usize = y.saturating_sub(SYNC);
+            let start: State = self.state_at(lines, lang, base);
+            (self.base, self.starts) = (base, vec![start]);
         }
+        let firsts: Firsts = firsts(lang);
         while self.base + self.starts.len() <= y {
             let i: usize = self.starts.len() - 1;
-            let chars: Vec<char> = lines[self.base + i].chars().collect();
-            let end: State = highlight(&chars, lang, self.starts[i]).1;
+            let end: State = end_state(lines[self.base + i].as_bytes(), lang, &firsts, self.starts[i]);
             self.starts.push(end);
         }
-        let chars: Vec<char> = lines[y].chars().collect();
+        let chars: Vec<char> = lines[y].chars().take(limit).collect();
         highlight(&chars, lang, self.starts[y - self.base]).0
+    }
+
+    /// The start state of line `y`, scanned from the nearest state known above it.
+    fn state_at(&mut self, lines: &[String], lang: &Lang, y: usize) -> State {
+        if self.checkpoints.is_empty() {
+            self.checkpoints.push(State::default());
+        }
+        let n: usize = (y / CHECKPOINT).min(self.checkpoints.len() - 1);
+        let (mut line, mut state): (usize, State) = (n * CHECKPOINT, self.checkpoints[n]);
+        let known: usize = self.base + self.starts.len().saturating_sub(1);
+        if !self.starts.is_empty() && (line..=y).contains(&known) {
+            (line, state) = (known, self.starts[known - self.base]);
+        }
+        let firsts: Firsts = firsts(lang);
+        while line < y {
+            state = end_state(lines[line].as_bytes(), lang, &firsts, state);
+            line += 1;
+            if line.is_multiple_of(CHECKPOINT) && line / CHECKPOINT == self.checkpoints.len() {
+                self.checkpoints.push(state);
+            }
+        }
+        state
+    }
+}
+
+/// `end_state` for the fuzzer, which checks it against `highlight`.
+#[cfg(test)]
+pub fn fast_end_state(line: &str, lang: &Lang, state: State) -> State {
+    end_state(line.as_bytes(), lang, &firsts(lang), state)
+}
+
+/// Which bytes can start a region, a comment or a quote of a language.
+type Firsts = [bool; 256];
+
+fn firsts(lang: &Lang) -> Firsts {
+    let mut firsts: Firsts = [false; 256];
+    let openers = lang.regions.iter().map(|(open, ..)| *open).chain([lang.comment]).filter_map(|p| p.bytes().next());
+    for b in openers.chain(lang.quotes.bytes()) {
+        firsts[usize::from(b)] = true;
+    }
+    firsts
+}
+
+/// The state after `line`, like `highlight(..).1` without coloring anything. Every region, comment and quote
+/// delimiter is ASCII and none starts with a word char, so bytes can be skipped up to the next possible one.
+fn end_state(line: &[u8], lang: &Lang, firsts: &Firsts, state: State) -> State {
+    if lang.kind == Kind::Markdown && state.region.is_none() && line.first() == Some(&b'#') {
+        return state;
+    }
+    let at = |i: usize, pat: &str| line[i..].starts_with(pat.as_bytes());
+    let close = |from: usize, close: &str, escapes: bool| {
+        let mut i: usize = from;
+        while i < line.len() {
+            if escapes && line[i] == b'\\' {
+                i += 2;
+            } else if at(i, close) {
+                return Some(i + close.len());
+            } else {
+                i += 1;
+            }
+        }
+        None
+    };
+    let mut region: Option<usize> = state.region;
+    let mut i: usize = 0;
+    loop {
+        if let Some(r) = region {
+            let (_, closer, group): (&str, &str, Hl) = lang.regions[r];
+            let Some(end): Option<usize> = close(i, closer, group == Hl::Str) else { return State { region } };
+            (i, region) = (end, None);
+            continue;
+        }
+        let Some(skip): Option<usize> =
+            line.get(i..).and_then(|rest| rest.iter().position(|&b| firsts[usize::from(b)]))
+        else {
+            return State::default();
+        };
+        i += skip;
+        if let Some(r) = lang.regions.iter().position(|(open, ..)| at(i, open)) {
+            (i, region) = (i + lang.regions[r].0.len(), Some(r));
+        } else if !lang.comment.is_empty() && at(i, lang.comment) {
+            return State::default();
+        } else if lang.quotes.as_bytes().contains(&line[i]) {
+            i = close(i + 1, &char::from(line[i]).to_string(), true).unwrap_or(line.len());
+        } else {
+            i += 1;
+        }
     }
 }
 
@@ -211,28 +301,78 @@ mod tests {
             ["let a = 1; /* start", "still comment", "end */ let b", "--[[ lua"].map(String::from).into();
         let rust: &Lang = lang("x.rs");
         let mut cache: Cache = Cache::default();
-        assert!(cache.line(&lines, rust, 1).iter().all(|h| *h == Hl::Comment));
-        let third: Vec<Hl> = cache.line(&lines, rust, 2);
+        assert!(cache.line(&lines, rust, 1, usize::MAX).iter().all(|h| *h == Hl::Comment));
+        let third: Vec<Hl> = cache.line(&lines, rust, 2, usize::MAX);
         assert_eq!((third[5], third[7]), (Hl::Comment, Hl::Keyword));
         cache.invalidate(0);
-        assert_eq!(cache.line(&lines, rust, 2)[7], Hl::Keyword);
+        assert_eq!(cache.line(&lines, rust, 2, usize::MAX)[7], Hl::Keyword);
         let lua: &Lang = lang("x.lua");
         assert!(highlight(&lines[3].chars().collect::<Vec<_>>(), lua, State::default()).1 != State::default());
     }
 
-    /// A far jump scans only `SYNC` lines above it; nearer lines, and the top after an edit, stay exact.
+    /// A far jump keeps only a window of states, yet stays exact: a comment opened on line 1 still colors it.
     #[test]
-    fn syncs_near_a_far_line() {
+    fn far_lines_stay_exact() {
         let mut lines: Vec<String> = vec!["/* open".into()];
-        lines.extend((0..3 * SYNC).map(|_| "let x".to_owned()));
+        lines.extend((0..3 * CHECKPOINT).map(|_| "let x".to_owned()));
         let rust: &Lang = lang("x.rs");
         let mut cache: Cache = Cache::default();
-        assert_eq!(cache.line(&lines, rust, SYNC)[0], Hl::Comment, "within SYNC: exact");
-        assert_eq!(cache.line(&lines, rust, 3 * SYNC)[0], Hl::Keyword, "far: synced from a neutral state");
-        assert_eq!((cache.base, cache.starts.len()), (2 * SYNC, SYNC + 1), "only the window was scanned");
-        assert_eq!(cache.line(&lines, rust, 3 * SYNC - 1)[0], Hl::Keyword, "the window is reused");
-        cache.invalidate(5);
-        assert_eq!(cache.line(&lines, rust, 3)[0], Hl::Comment, "an edit above the window starts over");
+        let far: usize = 3 * CHECKPOINT;
+        assert_eq!(cache.line(&lines, rust, far, usize::MAX)[0], Hl::Comment);
+        assert_eq!((cache.base, cache.starts.len(), cache.checkpoints.len()), (far - SYNC, SYNC + 1, 3));
+        lines[0] = "// closed".into();
+        cache.invalidate(0);
+        assert_eq!(cache.checkpoints.len(), 1, "checkpoints below the edit are dropped");
+        assert_eq!(cache.line(&lines, rust, far, usize::MAX)[0], Hl::Keyword);
+        lines[2 * CHECKPOINT + 5] = "/*".into();
+        cache.invalidate(2 * CHECKPOINT + 5);
+        assert_eq!(cache.line(&lines, rust, 5, usize::MAX)[0], Hl::Keyword, "back to the top, from a checkpoint");
+        assert_eq!(cache.line(&lines, rust, far, usize::MAX)[0], Hl::Comment);
+        lines[0] = "/* open".into();
+        lines[2 * CHECKPOINT + 5] = "let x".into();
+        let mut cache: Cache = Cache::default();
+        assert_eq!(cache.line(&lines, rust, SYNC + 500, usize::MAX)[0], Hl::Comment);
+        assert_eq!(cache.line(&lines, rust, 2 * SYNC + 1000, usize::MAX)[0], Hl::Comment, "from the window");
+        assert_eq!(cache.checkpoints.len(), 1);
+    }
+
+    /// `end_state` agrees with the full highlighter on every kind of delimiter.
+    #[test]
+    fn end_state_matches_highlight() {
+        let files: [&str; 16] = [
+            "x.rs", "x.lua", "x.py", "x.rb", "x.pl", "x.ps1", "x.md", "x.hs", "x.js", "x.c", "x.html", "x.go", "x.sql",
+            "x.sh", "x.json", "x.toml",
+        ];
+        let samples: [&str; 18] = [
+            "",
+            "plain é words 1.5",
+            "a /* b */ c /* d",
+            "*/ x \"str /* not\" y",
+            "s = \"esc \\\" /*\" // c /*",
+            "--[[ lua ]] [[ str",
+            "]] x -- c [[",
+            "\"\"\" py ''' x",
+            "x ''' y \"\"\" z",
+            "=begin ruby",
+            "=end =pod",
+            "=cut <# ps #> <#",
+            "# title ```",
+            "``` `tick` <!-- html",
+            "--> {- hs -} {-",
+            "-} 'a\\'b' \"\\",
+            "日本 /* 語 */ \"é",
+            "x \\",
+        ];
+        for (file, lang) in files.iter().filter_map(|f| Some((f, lang_for(Path::new(f))?))) {
+            let firsts: Firsts = firsts(lang);
+            let mut state: State = State::default();
+            for line in samples {
+                let chars: Vec<char> = line.chars().collect();
+                let want: State = highlight(&chars, lang, state).1;
+                assert_eq!(end_state(line.as_bytes(), lang, &firsts, state), want, "{line:?} in {file}");
+                state = want;
+            }
+        }
     }
 
     #[test]

@@ -121,6 +121,38 @@ fn perf() {
             }),
         ),
         (
+            "type 100 chars in a 1 MB line, frame per key",
+            ms(1500),
+            Box::new(|| {
+                let mut ed: Editor = editor_with("min.js", &"var a=\"x\";f(a,1);".repeat(60_000));
+                let mut screen: Screen = Screen::new(ColorDepth::TrueColor);
+                keys(&mut ed, "i");
+                timed(|| {
+                    for c in "x(1);".chars().cycle().take(100) {
+                        ed.handle(Key::Char(c));
+                        screen.draw(&mut ed, SCREEN);
+                    }
+                })
+            }),
+        ),
+        (
+            "gitsigns diff 20k lines: 10% edited, then all unrelated",
+            ms(100),
+            Box::new(|| {
+                let old: Vec<String> = (0..20_000).map(|n| format!("line {n}")).collect();
+                let edited: Vec<String> = old
+                    .iter()
+                    .enumerate()
+                    .map(|(n, l)| if n % 10 == 0 { format!("{l}!") } else { l.clone() })
+                    .collect();
+                let unrelated: Vec<String> = (0..20_000).map(|n| format!("other {n}")).collect();
+                timed(|| {
+                    crate::buffer::git::diff(&old, &edited);
+                    crate::buffer::git::diff(&old, &unrelated);
+                })
+            }),
+        ),
+        (
             "regex search x50 over 10k lines",
             ms(100),
             Box::new(|| {
@@ -254,7 +286,9 @@ fn big_files() {
         ms(3000),
     ));
     assert_eq!(ed.buf().line_count(), line_count);
-    rows.push(("text 100 MB: G + draw", timed(|| draw_after(&mut ed, &mut screen, "G")), ms(50)));
+    // The first far jump scans every line for comments and strings (exact colors), then checkpoints make it cheap.
+    rows.push(("text 100 MB: G + draw (exact syntax state)", timed(|| draw_after(&mut ed, &mut screen, "G")), ms(300)));
+    rows.push(("text 100 MB: gg, G again", timed(|| draw_after(&mut ed, &mut screen, "ggG")), ms(50)));
     rows.push((
         "text 100 MB: search to the end",
         timed(|| draw_after(&mut ed, &mut screen, "gg/end marker\n")),

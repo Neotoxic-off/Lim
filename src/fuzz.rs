@@ -5,6 +5,7 @@
 use std::env;
 use std::ops::Range;
 use std::panic::{self, AssertUnwindSafe};
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -12,7 +13,9 @@ use crate::buffer::regex::{Match, Regex};
 use crate::buffer::{Buffer, text};
 use crate::config::{Config, json, keys};
 use crate::editor::Editor;
+use crate::editor::tools::{self, Tool, WordCase};
 use crate::render::{Screen, markdown};
+use crate::syntax::{self, Lang, State};
 use crate::term::{ColorDepth, Key, Mouse, MouseKind, Size};
 
 /// A tiny deterministic generator (PCG-style), so a failing seed replays exactly.
@@ -162,6 +165,16 @@ const PHRASES: &[&str] = &[
     ":uniq\n",
     ":base64\n:base64!\n",
     ":.calc\n",
+    " xc1+2*ans\n(3\n\x1bk\n\x1b",
+    " xu5 ft cm\n\x1b",
+    " xb0xff\n\x1b",
+    " xt\n\x1b",
+    " xhf80\n\x1b:q\n",
+    " xksn\n",
+    " xd xD xi xp xl",
+    " xj xJ xw xs",
+    ":%case kebab\n",
+    ":%json\n:json!\n",
     ":hexedit\n",
     ":hexedit\nx:inspect\n:pack u16be 0x41\n:xor 0x5a\n:hexedit\n",
     ":detect\n:strings\n",
@@ -489,6 +502,109 @@ fn markdown_and_highlighting_survive_any_document() {
     });
 }
 
+/// The region-only scan that far jumps use agrees with the full highlighter, line after line.
+#[test]
+fn highlighter_end_states_agree() {
+    let pieces: &[&str] = &[
+        "/*", "*/", "//", "--", "--[[", "[[", "]]", "\"\"\"", "'''", "=begin", "=end", "=pod", "=cut", "<#", "#>",
+        "{-", "-}", "<!--", "-->", "```", "#", ";", "::", "x", "1.5", " ",
+    ];
+    let names: [&str; 16] = [
+        "x.rs", "x.lua", "x.py", "x.rb", "x.pl", "x.ps1", "x.md", "x.hs", "x.js", "x.c", "x.html", "x.go", "x.sql",
+        "x.sh", "x.lisp", "x.bat",
+    ];
+    fuzz("end-state", 600, |rng, log| {
+        let name: &str = rng.pick::<&str>(&names);
+        let Some(lang): Option<&Lang> = syntax::lang_for(Path::new(name)) else { return Ok(()) };
+        let mut state: State = State::default();
+        for _ in 0..6 {
+            let line: String = (0..rng.below(16))
+                .map(|_| if rng.chance(50) { *rng.pick(pieces) } else { *rng.pick(UNICODE) })
+                .collect();
+            log.push(format!("{line:?}"));
+            let chars: Vec<char> = line.chars().collect();
+            let want: State = syntax::highlight(&chars, lang, state).1;
+            if syntax::fast_end_state(&line, lang, state) != want {
+                return Err(format!("{name}: {line:?}"));
+            }
+            state = want;
+        }
+        Ok(())
+    });
+}
+
+/// Every `<Leader>x` tool answers any line, quickly, without panicking.
+#[test]
+fn tools_survive_any_input() {
+    let pieces: &[&str] = &[
+        "1",
+        "2.5",
+        "0x1f",
+        "0b1",
+        "1e3",
+        "e",
+        "pi",
+        "ans",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "^",
+        "!",
+        "(",
+        ")",
+        ",",
+        "sqrt",
+        "log",
+        "max",
+        " ",
+        "ft",
+        "cm",
+        "kg",
+        "lb",
+        "c",
+        "f",
+        "MB",
+        "Mb",
+        "km/h",
+        "to",
+        "en",
+        "#",
+        "rgb(",
+        "hsl(",
+        "2026-10-18",
+        "T12:00",
+        "Z",
+        ":",
+        "now",
+        "{",
+        "}",
+        "[",
+        "]",
+        "\"",
+        "\\",
+        "snake",
+        "camelCase",
+    ];
+
+    fuzz("tools", 1500, |rng, log| {
+        let input: String =
+            (0..rng.below(10)).map(|_| if rng.chance(70) { *rng.pick(pieces) } else { *rng.pick(UNICODE) }).collect();
+        log.push(format!("{input:?}"));
+        let start: Instant = Instant::now();
+        for tool in Tool::ALL {
+            let _: Result<String, String> = tool.run(&input, Some(1.5));
+        }
+        let _: Result<String, String> = tools::json(&input, rng.chance(50));
+        let _: String = WordCase::Camel.apply(&input);
+        if start.elapsed() > HANG {
+            return Err(format!("took {:?}", start.elapsed()));
+        }
+        Ok(())
+    });
+}
+
 #[test]
 fn ex_commands_survive_any_line() {
     let pieces: &[&str] = &[
@@ -547,6 +663,9 @@ fn ex_commands_survive_any_line() {
         "sha256",
         "wc",
         "calc",
+        "case ",
+        "snake",
+        "json",
         "base32",
         "hex",
         "url",

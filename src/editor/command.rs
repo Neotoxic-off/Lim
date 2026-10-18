@@ -10,6 +10,7 @@ use super::operator::Operator;
 use super::picker::PickerKind;
 use super::re::PackType;
 use super::textops::TextOp;
+use super::tools::WordCase;
 use super::vim::LineRange;
 use super::{Editor, Mode};
 use crate::buffer::{Buffer, Pos, text};
@@ -24,6 +25,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("bnext", "Next buffer"),
     ("bprevious", "Previous buffer"),
     ("calc", "Evaluate the arithmetic of the lines"),
+    ("case", "Change the case of the lines: snake camel pascal kebab constant title lower upper"),
     ("close", "Close window"),
     ("detect", "File type, architecture, entropy, packer of the bytes"),
     ("edit", "Edit a file"),
@@ -382,6 +384,13 @@ impl Command {
                 };
                 return Ok(Some(Self::Text { range: range.to_owned(), op }));
             }
+            "case" => {
+                let case: WordCase = WordCase::parse(arg).ok_or_else(|| Error::NotACommand(input.into()))?;
+                return Ok(Some(Self::Text { range: range.to_owned(), op: TextOp::Case(case) }));
+            }
+            "json" if arg.is_empty() => {
+                return Ok(Some(Self::Text { range: range.to_owned(), op: TextOp::Json { minify: force } }));
+            }
             "hexedit" | "detect" | "inspect" | "strings" if arg.is_empty() && range.is_empty() => {
                 return Ok(Some(match bare {
                     "hexedit" => Self::HexEdit,
@@ -697,7 +706,7 @@ impl Editor {
             }
             Command::Help => self.open_cheatsheet(),
             Command::Setup => self.open_setup(),
-            Command::User { range, name, args } => self.run_user_command(&range, &name, &args)?,
+            Command::User { range, name, args } => self.run_user_command(&range, &name, &args, true)?,
             Command::Goto(n) => {
                 let buf: &mut Buffer = self.buf_mut();
                 let line: usize = n.saturating_sub(1).min(buf.last_line());
@@ -790,7 +799,15 @@ mod tests {
         assert_eq!(Command::parse("uniq").unwrap(), Some(Command::Text { range: String::new(), op: TextOp::Uniq }));
         assert_eq!(Command::parse(".calc").unwrap(), Some(Command::Text { range: ".".into(), op: TextOp::Calc }));
         // The text commands take no argument, and `:b64` stays buffer 64.
-        for bad in ["uniq x", "wc -l", "sha256 file", "rename"] {
+        assert_eq!(
+            Command::parse("%case k").unwrap(),
+            Some(Command::Text { range: "%".into(), op: TextOp::Case(WordCase::Kebab) })
+        );
+        assert_eq!(
+            Command::parse("json!").unwrap(),
+            Some(Command::Text { range: String::new(), op: TextOp::Json { minify: true } })
+        );
+        for bad in ["uniq x", "wc -l", "sha256 file", "rename", "case", "case nope", "json x"] {
             assert!(matches!(Command::parse(bad), Err(Error::NotACommand(_))), "{bad}");
         }
         assert_eq!(Command::parse("b64").unwrap(), Some(Command::Buffer("64".into())));

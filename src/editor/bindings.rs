@@ -5,7 +5,9 @@ use super::manage::CloseSet;
 use super::motion::Motion;
 use super::operator::Operator;
 use super::picker::PickerKind;
-use super::ui::{CTRL_W, LEADER_B, LEADER_BS, LEADER_F, LEADER_G, LEADER_S, LEADER_T, LEADER_U};
+use super::textops::TextOp;
+use super::tools::{Generated, Tool};
+use super::ui::{CTRL_W, LEADER_B, LEADER_BS, LEADER_F, LEADER_G, LEADER_S, LEADER_T, LEADER_U, LEADER_X};
 use super::window::Direction;
 use super::{Mode, PickAction};
 use crate::config::keys::LEADER;
@@ -79,6 +81,14 @@ pub enum Action {
     InsertColumnZero,
     JoinRaw,
     OpenUrl,
+    /// `<Leader>x…`: a tool's window.
+    ToolWindow(Tool),
+    /// `<Leader>xk`
+    CasePrompt,
+    /// `<Leader>x…`: text inserted at the cursor.
+    Generate(Generated),
+    /// `<Leader>x…`: a text command on the whole buffer.
+    BufferText(TextOp),
 }
 
 /// `<Leader>u…`: an option to flip or a setting to change.
@@ -147,6 +157,7 @@ pub const MENUS: &[(char, &str)] = &[
     (LEADER_S, "<Leader>S"),
     (LEADER_T, "<Leader>t"),
     (LEADER_U, "<Leader>u"),
+    (LEADER_X, "<Leader>x"),
     ('g', "g"),
     (']', "]"),
     ('[', "["),
@@ -163,6 +174,7 @@ pub const BINDINGS: &[Binding] = &[
     b(LEADER, 'S', A::Group(LEADER_S), "+Session"),
     b(LEADER, 't', A::Group(LEADER_T), "+Terminal"),
     b(LEADER, 'u', A::Group(LEADER_U), "+UI/UI Toggles"),
+    b(LEADER, 'x', A::Group(LEADER_X), "+Tools"),
     b(LEADER, 'c', A::CloseBuffer { force: false }, "Close buffer"),
     b(LEADER, 'C', A::CloseBuffer { force: true }, "Force close buffer"),
     b(LEADER, 'e', A::ToggleExplorer, "Toggle Explorer"),
@@ -255,6 +267,21 @@ pub const BINDINGS: &[Binding] = &[
     b(LEADER_U, 'Z', A::Toggle(Toggle::Zen), "Toggle zen mode"),
     b(LEADER_U, 'm', A::Toggle(Toggle::MarkdownPreview), "Toggle Markdown preview"),
     b(LEADER_U, '|', A::Toggle(Toggle::IndentGuides), "Toggle indent guides"),
+    b(LEADER_X, 'c', A::ToolWindow(Tool::Calc), "Calculator window"),
+    b(LEADER_X, 'u', A::ToolWindow(Tool::Convert), "Unit converter window"),
+    b(LEADER_X, 'b', A::ToolWindow(Tool::Base), "Number bases window"),
+    b(LEADER_X, 't', A::ToolWindow(Tool::Time), "Time and timestamps window"),
+    b(LEADER_X, 'h', A::ToolWindow(Tool::Color), "Color window: hex, rgb, hsl"),
+    b(LEADER_X, 'k', A::CasePrompt, "Case of the word"),
+    b(LEADER_X, 'd', A::Generate(Generated::Date), "Insert date"),
+    b(LEADER_X, 'D', A::Generate(Generated::DateTime), "Insert date and time"),
+    b(LEADER_X, 'i', A::Generate(Generated::Uuid), "Insert UUID"),
+    b(LEADER_X, 'p', A::Generate(Generated::Password), "Insert password"),
+    b(LEADER_X, 'l', A::Generate(Generated::Lorem), "Insert lorem ipsum"),
+    b(LEADER_X, 'j', A::BufferText(TextOp::Json { minify: false }), "Format JSON"),
+    b(LEADER_X, 'J', A::BufferText(TextOp::Json { minify: true }), "Minify JSON"),
+    b(LEADER_X, 'w', A::BufferText(TextOp::Wc), "Count lines, words, chars"),
+    b(LEADER_X, 's', A::BufferText(TextOp::Sha256), "SHA-256 of the buffer"),
     b('g', 'g', A::Motion(Motion::FileStart), "First line"),
     b('g', 'c', A::Operator(Operator::Comment), "Toggle comment (gcc line, gco/gcO add)"),
     b('g', 'e', A::Motion(Motion::WordEndBack { big: false }), "Previous word end"),

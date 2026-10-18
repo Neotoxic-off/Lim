@@ -17,7 +17,8 @@ pub fn which_key(ed: &Editor, grid: &mut Grid, area: Rect) {
     let Some((title, entries)): Option<(String, Vec<MenuEntry>)> = ed.which_key() else { return };
     let t: Arc<Theme> = theme();
     let fill: Style = t.style(Group::WhichKeyNormal);
-    let border: Style = t.style(Group::FloatBorder);
+    // On the editor's own background a borderless frame would vanish into the code: keep the split line.
+    let border: Style = t.style(Group::WinSeparator);
     let arrow: String = format!(" {} ", super::icons::icons(&ed.options).arrow);
     let arrow: &str = arrow.as_str();
     let cell_width: usize = entries

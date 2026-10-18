@@ -6,6 +6,7 @@ mod history;
 mod motion;
 pub mod regex;
 pub mod text;
+mod width;
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -48,6 +49,8 @@ pub struct Buffer {
     pub title: Option<String>,
     /// The lines are a hex dump (`hex.rs`) of the file's bytes: binary files open this way.
     pub hex: bool,
+    /// A tool window's notebook: never asks to be saved (`is_dirty` stays false).
+    pub throwaway: bool,
     /// Positions the jump list points at, kept in step with edits like marks.
     anchors: HashMap<u64, Pos>,
     /// See `revision()`.
@@ -77,6 +80,7 @@ impl Buffer {
             marks: HashMap::new(),
             title: None,
             hex: false,
+            throwaway: false,
             anchors: HashMap::new(),
             revision: next_revision(),
             word_cache: (u64::MAX, Vec::new()),
@@ -217,7 +221,7 @@ impl Buffer {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.history.state() != self.saved
+        !self.throwaway && self.history.state() != self.saved
     }
 
     /// `:e!`: the file as it is on disk, dropping unsaved changes (undo brings them back).
@@ -523,8 +527,9 @@ impl Buffer {
     }
 
     /// Highlight groups for line `y`, one per char; None for files without a known language.
-    pub fn highlight_line(&mut self, y: usize) -> Option<Vec<Hl>> {
-        Some(self.syntax.line(&self.lines, self.lang?, y))
+    /// Groups for the first `limit` chars of line `y`.
+    pub fn highlight_line(&mut self, y: usize, limit: usize) -> Option<Vec<Hl>> {
+        Some(self.syntax.line(&self.lines, self.lang?, y, limit))
     }
 
     fn byte(&self, p: Pos) -> usize {

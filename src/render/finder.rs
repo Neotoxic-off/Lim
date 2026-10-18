@@ -30,18 +30,18 @@ pub fn picker(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
     let list_w: usize = if w >= 80 { w * 45 / 100 } else { w };
     let fill: Style = t.style(Group::NormalFloat);
     let border: Style = t.style(Group::FloatBorder);
-    let title: Style = t.on(Group::FloatTitle, fill.bg);
 
-    // Input.
-    grid.float(Rect { x, y, w: list_w, h: 3 }, border, fill, picker.kind.title());
+    // Input, on its own shade like NvChad's telescope prompt.
+    let prompt: Style = t.style(Group::PickerInput);
+    grid.float(Rect { x, y, w: list_w, h: 3 }, border, prompt, picker.kind.title());
     let mut input: Row = Row::new(list_w - 2);
-    input.text(title, &format!(" {} ", set.search));
-    input.text(fill, &picker.query);
+    input.text(Style { fg: t.bg(Group::FloatTitle), bold: true, ..prompt }, &format!(" {} ", set.search));
+    input.text(prompt, &picker.query);
     let cursor_col: usize = x + 1 + input.used();
     let count: String = format!("{}/{} ", picker.matches.len(), picker.items.len());
-    input.pad_to(fill, (list_w - 2).saturating_sub(text::str_width(&count)));
-    input.text(t.on(Group::LineNr, fill.bg), &count);
-    grid.put(x + 1, y + 1, &input.finish(fill));
+    input.pad_to(prompt, (list_w - 2).saturating_sub(text::str_width(&count)));
+    input.text(t.on(Group::LineNr, prompt.bg), &count);
+    grid.put(x + 1, y + 1, &input.finish(prompt));
 
     // Results.
     let list: Rect = Rect { x, y: y + 3, w: list_w, h: h - 3 };

@@ -9,6 +9,7 @@ use super::prompt::PromptAction;
 use super::registers::Register;
 use super::session;
 use super::ui::{CTRL_W, LEADER_F};
+use super::vim::LineRange;
 use super::window::Direction;
 use super::{Editor, Mode, Pending};
 use crate::buffer::{Buffer, CharClass, Pos, text};
@@ -284,6 +285,15 @@ impl Editor {
             Action::CycleBuffer { forward } => self.cycle(forward, n),
             Action::Shell => self.shell_requested = Some(Vec::new()),
             Action::Tool(argv) => self.run_tool(argv),
+            Action::ToolWindow(tool) => self.open_tool(tool),
+            Action::CasePrompt => self.open_case_prompt(),
+            Action::Generate(what) => self.insert_generated(what),
+            Action::BufferText(op) => {
+                let all: LineRange = LineRange { first: 0, last: self.buf().last_line() };
+                if let Err(e) = self.text_op(all, op) {
+                    self.error(&e);
+                }
+            }
             Action::GitBrowse => self.git_browse(),
             Action::Hunk { forward } => self.jump_hunk(forward),
             Action::HunkEdge { last } => self.jump_hunk_edge(last),

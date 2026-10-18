@@ -34,6 +34,8 @@ pub enum PromptAction {
     },
     /// `<Leader>Ss`
     SessionSave,
+    /// `<Leader>xk`: the case to put the word under the cursor in.
+    Case,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,6 +118,7 @@ impl Editor {
         }
         let result: Result<String, String> = match action {
             _ if input.is_empty() && !matches!(action, PromptAction::TreeDelete { .. }) => return,
+            PromptAction::Case => self.case_word(input),
             PromptAction::RenameFile => self.rename_current(input),
             PromptAction::IndentWidth => self.set_indent(input),
             PromptAction::TreeAdd { dir, directory } => {

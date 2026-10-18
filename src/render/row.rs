@@ -4,7 +4,7 @@
 use std::fmt::{self, Write};
 use std::ops::Range;
 
-use super::theme::{Rgb, Style};
+use super::theme::{Group, Rgb, Style, theme};
 use crate::buffer::text;
 use crate::editor::Rect;
 use crate::term::ColorDepth;
@@ -153,20 +153,21 @@ impl Grid {
         }
     }
 
-    /// A rounded float (`winborder = "rounded"`) with an optional title. The border is part of the panel: it
-    /// takes `fill`'s background, never `border`'s or the colors underneath, so the float reads as one block.
+    /// A rounded float (`winborder = "rounded"`) with an optional `FloatTitle` pill. The border is part of the
+    /// panel: it takes `fill`'s background, never `border`'s or the colors underneath, so the float reads as one
+    /// block. A border whose fg equals its bg (the borderless look of `NvChad`, the default) is drawn in the fill's color.
     pub fn float(&mut self, area: Rect, border: Style, fill: Style, title: &str) {
         let Rect { x, y, w, h }: Rect = area;
         if w < 2 || h < 2 {
             return;
         }
-        // `FloatBorder` brings its own background in most themes; the frame takes the inside's instead.
-        let border: Style = Style { bg: fill.bg, ..border };
+        let fg: Rgb = if border.fg == border.bg { fill.bg } else { border.fg };
+        let border: Style = Style { fg, bg: fill.bg, ..border };
         let mut top: Row = Row::new(w);
         top.cell(border, '╭');
         if !title.is_empty() {
             top.text(border, "─");
-            top.text(Style { bold: true, ..border }, &format!(" {title} "));
+            top.text(theme().on(Group::FloatTitle, fill.bg), &format!(" {title} "));
         }
         while top.used() < w - 1 {
             top.cell(border, '─');
@@ -256,12 +257,17 @@ mod tests {
             (Style::new(Rgb(0x111111), Rgb(0xaa0000)), Style::new(Rgb(0xeeeeee), Rgb(0x222222)));
         let mut grid: Grid = Grid::new(10, 5, under);
         let border: Style = Style::new(Rgb(0x888888), Rgb(0x333333));
-        grid.float(Rect { x: 1, y: 1, w: 6, h: 3 }, border, panel, "t");
+        grid.float(Rect { x: 1, y: 1, w: 6, h: 3 }, border, panel, "");
         for y in 1..4 {
             assert!(grid.row(y)[1..7].iter().all(|c| c.style.bg == panel.bg), "row {y}");
             assert_eq!(grid.row(y)[0].style.bg, under.bg, "outside stays");
         }
         assert_eq!(grid.row(1)[1].ch, '╭');
+        assert_eq!(grid.row(2)[1].style.fg, border.fg, "a set border color shows");
+        let borderless: Style = Style::new(Rgb(0x333333), Rgb(0x333333));
+        grid.float(Rect { x: 1, y: 1, w: 6, h: 3 }, borderless, panel, "t");
+        assert_eq!(grid.row(2)[1].style.fg, panel.bg, "fg == bg: the frame vanishes into the panel");
+        assert_eq!(grid.row(1)[4].style.bg, theme().bg(Group::FloatTitle), "the title is a pill");
     }
 
     #[test]

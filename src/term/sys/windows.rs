@@ -85,6 +85,56 @@ unsafe extern "system" {
     fn ReadConsoleInputW(console: Handle, records: *mut InputRecord, len: u32, read: *mut u32) -> i32;
 }
 
+/// `TIME_ZONE_INFORMATION`: biases in minutes west of UTC; the names and switch dates are not read.
+#[repr(C)]
+struct TimeZoneInformation {
+    bias: i32,
+    standard_name: [u16; 32],
+    standard_date: [u16; 8],
+    standard_bias: i32,
+    daylight_name: [u16; 32],
+    daylight_date: [u16; 8],
+    daylight_bias: i32,
+}
+
+/// `GetTimeZoneInformation`'s answer while daylight saving time is on.
+const TIME_ZONE_ID_DAYLIGHT: u32 = 2;
+
+unsafe extern "system" {
+    fn GetTimeZoneInformation(info: *mut TimeZoneInformation) -> u32;
+}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    /// `RtlGenRandom`, the system's cryptographic random source.
+    #[link_name = "SystemFunction036"]
+    fn RtlGenRandom(buf: *mut u8, len: u32) -> u8;
+}
+
+/// Seconds the local time zone is ahead of UTC now (Windows gives the current rule, not one per date).
+pub fn utc_offset(_ts: i64) -> i64 {
+    let mut info: TimeZoneInformation = TimeZoneInformation {
+        bias: 0,
+        standard_name: [0; 32],
+        standard_date: [0; 8],
+        standard_bias: 0,
+        daylight_name: [0; 32],
+        daylight_date: [0; 8],
+        daylight_bias: 0,
+    };
+    let zone: u32 = unsafe { GetTimeZoneInformation(&raw mut info) };
+    let extra: i32 = if zone == TIME_ZONE_ID_DAYLIGHT { info.daylight_bias } else { info.standard_bias };
+    -i64::from(info.bias + extra) * 60
+}
+
+/// Fills `buf` from the system's random source; false if it fails.
+pub fn random(buf: &mut [u8]) -> bool {
+    buf.chunks_mut(1 << 16).all(|chunk| {
+        let len: u32 = u32::try_from(chunk.len()).unwrap_or(0);
+        unsafe { RtlGenRandom(chunk.as_mut_ptr(), len) != 0 }
+    })
+}
+
 /// The input and output console modes, saved on entry and restored on exit.
 #[derive(Clone, Copy)]
 pub struct Mode {

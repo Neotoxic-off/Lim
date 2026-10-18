@@ -55,6 +55,7 @@ the start screen.
 - [Install](#install)
 - [Usage](#usage)
 - [Keymaps](#keymaps)
+- [Tools](#tools)
 - [Themes and icons](#themes-and-icons)
 - [Configuration](#configuration)
 - [Hex editing and reverse engineering](#hex-editing-and-reverse-engineering)
@@ -70,7 +71,7 @@ the start screen.
 | Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`–`"9` shifting, `"-`, `"_`, `"+`) · marks and jump list that follow edits · Vim regexes in `/`, `?`, `*`, `:s`, `:g` · `:g`/`:v`, `:norm`, `:sort`, `:m`, `:t`, `:r` · line ranges with offsets |
 | Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, `gn` (`cgn` then `.`), page and line scrolling, `<S-arrows>` (word / page), `zz zt zb` · `:` and `/` history |
 | Text objects | `iw` `aw` `iW` `aW` `ip` `ap` `it` `at` (HTML/XML tags) `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
-| AstroNvim look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · rounded floats · notifications · start screen |
+| AstroNvim look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · buffer tabline with jump labels, aligned with the windows when the file tree is open · winbar path · relative numbers · sign column · cursorline · borderless NvChad-style floats with pill titles · notifications · start screen |
 | Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) · Markdown preview beside the file, live as you type (`<Leader>um`) |
 | Git | signs against the index · hunk jumps · graph of every branch, log, file log, status and stash pickers with diffs · `git browse` · status colors in the file tree |
@@ -78,7 +79,8 @@ the start screen.
 | Windows | `\|` / `\` splits, `<C-h/j/k/l>`, `<C-arrows>` to resize, `<C-w>` family, zen mode, global statusline · mouse: click to place the cursor or focus a window, drag to select, wheel to scroll text and lists |
 | System | system clipboard (`clipboard=unnamedplus`, OSC 52 fallback over SSH) · `<F7>` shell, node, python, btm, gdu |
 | Config | settings screen (`<Leader>,`) to search and change every option live and save it · one JSON file: Neovim option names, colorscheme, astrotheme palette, Neovim highlight groups, keymaps per mode, icon set |
-| Text tools | `:uniq` `:base64[!]` `:base32[!]` `:hex[!]` `:url[!]` `:rot13` `:sha256` `:wc` `:calc` on the buffer or a range, built in (no process) |
+| Text tools | `:uniq` `:base64[!]` `:base32[!]` `:hex[!]` `:url[!]` `:rot13` `:sha256` `:wc` `:calc` `:case` `:json[!]` on the buffer or a range, built in (no process) |
+| Tools (`<Leader>x`) | tool windows that keep their history (`<CR>` answers a line, again after an edit): calculator (functions, bases, `ans`) · unit converter (length, area, volume, mass, time, speed, temperature, data, energy, power, pressure, angle) · number bases · timestamps and date differences · colors (hex, rgb, hsl) · word case · insert date, UUID, password, lorem ipsum · JSON format/minify · word count |
 | Hex & RE | binary files open as an editable hex dump, written back as bytes · `:hexedit` · `:detect` (ELF/PE/Mach-O and 20 formats, architecture, entropy, UPX) · `:strings` · `:inspect` · `:pack` · `:xor` |
 | Commands | `:Commands` in the config pipe the lines through a program in any language and put its output back or show it · format on save |
 | Robustness | atomic saves · refuses to clobber other files · a broken hex dump is never written · files too big for memory are refused, not half-loaded · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
@@ -243,6 +245,7 @@ Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
 | `<Leader>ur` · `uu` · `uz` · `uy` · `u\|` | References · URLs · colors · syntax · indent guides |
 | `<Leader>uN` · `uD` · `uZ` | Notifications · dismiss them · zen mode |
 | `<Leader>um` | Markdown preview beside Markdown buffers (*lim*) |
+| `<Leader>x…` | [Tools](#tools): `xc` calculator · `xu` units · `xb` bases · `xt` time · `xh` color · `xk` case · `xd`/`xD`/`xi`/`xp`/`xl` insert date, UUID, password, lorem · `xj`/`xJ` JSON · `xw`/`xs` count, hash (*lim*) |
 
 ### Vim
 
@@ -250,7 +253,7 @@ Everything usual, including: `R` replace mode, `<C-a>`/`<C-x>`, `gu`/`gU`/`g~`, 
 `gx`, `gf` (also `path:line`), `gn`, `ge`, `g_`, `H`/`M`/`L`, `zz`/`zt`/`zb`, `<C-e>`/`<C-y>`, `m{a-z}` with
 `'`/`` ` ``, `''`, `<C-o>`, `<C-^>` (previous buffer), `"{register}`, `q{r}`/`@{r}`/`@@`, `?`, `;`/`,`, `&`. Visual
 block: `I`, `A`, `$` (ragged right edge, then `A` appends to every line), `d`, `c`, `y`, `r`, `~`/`u`/`U`,
-`o`/`O`, blockwise put. Insert mode: `<C-r>{r}`, `<C-o>`, `<C-t>`/`<C-d>`, `<C-w>`, `<C-u>`.
+`o`/`O`, blockwise put; its columns are screen cells, so tabs and wide characters line up as drawn. Insert mode: `<C-r>{r}`, `<C-o>`, `<C-t>`/`<C-d>`, `<C-w>`, `<C-u>`.
 `<S-Left>`/`<S-Right>` move a word and `<S-Up>`/`<S-Down>` a page, in normal, visual (to grow the selection fast),
 insert and after an operator. On the `:` and `/` lines, `<Up>`/`<Down>` recall older / newer entries that start with
 what is typed (separate histories for commands and searches).
@@ -278,9 +281,11 @@ uppercase letter come from the config's [commands](#commands).
 | `:rot13` | ROT13 each line |
 | `:sha256` | SHA-256 of the lines, as a file would hold them |
 | `:wc` | Lines, words and chars |
-| `:calc` | Arithmetic of the lines: `+ - * / % ^`, parentheses, decimals (`:.calc`) |
+| `:calc` | Arithmetic of the lines, with the [calculator](#tools)'s syntax (`:.calc`) |
+| `:case snake` | Each line in another case: `snake` `camel` `pascal` `kebab` `constant` `title` `lower` `upper` (a prefix is enough) |
+| `:json` `:json!` | Lay the lines out as indented JSON / minify them; numbers and strings stay exactly as written |
 
-Sorting, case, trailing blanks and reversing are Vim's own: `:sort`, `gU`/`gu`, `:%s/\s\+$//`, `:g/^/m0`.
+Sorting, trailing blanks and reversing are Vim's own: `:sort`, `:%s/\s\+$//`, `:g/^/m0`.
 
 **Patterns** are Vim regexes (magic by default): `.` `*` `[a-z]` `[^…]` `^` `$` `\+` `\=` `\?` `\{n,m}`
 `\(…\)` `\|` `\<` `\>` `\d` `\w` `\s` `\a` `\l` `\u` (and `\D` `\W` `\S`…), `\v` for very magic (`(a|b)+`), `\c`/`\C`
@@ -289,6 +294,56 @@ every match, `c` confirm each (`y` `n` `a` `q` `l`, one undo step for the sessio
 only, `e` no error when nothing matches; `\r` in the replacement splits the line. `:g`
 runs its command on marked lines, so deleting lines on the way is safe, and `u` undoes the whole `:g` or `:norm`.
 Live grep (`<Leader>fw`) stays plain text.
+
+## Tools
+
+`<Leader>x` opens the tools menu (which-key shows it; the cheat sheet documents every syntax under "Tools").
+
+The calculator, converter, bases, time and color tools are **windows**: each opens once, split below, on its own
+buffer (`[Calculator]`, `[Convert]`, `[Bases]`, `[Time]`, `[Color]`), in insert mode. Type a line and `<CR>`: the
+answer lands on the line below (`= 152.4 cm`, or `! why` when it is wrong) and a fresh line waits. The buffer is
+the history: scroll it, search it, yank from it, edit an old question and `<CR>` on it (in insert or normal mode)
+to answer it again in place. Each answer also goes to the `"` register, so `p` in your code pastes it. `:q`
+closes the window without asking to save; the same key brings it back with everything still in it.
+
+```
+2+3*4
+= 14
+ans^2
+= 196
+sqrt(-1)
+! undefined result (like sqrt(-1), log(0) or 0/0)
+```
+
+| Keys | Tool | Examples |
+|---|---|---|
+| `<Leader>xc` | Calculator | `2+3*4` · `2pi` · `3(4+1)` · `2^10` · `200*15%` · `10%3` · `5!` · `0xff+0b11` · `sqrt(2)` · `log(8, 2)` · `max(1, 7)` · `ans*2` |
+| `<Leader>xu` | Unit converter | `5 ft to cm` · `70 kg en lb` · `100 f c` · `1.5 GiB MB` · `90 km/h mph` · `2 m` (every unit of its kind) |
+| `<Leader>xb` | Number bases | `255` → `255 · 0xff · 0o377 · 0b1111_1111 · 'ÿ' U+00FF`; also `-0b101`, `2^40` |
+| `<Leader>xt` | Time | empty or `now` · `1700000000` (or milliseconds) · `2026-10-18 14:30` (local; `Z` for UTC) · `2026-01-01 to 2026-03-01` (difference) |
+| `<Leader>xh` | Color | `#f80` · `#ff8800` · `rgb(255, 136, 0)` · `hsl(32, 100%, 50%)` → all three forms |
+| `<Leader>xk` | Case of the WORD under the cursor | `snake` `camel` `pascal` `kebab` `constant` `title` `lower` `upper` (`sn`, `k`…) |
+| `<Leader>xd` `xD` | Insert the date / date and time (local) | `2026-10-18` · `2026-10-18 14:30:05` |
+| `<Leader>xi` `xp` `xl` | Insert a UUID v4 / a 20-char password / lorem ipsum | random bytes come from the system (`/dev/urandom`, `RtlGenRandom`) |
+| `<Leader>xj` `xJ` | Format / minify the buffer as JSON (`:json`, `:json!` on a range) | invalid JSON is left alone with the parser's message |
+| `<Leader>xw` `xs` | Count lines, words, chars / SHA-256 of the buffer | |
+
+**Calculator**: `+ - * / ^` (right to left, `-2^2` is -4; `**` too), `%` (a remainder between two numbers, else a
+percentage), `!`, `√`, `²`, `³`, parentheses (`[ ]` and `{ }` too; those still open at the end are closed), a value
+next to a name or `(` multiplies (`2pi(1+1)`, `(1+1)(2)`); `×` `·` `÷` `−` are read as `*` `*` `/` `-`; literals
+`1.5`, `.5`, `1,5` (decimal comma outside function arguments), `1 000 000` (blanks are ignored), `1e-3`, `0xff`,
+`0b101`, `0o17`; functions `sqrt cbrt abs floor ceil round trunc sign exp ln log log2 log(x, base) sin cos tan asin
+acos atan sinh cosh tanh rad deg hypot pow min max`; constants `pi` (`π`) `e` `tau` `phi`, and `ans` for the
+previous answer. Answers show at most 10 decimals (`0.1+0.2` is `0.3`). A wrong line says what and where:
+`unmatched ) at column 4`, `unknown name foo`, `incomplete: something is missing after +`, `infinite result (a
+division by zero or an overflow)`, `undefined result (like sqrt(-1)…)`, `! needs a whole number from 0 to 170`.
+
+**Units** (French names work too: `pied`, `livre`, `pouce`, `tasse`, `octet`…): length `m km cm mm µm nm in ft yd
+mi nmi au ly` · area `m2 km2 cm2 mm2 ha acre ft2 in2 mi2` · volume `l ml cl dl m3 cc gal ukgal qt pt cup floz tbsp
+tsp` · mass `kg g mg t lb oz st ct` · time `s ms µs ns min h d wk mo yr` · speed `m/s km/h mph kn ft/s` ·
+temperature `c f k` · data `B bit KB MB GB TB PB KiB MiB GiB TiB Kb Mb Gb` (case tells bits from bytes) · energy
+`J kJ cal kcal Wh kWh eV BTU` · power `W kW MW hp ch` · pressure `Pa hPa kPa bar mbar atm psi mmHg` · angle `rad deg
+grad turn`. US cups, pints and gallons.
 
 ## Themes and icons
 
@@ -436,10 +491,10 @@ Each takes `fg`, `bg` (`"#RRGGBB"`), `bold`, `italic`, `underline`, or `link` to
 | Syntax | `@variable` `@comment` `@string` `@number` `@keyword` `@function` `@type` `@type.builtin` `@constant` `@function.macro` `@property` |
 | Statusline | `StatusLine` `StatusLineSection` `StatusLineNormal` `StatusLineInsert` `StatusLineVisual` `StatusLineCommand` `StatusLineReplace` `StatusLineCwd` `StatusLinePosition` `StatusLineRecording` |
 | Tabline, windows | `TabLine` `TabLineSel` `TabLineFill` `TabLineIndicator` `TabLineModified` `BufferPicker` `WinSeparator` `WinBar` `WinBarNC` |
-| Messages, floats | `MsgArea` `ErrorMsg` `NormalFloat` `FloatBorder` `FloatTitle` `PmenuSel` `SnacksNotifierInfo` `SnacksNotifierError` |
+| Messages, floats | `MsgArea` `ErrorMsg` `NormalFloat` `FloatBorder` (fg = bg hides the frame, the default; set an fg to bring lines back) `FloatTitle` (title pill) `PmenuSel` `SnacksNotifierInfo` `SnacksNotifierError` |
 | Completion | `BlinkCmpLabelMatch` `BlinkCmpKind` `BlinkCmpSource` (menu: `NormalFloat`, `FloatBorder`, `PmenuSel`) |
 | Git, TODO | `GitSignsAdd` `GitSignsChange` `GitSignsDelete` · `TodoFgFIX` `TodoFgTODO` `TodoFgHACK` `TodoFgWARN` `TodoFgPERF` `TodoFgNOTE` `TodoFgTEST` |
-| Plugins look-alikes | `WhichKey` `WhichKeyNormal` (menu background, the editor's by default) `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksPickerMatch` `SnacksPickerDir` · `NeoTreeNormal` `NeoTreeRootName` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
+| Plugins look-alikes | `WhichKey` `WhichKeyNormal` (menu background, the editor's by default) `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksPickerMatch` `SnacksPickerDir` `SnacksPickerInput` · `NeoTreeNormal` `NeoTreeRootName` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
 | lim | `LimCheatsheetKey` `LimCheatsheetDesc` (the start screen uses `Normal`) |
 
 ### Keymaps
@@ -490,8 +545,10 @@ file, about 1 s at 64 MB.
 The config's `commands` section adds `:Name` commands, uppercase first as Vim user commands. Its program gets the
 lines on stdin: the whole buffer, or a range (`:'<,'>Name`, `:%Name`, `:3,9Name`). Words typed after the name are
 added to `run`. `output` is `"message"` (default: stdout is shown) or `"replace"` (stdout replaces the lines, as
-one undo step). A program that fails (non-zero exit), prints nothing, or runs more than 10 seconds leaves the
-text as it was and its first stderr line is shown. In `run`, `${file}` is the buffer's path and `${line}` the
+one undo step). A command typed by hand runs in the background: editing goes on, and its output lands when it
+arrives (a `"replace"` is dropped, with a message, if the text changed meanwhile). A program that fails (non-zero
+exit), prints nothing, or runs too long (10 minutes; 10 seconds for format on save, which runs before the write)
+leaves the text as it was and its first stderr line is shown. In `run`, `${file}` is the buffer's path and `${line}` the
 cursor's line. An optional `windows` array replaces `run` on Windows. Commands appear in `:` completion and the
 commands picker (`<Leader>fC`); bind them with a keymap.
 
@@ -549,12 +606,18 @@ src/
 - **Undo** stores the lines an edit replaced, not copies of the file, and keeps 1000 steps. The same
   line-range changes move marks and jump-list anchors, so they follow the text.
 - **Completion** words are cached per buffer and re-read only when that buffer's text changed.
-- **Highlighting** state at each line start is cached and invalidated from the first edited line. A jump far
-  past the cached lines starts 2000 lines above the target instead of at the top (Vim's `syntax sync`), so `G`
-  in a 3-million-line file takes about a millisecond.
+- **Highlighting** state at each line start is cached and invalidated from the first edited line. A far jump
+  finds its start state with a scan that only tracks comments and strings (skipping straight to the bytes that
+  can open one) and leaves a checkpoint every 4096 lines, so it stays exact: the first `G` in a 3-million-line
+  file takes about 80 ms, later jumps well under a millisecond. Only the visible part of a long line is colored.
+- **Live grep** reads the project once per picker and indexes its trigrams: each key greps only the files that
+  hold every trigram of the query.
 - **Hex buffers** are ordinary lines in a dump format; only the hex digits count when writing, so every Vim edit
   works on bytes and a broken line is refused before anything touches the disk.
-- **Git signs** read the index once per open/save and diff in memory when the text changes.
+- **Git signs** read the index once per open/save and diff in memory when the text changes (Myers in linear
+  space, after dropping the lines only one side has, as xdiff does).
+- **Regexes** compile to a small program run by a backtracking machine with its own stack: a group can repeat
+  any number of times without deepening the call stack, and a step budget stops runaway patterns.
 - **Saving** writes a temp file next to the target, syncs it, keeps permissions, then renames it over the
   original; writing over another existing file needs `!`.
 - **No crashes**: `unwrap`, `expect`, `panic!` are denied outside tests. A panic is caught by the event loop,
@@ -566,11 +629,9 @@ src/
 Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics, language-aware completion; buffer-word completion is there), debugger, treesitter (a keyword
 highlighter stands in), plugins, scripting the editor (config commands only filter text through a process), an
 embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
-line wrapping, folds, spell checking, persistent undo. A regex group repeats at
-most 100 times in one match. Visual-block columns count characters, so tabs and wide characters select
-unevenly. Files are read whole into memory, as in Vim: text files over 512 MB and binaries over 64 MB (their hex dump
-takes about 7 times their size) are refused with a message. A comment or string opened more than 2000 lines above a
-far jump is not seen there until you scroll from above. There is no disassembler.
+line wrapping, folds, spell checking, persistent undo. Files are read whole into memory, as in Vim: text files
+over 512 MB and binaries over 64 MB (their hex dump takes about 7 times their size) are refused with a message.
+There is no disassembler.
 
 ## Development
 
