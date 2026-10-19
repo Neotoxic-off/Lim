@@ -155,12 +155,16 @@ pub fn find_word(line: &str, word: &str) -> Vec<Range<usize>> {
 
 /// URLs (`http://`, `https://`, `file://`) as char ranges, for `highlighturl`.
 pub fn find_urls(line: &str) -> Vec<Range<usize>> {
+    // Runs on every shown line of every frame, and almost none holds a URL: one substring search rules it out.
+    if !line.contains("://") {
+        return Vec::new();
+    }
     let chars: Vec<char> = line.chars().collect();
     let mut urls: Vec<Range<usize>> = Vec::new();
     let mut i: usize = 0;
     while i < chars.len() {
-        let rest: String = chars[i..chars.len().min(i + 8)].iter().collect();
-        if ["https://", "http://", "file://"].iter().any(|p| rest.starts_with(p)) {
+        let at = |prefix: &str| prefix.chars().enumerate().all(|(k, c)| chars.get(i + k) == Some(&c));
+        if ["https://", "http://", "file://"].into_iter().any(at) {
             let start: usize = i;
             while i < chars.len() && !chars[i].is_whitespace() && !"\"'<>`".contains(chars[i]) {
                 i += 1;
@@ -180,6 +184,9 @@ pub fn find_urls(line: &str) -> Vec<Range<usize>> {
 
 /// `#RRGGBB` color literals (highlight-colors) as char ranges with their value.
 pub fn find_hex_colors(line: &str) -> Vec<(Range<usize>, u32)> {
+    if !line.contains('#') {
+        return Vec::new();
+    }
     let chars: Vec<char> = line.chars().collect();
     let mut found: Vec<(Range<usize>, u32)> = Vec::new();
     for i in 0..chars.len() {
