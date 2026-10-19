@@ -217,7 +217,6 @@ pub struct Editor {
     pub explorer: Option<Explorer>,
     /// The start screen is showing (no file given, or `<Leader>h`).
     pub dashboard: bool,
-    pub started: Instant,
     /// Set by `<F7>` / `<Leader>t…`: the main loop suspends the editor and runs `$SHELL`.
     pub shell_requested: Option<Vec<String>>,
     last_picker: Option<Picker>,
@@ -316,7 +315,6 @@ impl Editor {
             picker: None,
             explorer: None,
             dashboard: paths.is_empty(),
-            started: Instant::now(),
             shell_requested: None,
             last_picker: None,
             recent: recent::load(),

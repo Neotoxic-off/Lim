@@ -21,7 +21,6 @@ use std::fmt::{self, Write};
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use std::{env, fs};
 
 use crate::buffer::text;
@@ -103,21 +102,11 @@ pub struct Screen {
     rows: Vec<String>,
     /// Whether the terminal reports the mouse; None until the first frame tells it.
     mouse: Option<bool>,
-    /// Time from launch to the first frame, for the dashboard footer.
-    startup: Option<Duration>,
 }
 
 impl Screen {
     pub fn new(detected: ColorDepth) -> Self {
-        Self {
-            detected,
-            depth: detected,
-            ctx: Context::detect(),
-            size: Size::default(),
-            rows: Vec::new(),
-            mouse: None,
-            startup: None,
-        }
+        Self { detected, depth: detected, ctx: Context::detect(), size: Size::default(), rows: Vec::new(), mouse: None }
     }
 
     /// Forces the next frame to repaint everything.
@@ -191,7 +180,6 @@ impl Screen {
         if top == 1 {
             ed.tab_hits = bars::tabline(ed, &mut grid, 0, if tree_width > 0 { tree_width + 1 } else { 0 });
         }
-        let startup: Duration = *self.startup.get_or_insert_with(|| ed.started.elapsed());
         let mut area: Rect = Rect { x: 0, y: top, w: width, h: text_height };
         let mut cursor: Option<(usize, usize)> = None;
         if tree_width > 0 {
@@ -221,7 +209,7 @@ impl Screen {
         };
         if ed.dashboard {
             grid.fill(area, theme().style(Group::Normal));
-            home::dashboard(&mut grid, area, startup, &options);
+            home::dashboard(&mut grid, area, &options);
         } else if ed.mode != Mode::Explorer {
             cursor = windows_cursor;
         }

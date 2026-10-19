@@ -32,7 +32,6 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{self, Path};
 use std::process::ExitCode;
 use std::sync::Mutex;
-use std::time::Instant;
 
 use editor::Editor;
 use render::Screen;
@@ -42,7 +41,6 @@ use term::{Event, Input, Terminal};
 static LAST_PANIC: Mutex<String> = Mutex::new(String::new());
 
 fn main() -> ExitCode {
-    let started: Instant = Instant::now();
     let args: Vec<String> = env::args().skip(1).collect();
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("usage: lim [dir] [file...] | --version | --print-config | --config-path");
@@ -73,7 +71,6 @@ fn main() -> ExitCode {
         }
     }
     let mut editor: Editor = Editor::new(&files);
-    editor.started = started;
     editor.configure(&config);
     editor.colorscheme = colorscheme;
     if !warnings.is_empty() {
