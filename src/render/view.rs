@@ -98,16 +98,11 @@ fn winbar_cells(buf: &Buffer, width: usize, active: bool, ctx: &Context) -> Vec<
 
 /// Text rows inside `area`; returns the cursor's (row, col) relative to it and the gutter's width.
 fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (usize, usize, usize) {
-    let t: Arc<Theme> = theme();
     let o: &Options = &ctx.options;
-    let numbers: bool = o.number || o.relativenumber;
-    let number_width: usize = if numbers { buf.line_count().to_string().len().max(3) } else { 0 };
-    let signs: usize = if o.signcolumn { 2 } else { usize::from(numbers) };
-    let fold: usize = usize::from(o.foldcolumn);
-    let gutter: usize = fold + number_width + signs;
+    let gutter: Gutter = Gutter::of(buf, o);
     let cursor: Pos = buf.cursor;
     let cursor_x: usize = text::display_col(buf.line(cursor.line), cursor.col);
-    scroll(buf, cursor_x, area.h.max(1), area.w.saturating_sub(gutter).max(1), o);
+    scroll(buf, cursor_x, area.h.max(1), area.w.saturating_sub(gutter.width).max(1), o);
     let bottom: usize = (buf.top + area.h).min(buf.line_count());
     let git: Vec<Option<Sign>> = if o.gitsigns && o.signcolumn {
         let top: usize = buf.top;
@@ -115,51 +110,93 @@ fn text_rows(buf: &mut Buffer, area: Rect, ctx: &Context, grid: &mut Grid) -> (u
     } else {
         Vec::new()
     };
+    // What the whole window highlights: the bracket pair and the word under the cursor.
     let parens: [Option<Pos>; 2] = if o.matchparen && ctx.active { matching_pair(buf, area.h) } else { [None, None] };
     let word: Option<String> =
         if o.wordhighlight && ctx.active && ctx.normal_mode { word_under_cursor(buf) } else { None };
+    let t: Arc<Theme> = theme();
     let blank: Style = Style::new(t.fg(Group::Normal), ctx.base);
     for (r, y) in (buf.top..buf.top + area.h).enumerate() {
         let mut row: Row = Row::new(area.w);
         if y < buf.line_count() {
-            let current: bool = y == cursor.line;
-            row.pad_to(blank, fold);
-            if numbers {
-                let number: usize = match (o.number, o.relativenumber, current) {
-                    (true, _, true) | (true, false, false) => y + 1,
-                    _ => y.abs_diff(cursor.line),
-                };
-                let group: Group = if current { Group::CursorLineNr } else { Group::LineNr };
-                row.text(t.on(group, ctx.base), &format!("{number:>number_width$}"));
-            }
-            if let Some(Some(sign)) = git.get(r) {
-                let group: Group = match sign {
-                    Sign::Add => Group::GitSignsAdd,
-                    Sign::Change => Group::GitSignsChange,
-                    Sign::Delete => Group::GitSignsDelete,
-                };
-                row.text(t.on(group, ctx.base), "\u{258e}");
-            }
-            row.pad_to(blank, gutter);
-            // Only the shown part of a line (and a little past it, for tokens cut by the right edge) is scanned.
-            let shown_chars: usize = text::col_at_display(buf.line(y), buf.left + area.w) + LOOKAHEAD;
-            let shown: usize = text::byte_index(buf.line(y), shown_chars);
-            let decor: Decor = Decor {
-                groups: if o.syntax { buf.highlight_line(y, shown_chars) } else { None },
-                shown,
-                guide_to: if o.indentguides { guide_indent(buf, y) } else { 0 },
-                indent_width: o.indent_width(),
-                urls: if o.highlighturl { text::find_urls(&buf.line(y)[..shown]) } else { Vec::new() },
-                words: word.as_deref().map(|w| text::find_word(&buf.line(y)[..shown], w)).unwrap_or_default(),
-                parens: parens.map(|p| p.filter(|p| p.line == y).map(|p| p.col)),
-                colors: if o.colorhighlight { text::find_hex_colors(&buf.line(y)[..shown]) } else { Vec::new() },
-                todo: if o.todocomments { syntax::todo(&buf.line(y)[..shown]) } else { None },
-            };
+            gutter.draw(&t, &mut row, (y, cursor.line), git.get(r).copied().flatten(), ctx);
+            let decor: Decor = decor_for(buf, y, buf.left + area.w, o, word.as_deref(), parens);
             draw_line(&mut row, buf, y, &decor, ctx);
         }
         grid.put(area.x, area.y + r, &row.finish(blank));
     }
-    (cursor.line.saturating_sub(buf.top), (gutter + cursor_x).saturating_sub(buf.left), gutter)
+    (cursor.line.saturating_sub(buf.top), (gutter.width + cursor_x).saturating_sub(buf.left), gutter.width)
+}
+
+/// `AstroNvim`'s statuscolumn: fold space, line numbers, then the sign column.
+struct Gutter {
+    fold: usize,
+    /// 0 without numbers.
+    number_width: usize,
+    width: usize,
+}
+
+impl Gutter {
+    fn of(buf: &Buffer, o: &Options) -> Self {
+        let numbers: bool = o.number || o.relativenumber;
+        let number_width: usize = if numbers { buf.line_count().to_string().len().max(3) } else { 0 };
+        let signs: usize = if o.signcolumn { 2 } else { usize::from(numbers) };
+        let fold: usize = usize::from(o.foldcolumn);
+        Self { fold, number_width, width: fold + number_width + signs }
+    }
+
+    /// Line `y`'s number (absolute, or relative to the cursor's) and its gitsigns mark.
+    fn draw(&self, t: &Theme, row: &mut Row, (y, cursor): (usize, usize), sign: Option<Sign>, ctx: &Context) {
+        let o: &Options = &ctx.options;
+        let blank: Style = Style::new(t.fg(Group::Normal), ctx.base);
+        row.pad_to(blank, self.fold);
+        if self.number_width > 0 {
+            let current: bool = y == cursor;
+            let number: usize = match (o.number, o.relativenumber, current) {
+                (true, _, true) | (true, false, false) => y + 1,
+                _ => y.abs_diff(cursor),
+            };
+            let group: Group = if current { Group::CursorLineNr } else { Group::LineNr };
+            let width: usize = self.number_width;
+            row.text(t.on(group, ctx.base), &format!("{number:>width$}"));
+        }
+        if let Some(sign) = sign {
+            let group: Group = match sign {
+                Sign::Add => Group::GitSignsAdd,
+                Sign::Change => Group::GitSignsChange,
+                Sign::Delete => Group::GitSignsDelete,
+            };
+            row.text(t.on(group, ctx.base), "\u{258e}");
+        }
+        row.pad_to(blank, self.width);
+    }
+}
+
+/// Line `y`'s highlights over the syntax colors, found in the part shown left of screen column `right_edge` (and a
+/// little past it, for tokens cut by the edge): a long line is not scanned to its end.
+fn decor_for(
+    buf: &mut Buffer,
+    y: usize,
+    right_edge: usize,
+    o: &Options,
+    word: Option<&str>,
+    parens: [Option<Pos>; 2],
+) -> Decor {
+    let shown_chars: usize = text::col_at_display(buf.line(y), right_edge) + LOOKAHEAD;
+    let shown: usize = text::byte_index(buf.line(y), shown_chars);
+    let groups: Option<Vec<Hl>> = if o.syntax { buf.highlight_line(y, shown_chars) } else { None };
+    let line: &str = &buf.line(y)[..shown];
+    Decor {
+        groups,
+        shown,
+        guide_to: if o.indentguides { guide_indent(buf, y) } else { 0 },
+        indent_width: o.indent_width(),
+        urls: if o.highlighturl { text::find_urls(line) } else { Vec::new() },
+        words: word.map(|w| text::find_word(line, w)).unwrap_or_default(),
+        parens: parens.map(|p| p.filter(|p| p.line == y).map(|p| p.col)),
+        colors: if o.colorhighlight { text::find_hex_colors(line) } else { Vec::new() },
+        todo: if o.todocomments { syntax::todo(line) } else { None },
+    }
 }
 
 /// Per-line extras drawn over the syntax colors.
