@@ -42,7 +42,7 @@ pub const NERD: Icons = Icons {
     file: "\u{f15b}",
     folder_closed: "\u{f07b}",
     folder_open: "\u{f07c}",
-    modified: "\u{f111}",
+    modified: "\u{f444}",
     close: "\u{f00d}",
     theme: "\u{f186}",
     // NvChad's own: search, history, word, palette, keyboard.
@@ -60,10 +60,11 @@ pub const NERD: Icons = Icons {
     recording: "\u{f111}",
     arrow: "\u{279c}",
     word: "\u{f031}",
-    git_modified: "\u{f111}",
-    git_added: "\u{271a}",
-    git_untracked: "\u{2605}",
-    git_deleted: "\u{2716}",
+    // Octicons, as NvChad's statusline: dingbats like ✚ ★ ✖ turn into color emoji in some terminals.
+    git_modified: "\u{f459}",
+    git_added: "\u{f457}",
+    git_untracked: "\u{f420}",
+    git_deleted: "\u{f458}",
 };
 
 pub const UNICODE: Icons = Icons {
