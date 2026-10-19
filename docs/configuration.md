@@ -21,7 +21,7 @@ The documented defaults are also in [`config.example.json`](../config.example.js
 
 ```jsonc
 {
-  "options": { "tabstop": 4, "relativenumber": false, "mapleader": ",", "colorscheme": "catppuccin-mocha" },
+  "options": { "tabstop": 4, "relativenumber": true, "mapleader": ",", "colorscheme": "catppuccin-mocha" },
   "palette": { "ui": { "base": "#11121d" } },
   "highlights": {
     "@comment": { "fg": "#565f89", "italic": false },
@@ -45,15 +45,15 @@ Names and defaults follow AstroNvim.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `number` / `relativenumber` | `true` / `true` | Line numbers; both on shows the current line's absolute number |
+| `number` / `relativenumber` | `true` / `false` | Line numbers; both on shows the current line's absolute number |
 | `signcolumn` · `foldcolumn` | `true` · `true` | Two-cell git sign column · one blank column left of the numbers |
-| `cursorline` | `true` | Highlight the cursor's line |
+| `cursorline` | `false` | Highlight the cursor's line; off, only its number stands out (NvChad) |
 | `tabstop` · `shiftwidth` · `expandtab` | `4` · `0` · `true` | Tab width · indent step (`0` = tabstop) · indent with spaces |
 | `scrolloff` / `sidescrolloff` | `0` / `0` | Lines / columns kept around the cursor |
 | `ignorecase` / `smartcase` · `hlsearch` | `true` / `true` · `true` | Search case rules · highlight matches |
 | `autopairs` · `autoindent` | `true` · `true` | Close brackets and quotes · keep indentation |
 | `mapleader` · `timeoutlen` | `" "` · `500` | Leader key · ms to wait for the rest of a mapping |
-| `showtabline` / `laststatus` / `winbar` | `true` | Tabline · statusline · per-window path bar |
+| `showtabline` / `laststatus` / `winbar` | `true` / `true` / `false` | Tabline · statusline · per-window path bar |
 | `cmdheight` | `0` | `0`: notifications and an on-demand command line; `1`: permanent command line |
 | `clipboard` | `"unnamedplus"` | `""` keeps yanks inside lim |
 | `colorscheme` | unset | A theme name; unset uses the last one picked (nvchad at first) |
@@ -81,7 +81,7 @@ Each takes `fg`, `bg` (`"#RRGGBB"`), `bold`, `italic`, `underline`, or `link` to
 | Editor | `Normal` `NormalNC` `CursorLine` `LineNr` `CursorLineNr` `Visual` `Search` `CurSearch` `MatchParen` `LspReferenceText` `HighlightURL` `IblIndent` `Directory` |
 | Syntax | `@variable` `@comment` `@string` `@number` `@keyword` `@function` `@type` `@type.builtin` `@constant` `@function.macro` `@property` |
 | Statusline | `StatusLine` `StatusLineSection` `StatusLineNormal` `StatusLineInsert` `StatusLineVisual` `StatusLineCommand` `StatusLineReplace` `StatusLineCwd` `StatusLinePosition` `StatusLineRecording` |
-| Tabline, windows | `TabLine` `TabLineSel` `TabLineFill` `TabLineIndicator` `TabLineModified` `BufferPicker` `WinSeparator` `WinBar` `WinBarNC` |
+| Tabline, windows | `TabLine` `TabLineSel` `TabLineFill` `TabLineModified` `BufferPicker` `WinSeparator` `WinBar` `WinBarNC` |
 | Messages, floats | `MsgArea` `ErrorMsg` `NormalFloat` `FloatBorder` (fg = bg hides the frame, the default; set an fg to bring lines back) `FloatTitle` (title pill) `PmenuSel` `SnacksNotifierInfo` `SnacksNotifierError` |
 | Completion | `BlinkCmpLabelMatch` `BlinkCmpKind` `BlinkCmpSource` (menu: `NormalFloat`, `FloatBorder`, `PmenuSel`) |
 | Git, TODO | `GitSignsAdd` `GitSignsChange` `GitSignsDelete` · `TodoFgFIX` `TodoFgTODO` `TodoFgHACK` `TodoFgWARN` `TodoFgPERF` `TodoFgNOTE` `TodoFgTEST` |

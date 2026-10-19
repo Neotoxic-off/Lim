@@ -26,7 +26,7 @@ impl Rgb {
     }
 }
 
-/// Mirrors the `AstroNvim` option of the same name; defaults are `AstroNvim`'s.
+/// Mirrors the `AstroNvim` option of the same name; the defaults give `NvChad`'s look.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[expect(clippy::struct_excessive_bools, reason = "mirrors Neovim's boolean options one to one")]
 pub struct Options {
@@ -178,9 +178,9 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             number: true,
-            relativenumber: true,
+            relativenumber: false,
             signcolumn: true,
-            cursorline: true,
+            cursorline: false,
             tabstop: 4,
             shiftwidth: 0,
             expandtab: true,
@@ -195,7 +195,7 @@ impl Default for Options {
             timeoutlen: 500,
             showtabline: true,
             laststatus: true,
-            winbar: true,
+            winbar: false,
             cmdheight: 0,
             icons: true,
             truecolor: None,

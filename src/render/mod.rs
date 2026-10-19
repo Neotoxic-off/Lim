@@ -29,7 +29,7 @@ use crate::config::Options;
 use crate::editor::{EXPLORER_WIDTH, Editor, Mode, Rect, Separator, WindowId};
 use crate::term::{ColorDepth, Size};
 use row::Grid;
-use theme::{Group, theme};
+use theme::{Group, Rgb, Style, theme};
 
 fn colorscheme_file() -> Option<PathBuf> {
     if cfg!(test) {
@@ -195,7 +195,9 @@ impl Screen {
         let mut cursor: Option<(usize, usize)> = None;
         if tree_width > 0 {
             cursor = tree::explorer(ed, &mut grid, Rect { w: tree_width, ..area });
-            grid.vline(tree_width, area.y..area.y + area.h, theme().style(Group::WinSeparator));
+            // NvChad hides this separator: the tree's color alone sets it apart.
+            let tree_bg: Rgb = t.bg(Group::ExplorerNormal);
+            grid.vline(tree_width, area.y..area.y + area.h, Style::new(tree_bg, tree_bg));
             area = Rect { x: tree_width + 1, w: width - tree_width - 1, ..area };
         }
         // The Markdown preview takes the right half, past a separator, while a Markdown buffer is shown.
@@ -267,7 +269,7 @@ impl Screen {
             }
             cursor = cursor.or(view::window(ed, index, rect, grid));
         }
-        let border: theme::Style = theme().style(Group::WinSeparator);
+        let border: Style = theme().style(Group::WinSeparator);
         for sep in separators {
             if sep.vertical {
                 grid.vline(sep.x, sep.y..sep.y + sep.len, border);

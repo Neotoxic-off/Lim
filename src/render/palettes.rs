@@ -36,7 +36,7 @@ pub const THEMES: &[ThemeDef] = &[
             ("ui.blue", 0x61AFEF),
             ("ui.purple", 0xDE98FD),
             ("ui.accent", 0x61AFEF),
-            ("ui.tabline", 0x1B1F27),
+            ("ui.tabline", 0x252931),
             ("ui.winbar", 0x6F737B),
             ("ui.tool", 0x1B1F27),
             ("ui.base", 0x1E222A),
