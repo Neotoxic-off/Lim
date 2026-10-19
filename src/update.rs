@@ -15,7 +15,12 @@ const DOWNLOAD: &str = "https://github.com/Neotoxic-off/Lim/releases/download";
 
 /// Runs on a background thread while editing goes on; what it returns becomes a notification.
 pub fn run() -> Result<String, String> {
-    let current: &str = env!("CARGO_PKG_VERSION");
+    let exe: PathBuf = env::current_exe().map_err(|e| format!("cannot find lim's own file: {e}"))?;
+    upgrade(env!("LIM_VERSION"), &exe)
+}
+
+/// Puts the latest release in place of `exe`, a lim of version `current`, when the release is newer.
+fn upgrade(current: &str, exe: &PathBuf) -> Result<String, String> {
     let reply: Vec<u8> = https_get(LATEST).map_err(|e| {
         if e.contains("404") {
             "no release published on GitHub yet".into()
@@ -35,10 +40,9 @@ pub fn run() -> Result<String, String> {
             format!("download: {e}")
         }
     })?;
-    let exe: PathBuf = env::current_exe().map_err(|e| format!("cannot find lim's own file: {e}"))?;
     let new: PathBuf = exe.with_extension("new");
     let written: io::Result<()> = fs::write(&new, &binary)
-        .and_then(|()| fs::metadata(&exe))
+        .and_then(|()| fs::metadata(exe))
         .and_then(|m| fs::set_permissions(&new, m.permissions()));
     if let Err(e) = written {
         let _: io::Result<()> = fs::remove_file(&new);
@@ -51,7 +55,7 @@ pub fn run() -> Result<String, String> {
         let _: io::Result<()> = fs::remove_file(&new);
         return Err(format!("the {tag} binary does not run on this system; lim {current} kept"));
     }
-    replace(&exe, &new).map_err(|e| format!("cannot replace {}: {e}", exe.display()))?;
+    replace(exe, &new).map_err(|e| format!("cannot replace {}: {e}", exe.display()))?;
     Ok(format!("lim updated to {tag}: restart lim to use it"))
 }
 
@@ -140,6 +144,26 @@ mod tests {
         let url: String = format!("https://github.com/cli/cli/releases/download/{tag}/gh_{}_checksums.txt", &tag[1..]);
         assert!(String::from_utf8_lossy(&https_get(&url).unwrap()).contains("linux_amd64"));
         assert_eq!(https_get("https://api.github.com/repos/cli/cli/releases/tags/no-such-tag"), Err("HTTP 404".into()));
+    }
+
+    #[test]
+    #[ignore = "network: cargo test upgrades -- --ignored"]
+    fn upgrades_an_old_lim_to_the_latest_release() {
+        let dir: PathBuf = env::temp_dir().join(format!("lim-upgrade-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let exe: PathBuf = dir.join(format!("lim{}", env::consts::EXE_SUFFIX));
+        fs::write(&exe, "an old lim").unwrap();
+        // The new binary takes the old one's permissions, and an installed lim is executable.
+        #[cfg(unix)]
+        fs::set_permissions(&exe, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let done: String = upgrade("0.0.1", &exe).unwrap();
+        let said: Output = Command::new(&exe).arg("--version").output().unwrap();
+        let version: String = String::from_utf8_lossy(&said.stdout).trim().to_owned();
+        assert!(done.contains(version.trim_start_matches("lim ")), "{done} / {version}");
+        // Now at the latest release: nothing to do.
+        let current: &str = version.trim_start_matches("lim ");
+        assert!(upgrade(current, &exe).unwrap().contains("up to date"));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
