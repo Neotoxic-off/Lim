@@ -1,4 +1,4 @@
-//! neo-tree's file tree in a left-hand pane.
+//! `NvChad`'s nvim-tree in a left-hand pane.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,8 +36,9 @@ pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, 
     let mut cursor: Option<(usize, usize)> = None;
     for (r, (i, entry)) in explorer.entries.iter().enumerate().skip(explorer.scroll).take(rows).enumerate() {
         let selected: bool = i == explorer.cursor;
-        let bg: Rgb = if selected && explorer.focused { t.bg(Group::PmenuSel) } else { base.bg };
-        let line: Style = Style { bg, bold: selected && explorer.focused, ..base };
+        // nvim-tree's cursorline: a lighter row, no bold.
+        let bg: Rgb = if selected && explorer.focused { t.bg(Group::CursorLine) } else { base.bg };
+        let line: Style = Style { bg, ..base };
         let mut row: Row = Row::new(area.w);
         row.text(line, " ");
         for depth in 0..entry.depth {

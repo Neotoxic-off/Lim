@@ -3,9 +3,9 @@
   // Comments and trailing commas are allowed. Every value below is the default.
   "options": {
     "number": true,
-    "relativenumber": true,
+    "relativenumber": false,
     "signcolumn": true,
-    "cursorline": true,
+    "cursorline": false,     // false: only the line number stands out, as NvChad
     "tabstop": 4,
     "shiftwidth": 0,          // 0: use tabstop
     "expandtab": true,
@@ -20,7 +20,7 @@
     "timeoutlen": 500,        // ms to wait for the rest of a mapping
     "showtabline": true,
     "laststatus": true,
-    "winbar": true,
+    "winbar": false,
     "cmdheight": 0,           // 0: messages become notifications, ':' borrows the last line
     "icons": true,            // Nerd Font glyphs
     "truecolor": "auto",      // true, false or "auto"

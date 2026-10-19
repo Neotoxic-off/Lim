@@ -1,4 +1,4 @@
-//! Tabline (heirline bufferline), NvChad-style statusline, command line and notifications.
+//! NvChad-style tabufline and statusline, command line and notifications.
 
 use super::Context;
 use super::icons::{Icons, icons};
@@ -39,7 +39,10 @@ fn bar_at(grid: &mut Grid, x: usize, y: usize, left: &[Segment], right: &[Segmen
     grid.put(x, y, &row.finish(fill));
 }
 
-/// Buffer tabs from column `offset`: heirline pads the tabline over the file tree so tabs line up with the windows.
+/// `NvChad`'s tabufline: each buffer centred in `BUF_WIDTH` columns (its `bufwidth`).
+const BUF_WIDTH: usize = 21;
+
+/// Buffer tabs from column `offset`: the part over the file tree takes the tree's color, as `NvChad`'s tree offset.
 pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) {
     let t: Arc<Theme> = theme();
     let set: &Icons = icons(&ed.options);
@@ -49,32 +52,38 @@ pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) {
     for (i, buf) in ed.buffers.iter().enumerate() {
         let active: bool = i == ed.current;
         let name: Style = t.style(if active { Group::TabLineSel } else { Group::TabLine });
-        let plain: Style = Style { bold: false, italic: false, ..name };
-        let indicator: Style =
-            if active { t.on(Group::TabLineIndicator, name.bg) } else { Style { fg: name.bg, ..name } };
-        segments.push((indicator, "▎".into()));
         let (icon, icon_fg): (String, Option<u32>) = set.for_file(buf.lang);
-        match labels.as_ref().and_then(|l| l.get(i)) {
-            Some(label) => segments.push((t.on(Group::BufferPicker, name.bg), format!(" {label} "))),
+        let (icon, icon_style): (String, Style) = match labels.as_ref().and_then(|l| l.get(i)) {
+            Some(label) => (format!("{label} "), t.on(Group::BufferPicker, name.bg)),
             None if !icon.is_empty() => {
-                let fg: Rgb = if active { icon_fg.map_or(plain.fg, Rgb) } else { plain.fg };
-                segments.push((Style { fg, ..plain }, format!(" {icon} ")));
+                let fg: Rgb = if active { icon_fg.map_or(name.fg, Rgb) } else { name.fg };
+                (format!("{icon} "), Style { fg, ..name })
             }
-            None => segments.push((plain, " ".into())),
-        }
-        segments.push((name, buf.name()));
-        let (mark, style): (String, Style) = if buf.is_dirty() {
-            (format!(" {} ", set.modified), t.on(Group::TabLineModified, name.bg))
-        } else {
-            (format!(" {} ", set.close), plain)
+            None => (String::new(), name),
         };
-        segments.push((style, mark));
+        let (mark, mark_style): (String, Style) = if buf.is_dirty() {
+            (format!("{} ", set.modified), t.on(Group::TabLineModified, name.bg))
+        } else if active {
+            // NvChad's red close button on the current buffer.
+            (format!("{} ", set.close), t.on(Group::ErrorMsg, name.bg))
+        } else {
+            (format!("{} ", set.close), name)
+        };
+        let label: String = buf.name();
+        let used: usize = text::str_width(&icon) + text::str_width(&label) + text::str_width(&mark);
+        let pad: usize = BUF_WIDTH.saturating_sub(used).max(2);
+        segments.extend([
+            (name, " ".repeat(pad / 2)),
+            (icon_style, icon),
+            (name, label),
+            (name, " ".repeat(pad - pad / 2)),
+            (mark_style, mark),
+        ]);
     }
-    let fill: Style = t.style(Group::TabLineFill);
     if offset > 0 {
-        grid.text(0, y, offset, fill, "");
+        grid.text(0, y, offset, t.style(Group::ExplorerNormal), "");
     }
-    bar_at(grid, offset, y, &segments, &[], fill);
+    bar_at(grid, offset, y, &segments, &[], t.style(Group::TabLineFill));
 }
 
 pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
