@@ -251,81 +251,25 @@ fn scroll(buf: &mut Buffer, cursor_x: usize, height: usize, width: usize, o: &Op
 /// Chars scanned past the right edge, so a word, URL, color or match cut by it is still recognized.
 const LOOKAHEAD: usize = 256;
 
+/// The indent guide's glyph.
+const GUIDE: char = '\u{258f}';
+
 fn draw_line(row: &mut Row, buf: &Buffer, y: usize, decor: &Decor, ctx: &Context) {
-    let t: Arc<Theme> = theme();
     let line: &str = &buf.line(y)[..decor.shown];
-    let matches: Vec<Range<usize>> = text::find_all(line, &ctx.pattern);
-    let cursor: Pos = buf.cursor;
-    let bg: Rgb = match t.get(Group::CursorLine).bg {
-        Some(cursorline) if y == cursor.line && ctx.options.cursorline => cursorline,
-        _ => ctx.base,
-    };
-    let guide: Style = t.on(Group::IndentGuide, bg);
-    let is_guide =
-        |col: usize| decor.indent_width > 0 && col < decor.guide_to && col.is_multiple_of(decor.indent_width);
+    let mut paint: LinePaint<'_> = LinePaint::new(buf, y, decor, ctx, text::find_all(line, &ctx.pattern));
     let leading: usize = text::char_len(text::indent(line));
-    let mut next_match: usize = 0;
     let mut screen_x: usize = 0;
     for (x, c) in line.chars().enumerate() {
         let cells: usize = if c == '\t' { text::tab_cells(screen_x) } else { text::char_width(c) };
         let end: usize = screen_x + cells;
+        // Scrolled off to the left.
         if end <= buf.left && cells > 0 {
             screen_x = end;
             continue;
         }
-        while matches.get(next_match).is_some_and(|m| m.end <= x) {
-            next_match += 1;
-        }
-        let hit: Option<&Range<usize>> = matches.get(next_match).filter(|m| m.contains(&x));
-        let group: Hl = decor.groups.as_ref().and_then(|g| g.get(x)).copied().unwrap_or(Hl::Text);
-        let mut style: Style = t.syntax(group, bg);
-        if decor.urls.iter().any(|u| u.contains(&x)) {
-            style.underline |= t.get(Group::Url).underline;
-        }
-        if decor.words.iter().any(|w| w.contains(&x))
-            && let Some(word_bg) = t.get(Group::WordHighlight).bg
-        {
-            style.bg = word_bg;
-        }
-        // todo-comments only inside comments (or anywhere when there is no highlighter).
-        if let Some((col, len, kind)) = decor.todo
-            && x >= col.saturating_sub(1)
-            && group_at(decor, col).is_none_or(|g| g == Hl::Comment)
-        {
-            let color: Rgb = t.fg(todo_group(kind));
-            if x < col + len + 1 {
-                style = Style { fg: ctx.base, bg: color, bold: true, ..style };
-            } else {
-                style.fg = color;
-            }
-        }
-        if let Some((_, value)) = decor.colors.iter().find(|(r, _)| r.contains(&x)) {
-            style = Style { fg: contrast(*value), bg: Rgb(*value), ..style };
-        }
-        if decor.parens.contains(&Some(x)) {
-            let paren: Highlight = t.get(Group::MatchParen);
-            style.fg = paren.fg.unwrap_or(style.fg);
-            style.bold |= paren.bold;
-        }
-        if let Some(selection) = ctx.selection
-            && selection.contains(Pos::new(y, x), screen_x)
-        {
-            style.bg = t.bg(Group::Visual);
-        } else if hit.is_some() {
-            style.bg = t.bg(Group::Search);
-        }
-        if hit.is_some_and(|m| y == cursor.line && m.contains(&cursor.col)) {
-            style = t.style(Group::CurSearch);
-        }
+        let style: Style = paint.style_at(x, screen_x);
         if c == '\t' || c == ' ' || screen_x < buf.left {
-            // Blanks (with indent guides), and wide chars cut by the left edge, cell by cell.
-            for col in screen_x.max(buf.left)..end {
-                let guided: bool = x < leading && is_guide(col) && c.is_whitespace();
-                row.cell(
-                    if guided { Style { bg: style.bg, ..guide } } else { style },
-                    if guided { '\u{258f}' } else { ' ' },
-                );
-            }
+            paint.blanks(row, style, screen_x.max(buf.left)..end, x < leading && c.is_whitespace());
         } else {
             row.cell(style, c);
         }
@@ -334,17 +278,153 @@ fn draw_line(row: &mut Row, buf: &Buffer, y: usize, decor: &Decor, ctx: &Context
             break;
         }
     }
-    // Blank lines inside a block still show the block's guides.
-    while screen_x < decor.guide_to && !row.is_full() {
-        if screen_x >= buf.left {
-            row.cell(
-                if is_guide(screen_x) { guide } else { Style::new(guide.fg, bg) },
-                if is_guide(screen_x) { '\u{258f}' } else { ' ' },
-            );
-        }
-        screen_x += 1;
+    paint.guides_past_text(row, screen_x);
+    row.pad_to(Style::new(paint.t.fg(Group::Normal), paint.bg), usize::MAX);
+}
+
+/// What drawing one line needs, worked out once for the line.
+struct LinePaint<'a> {
+    t: Arc<Theme>,
+    buf: &'a Buffer,
+    y: usize,
+    decor: &'a Decor,
+    ctx: &'a Context,
+    /// The line's background: the cursorline's, or the window's.
+    bg: Rgb,
+    guide: Style,
+    /// Search matches, and the first one not yet passed.
+    matches: Vec<Range<usize>>,
+    next_match: usize,
+}
+
+impl<'a> LinePaint<'a> {
+    fn new(buf: &'a Buffer, y: usize, decor: &'a Decor, ctx: &'a Context, matches: Vec<Range<usize>>) -> Self {
+        let t: Arc<Theme> = theme();
+        let bg: Rgb = match t.get(Group::CursorLine).bg {
+            Some(cursorline) if y == buf.cursor.line && ctx.options.cursorline => cursorline,
+            _ => ctx.base,
+        };
+        let guide: Style = t.on(Group::IndentGuide, bg);
+        Self { t, buf, y, decor, ctx, bg, guide, matches, next_match: 0 }
     }
-    row.pad_to(Style::new(t.fg(Group::Normal), bg), usize::MAX);
+
+    /// The style of char `x` (at screen column `screen_x`): its syntax color, then each highlight drawn over it.
+    #[inline]
+    fn style_at(&mut self, x: usize, screen_x: usize) -> Style {
+        let group: Hl = group_at(self.decor, x).unwrap_or(Hl::Text);
+        let mut style: Style = self.t.syntax(group, self.bg);
+        self.url(&mut style, x);
+        self.word(&mut style, x);
+        self.todo(&mut style, x);
+        self.hex_color(&mut style, x);
+        self.paren(&mut style, x);
+        self.selection_or_search(&mut style, x, screen_x);
+        style
+    }
+
+    /// `highlighturl`: underlined.
+    #[inline]
+    fn url(&self, style: &mut Style, x: usize) {
+        if self.decor.urls.iter().any(|u| u.contains(&x)) {
+            style.underline |= self.t.get(Group::Url).underline;
+        }
+    }
+
+    /// The other places of the word under the cursor, as LSP document highlights.
+    #[inline]
+    fn word(&self, style: &mut Style, x: usize) {
+        if self.decor.words.iter().any(|w| w.contains(&x))
+            && let Some(word_bg) = self.t.get(Group::WordHighlight).bg
+        {
+            style.bg = word_bg;
+        }
+    }
+
+    /// todo-comments: the keyword on its color, the rest of the comment in it. Only inside comments, or anywhere
+    /// when there is no highlighter.
+    #[inline]
+    fn todo(&self, style: &mut Style, x: usize) {
+        let Some((col, len, kind)): Option<(usize, usize, Todo)> = self.decor.todo else { return };
+        if x + 1 < col || group_at(self.decor, col).is_some_and(|g| g != Hl::Comment) {
+            return;
+        }
+        let color: Rgb = self.t.fg(todo_group(kind));
+        if x < col + len + 1 {
+            *style = Style { fg: self.ctx.base, bg: color, bold: true, ..*style };
+        } else {
+            style.fg = color;
+        }
+    }
+
+    /// `#RRGGBB` drawn on its own color.
+    #[inline]
+    fn hex_color(&self, style: &mut Style, x: usize) {
+        if let Some((_, value)) = self.decor.colors.iter().find(|(r, _)| r.contains(&x)) {
+            *style = Style { fg: contrast(*value), bg: Rgb(*value), ..*style };
+        }
+    }
+
+    /// `matchparen`: the bracket under the cursor and its partner.
+    #[inline]
+    fn paren(&self, style: &mut Style, x: usize) {
+        if self.decor.parens.contains(&Some(x)) {
+            let paren: Highlight = self.t.get(Group::MatchParen);
+            style.fg = paren.fg.unwrap_or(style.fg);
+            style.bold |= paren.bold;
+        }
+    }
+
+    /// The visual selection, else a search match; the match under the cursor stands out from the others.
+    #[inline]
+    fn selection_or_search(&mut self, style: &mut Style, x: usize, screen_x: usize) {
+        while self.matches.get(self.next_match).is_some_and(|m| m.end <= x) {
+            self.next_match += 1;
+        }
+        let hit: Option<&Range<usize>> = self.matches.get(self.next_match).filter(|m| m.contains(&x));
+        if let Some(selection) = self.ctx.selection
+            && selection.contains(Pos::new(self.y, x), screen_x)
+        {
+            style.bg = self.t.bg(Group::Visual);
+        } else if hit.is_some() {
+            style.bg = self.t.bg(Group::Search);
+        }
+        let cursor: Pos = self.buf.cursor;
+        if hit.is_some_and(|m| self.y == cursor.line && m.contains(&cursor.col)) {
+            *style = self.t.style(Group::CurSearch);
+        }
+    }
+
+    #[inline]
+    fn is_guide(&self, col: usize) -> bool {
+        let width: usize = self.decor.indent_width;
+        width > 0 && col < self.decor.guide_to && col.is_multiple_of(width)
+    }
+
+    /// Blank cells (a tab, a space, a wide char cut by the left edge), with indent guides in the indentation.
+    #[inline]
+    fn blanks(&self, row: &mut Row, style: Style, cols: Range<usize>, indentation: bool) {
+        for col in cols {
+            if indentation && self.is_guide(col) {
+                row.cell(Style { bg: style.bg, ..self.guide }, GUIDE);
+            } else {
+                row.cell(style, ' ');
+            }
+        }
+    }
+
+    /// A blank line inside a block still shows the block's guides, up to its depth.
+    fn guides_past_text(&self, row: &mut Row, mut screen_x: usize) {
+        while screen_x < self.decor.guide_to && !row.is_full() {
+            if screen_x >= self.buf.left {
+                if self.is_guide(screen_x) {
+                    row.cell(self.guide, GUIDE);
+                } else {
+                    row.cell(Style::new(self.guide.fg, self.bg), ' ');
+                }
+            }
+            screen_x += 1;
+        }
+    }
 }
 
 fn group_at(decor: &Decor, col: usize) -> Option<Hl> {
