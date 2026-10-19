@@ -3,8 +3,11 @@
 //! boxes, quotes, fenced code, tables and rules; paragraphs wrap to the panel.
 
 use std::cell::RefCell;
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use super::row::{Grid, Row};
 use super::theme::{Group, Rgb, Style, Theme, theme};
@@ -51,115 +54,6 @@ fn span(text: impl Into<String>, look: Look) -> Span {
 /// Whether the buffer is Markdown, so the preview has something to show.
 pub fn is_markdown(buf: &Buffer) -> bool {
     buf.lang.is_some_and(|l| l.kind == Kind::Markdown)
-}
-
-/// `**bold**`, `*italic*` / `_italic_`, `` `code` ``, `[text](url)`, `![alt](src)`, `~~gone~~`, `\*` escapes.
-fn inline(source: &str, base: Look) -> Vec<Span> {
-    let chars: Vec<char> = source.chars().collect();
-    let mut text: Inline =
-        Inline { base, spans: Vec::new(), current: String::new(), bold: false, italic: false, dim: false };
-    let mut i: usize = 0;
-    while let Some(&c) = chars.get(i) {
-        let next: Option<char> = chars.get(i + 1).copied();
-        // A code span or a link takes several chars; an unclosed one is plain text.
-        let span: Option<usize> = match c {
-            '`' => code_span(&chars, i, &mut text),
-            '!' | '[' => link(&chars, i, &mut text),
-            _ => None,
-        };
-        if let Some(len) = span {
-            i += len;
-            continue;
-        }
-        i += match c {
-            '\\' if next.is_some_and(|n| n.is_ascii_punctuation()) => {
-                text.current.push(next.unwrap_or(c));
-                2
-            }
-            '*' | '_' if next == Some(c) => text.toggle(|t| &mut t.bold, 2),
-            '~' if next == Some('~') => text.toggle(|t| &mut t.dim, 2),
-            // `_` inside a word (snake_case) is not emphasis.
-            '*' | '_' if c == '*' || i == 0 || !chars[i - 1].is_alphanumeric() || text.italic => {
-                text.toggle(|t| &mut t.italic, 1)
-            }
-            _ => {
-                text.current.push(c);
-                1
-            }
-        };
-    }
-    text.flush();
-    text.spans
-}
-
-/// The spans read so far, the text not yet in one, and the emphasis it is in.
-struct Inline {
-    base: Look,
-    spans: Vec<Span>,
-    current: String,
-    bold: bool,
-    italic: bool,
-    dim: bool,
-}
-
-impl Inline {
-    /// What the current text looks like: struck-through wins over bold, bold over italic.
-    fn look(&self) -> Look {
-        match (self.dim, self.bold, self.italic) {
-            (true, _, _) => Look::Dim,
-            (_, true, _) => Look::Bold,
-            (_, _, true) => Look::Italic,
-            _ => self.base,
-        }
-    }
-
-    /// Ends the text in the current emphasis as a span.
-    fn flush(&mut self) {
-        if !self.current.is_empty() {
-            let look: Look = self.look();
-            self.spans.push(span(std::mem::take(&mut self.current), look));
-        }
-    }
-
-    /// A `**`, `~~` or `*` marker: the text so far keeps its emphasis, the emphasis flips. Returns `len`, the
-    /// marker's length.
-    fn toggle(&mut self, emphasis: fn(&mut Self) -> &mut bool, len: usize) -> usize {
-        self.flush();
-        let flag: &mut bool = emphasis(self);
-        *flag = !*flag;
-        len
-    }
-}
-
-/// `` `code` `` at `i`: a code span, and the chars it took; None when the backtick is not closed.
-fn code_span(chars: &[char], i: usize, text: &mut Inline) -> Option<usize> {
-    let len: usize = chars[i + 1..].iter().position(|&x| x == '`')?;
-    text.flush();
-    text.spans.push(span(chars[i + 1..i + 1 + len].iter().collect::<String>(), Look::Code));
-    Some(len + 2)
-}
-
-/// `[text](url)` (the text, styled as a link) or `![alt](src)` (a dimmed placeholder) at `i`, and the chars it
-/// took; None when the brackets do not make one.
-fn link(chars: &[char], i: usize, text: &mut Inline) -> Option<usize> {
-    let image: bool = chars[i] == '!';
-    let open: usize = if image { i + 1 } else { i };
-    if chars.get(open) != Some(&'[') {
-        return None;
-    }
-    let close: usize = open + chars[open..].iter().position(|&x| x == ']')?;
-    if chars.get(close + 1) != Some(&'(') {
-        return None;
-    }
-    let end: usize = close + chars[close..].iter().position(|&x| x == ')')?;
-    text.flush();
-    let label: String = chars[open + 1..close].iter().collect();
-    if image {
-        text.spans.push(span(format!("▣ {label}"), Look::Dim));
-    } else {
-        text.spans.extend(inline(&label, Look::Link));
-    }
-    Some(end + 1 - i)
 }
 
 /// Word-wraps `spans` into lines of `width` cells: the first starts with `first`, the rest with `rest`.
@@ -212,211 +106,329 @@ fn rule(width: usize, ch: &str, source: usize) -> Line {
     Line { spans: vec![span(ch.repeat(width), Look::Rule)], source, block: false }
 }
 
-/// `- item`, `* item`, `+ item`, `1. item`, `2) item`: (indent, marker as written, text after it).
-fn list_item(line: &str) -> Option<(usize, &str, &str)> {
-    let indent: usize = line.len() - line.trim_start().len();
-    let t: &str = line.trim_start();
-    let marker_len: usize = if t.starts_with(['-', '*', '+']) {
-        1
-    } else {
-        let digits: usize = t.bytes().take_while(u8::is_ascii_digit).count();
-        if digits == 0 || !matches!(t.as_bytes().get(digits), Some(b'.' | b')')) {
-            return None;
+/// A list item being read: its first line's prefix (indent and bullet) until used, then the hanging indent.
+struct Item {
+    first: Option<Vec<Span>>,
+    rest: Vec<Span>,
+}
+
+/// A table being read: its rows of cells (the first is the header) and the source line of each row.
+#[derive(Default)]
+struct Table {
+    rows: Vec<(usize, Vec<Vec<Span>>)>,
+    cell: Vec<Span>,
+}
+
+/// The preview being built from pulldown-cmark's events.
+struct Renderer {
+    width: usize,
+    out: Vec<Line>,
+    /// Byte offset where each source line starts.
+    starts: Vec<usize>,
+    /// Inline text of the current block, and the look its text gets.
+    spans: Vec<Span>,
+    base: Look,
+    bold: usize,
+    italic: usize,
+    dim: usize,
+    link: usize,
+    /// The alt text of an image being read.
+    image: Option<String>,
+    quote: usize,
+    /// Each open list: its next number when ordered.
+    lists: Vec<Option<u64>>,
+    items: Vec<Item>,
+    code: bool,
+    table: Option<Table>,
+    /// The source line where the current block starts, and where the last one ended.
+    start: usize,
+    end: Option<usize>,
+}
+
+impl Renderer {
+    fn line_of(&self, offset: usize) -> usize {
+        self.starts.partition_point(|&s| s <= offset).saturating_sub(1)
+    }
+
+    /// What text looks like now: struck-through wins over bold, bold over italic, italic over a link's look.
+    fn look(&self) -> Look {
+        match (self.dim, self.bold, self.italic, self.link) {
+            (1.., _, _, _) => Look::Dim,
+            (_, 1.., _, _) => Look::Bold,
+            (_, _, 1.., _) => Look::Italic,
+            (_, _, _, 1..) => Look::Link,
+            _ => self.base,
         }
-        digits + 1
+    }
+
+    fn blank(&mut self) {
+        if self.out.last().is_some_and(|l| !l.spans.is_empty()) {
+            self.out.push(Line { spans: Vec::new(), source: self.start, block: false });
+        }
+    }
+
+    /// A block starts at source line `line`: a blank line before it when the source has one (or `always`).
+    fn open(&mut self, line: usize, always: bool) {
+        self.start = line;
+        if always || self.end.is_some_and(|end| line > end + 1) {
+            self.blank();
+        }
+    }
+
+    fn push_text(&mut self, text: &str, look: Look) {
+        match (&mut self.image, &mut self.table) {
+            (Some(alt), _) => alt.push_str(text),
+            (None, Some(table)) => table.cell.push(span(text, look)),
+            (None, None) => self.spans.push(span(text, look)),
+        }
+    }
+
+    /// Wraps the inline text read so far, after a list bullet or a quote bar when inside one.
+    fn flush(&mut self) {
+        if self.spans.is_empty() {
+            return;
+        }
+        let bar: Vec<Span> = if self.quote > 0 { vec![span("▌ ", Look::Quote)] } else { Vec::new() };
+        let (mut first, mut rest): (Vec<Span>, Vec<Span>) = match self.items.last_mut() {
+            Some(item) => (item.first.take().unwrap_or_else(|| item.rest.clone()), item.rest.clone()),
+            None => (Vec::new(), Vec::new()),
+        };
+        first.splice(0..0, bar.iter().cloned());
+        rest.splice(0..0, bar);
+        let spans: Vec<Span> = std::mem::take(&mut self.spans);
+        self.out.extend(wrap(spans, self.width, first, &rest, self.start));
+    }
+
+    fn start(&mut self, tag: Tag<'_>, line: usize) {
+        match tag {
+            Tag::Paragraph => self.open(line, false),
+            Tag::Heading { level, .. } => {
+                self.open(line, true);
+                self.base = Look::Heading(match level {
+                    HeadingLevel::H1 => 1,
+                    HeadingLevel::H2 => 2,
+                    HeadingLevel::H3 => 3,
+                    HeadingLevel::H4 => 4,
+                    HeadingLevel::H5 => 5,
+                    HeadingLevel::H6 => 6,
+                });
+            }
+            Tag::BlockQuote(_) => {
+                self.open(line, false);
+                self.quote += 1;
+                self.base = Look::Quote;
+            }
+            Tag::CodeBlock(kind) => {
+                self.flush();
+                self.open(line, true);
+                self.code = true;
+                if let CodeBlockKind::Fenced(info) = kind
+                    && let Some(lang) = info.split_whitespace().next()
+                {
+                    self.out.push(Line { spans: vec![span(format!(" {lang}"), Look::Dim)], source: line, block: true });
+                }
+            }
+            Tag::List(number) => {
+                self.flush();
+                self.lists.push(number);
+            }
+            Tag::Item => {
+                self.open(line, false);
+                let depth: usize = self.lists.len().saturating_sub(1);
+                let pad: String = "  ".repeat(depth);
+                let bullet: String = match self.lists.last_mut() {
+                    Some(Some(n)) => {
+                        *n += 1;
+                        format!("{}.", *n - 1)
+                    }
+                    _ => ["•", "◦", "▪"][depth % 3].to_owned(),
+                };
+                let hang: String = format!("{pad}{}", " ".repeat(text::str_width(&bullet) + 1));
+                let first: Vec<Span> = vec![span(pad, Look::Text), span(format!("{bullet} "), Look::Marker)];
+                self.items.push(Item { first: Some(first), rest: vec![span(hang, Look::Text)] });
+            }
+            Tag::Table(_) => {
+                self.open(line, true);
+                self.table = Some(Table::default());
+            }
+            Tag::TableHead | Tag::TableRow => {
+                if let Some(table) = &mut self.table {
+                    table.rows.push((line, Vec::new()));
+                }
+            }
+            Tag::Emphasis => self.italic += 1,
+            Tag::Strong => self.bold += 1,
+            Tag::Strikethrough => self.dim += 1,
+            Tag::Link { .. } => self.link += 1,
+            Tag::Image { .. } => self.image = Some(String::new()),
+            _ => {}
+        }
+    }
+
+    fn end(&mut self, tag: TagEnd) {
+        match tag {
+            TagEnd::Paragraph => self.flush(),
+            TagEnd::Heading(level) => {
+                self.flush();
+                match level {
+                    HeadingLevel::H1 => self.out.push(rule(self.width, "━", self.start)),
+                    HeadingLevel::H2 => self.out.push(rule(self.width, "─", self.start)),
+                    _ => {}
+                }
+                self.base = Look::Text;
+            }
+            TagEnd::BlockQuote(_) => {
+                self.quote = self.quote.saturating_sub(1);
+                self.base = if self.quote > 0 { Look::Quote } else { Look::Text };
+            }
+            TagEnd::CodeBlock => {
+                self.code = false;
+                self.blank();
+            }
+            TagEnd::List(_) => {
+                self.lists.pop();
+            }
+            TagEnd::Item => {
+                self.flush();
+                self.items.pop();
+            }
+            TagEnd::TableCell => {
+                if let Some(table) = &mut self.table {
+                    let cell: Vec<Span> = std::mem::take(&mut table.cell);
+                    if let Some((_, row)) = table.rows.last_mut() {
+                        row.push(cell);
+                    }
+                }
+            }
+            TagEnd::Table => {
+                if let Some(table) = self.table.take() {
+                    self.out.extend(table_lines(table.rows));
+                }
+            }
+            TagEnd::Emphasis => self.italic = self.italic.saturating_sub(1),
+            TagEnd::Strong => self.bold = self.bold.saturating_sub(1),
+            TagEnd::Strikethrough => self.dim = self.dim.saturating_sub(1),
+            TagEnd::Link => self.link = self.link.saturating_sub(1),
+            TagEnd::Image => {
+                if let Some(alt) = self.image.take() {
+                    self.push_text(&format!("▣ {alt}"), Look::Dim);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn event(&mut self, event: Event<'_>, range: Range<usize>) {
+        let line: usize = self.line_of(range.start);
+        let last: usize = self.line_of(range.end.saturating_sub(1).max(range.start));
+        // Where content last ended (a block's own range can take in the blank lines after it).
+        let content: bool =
+            matches!(event, Event::Text(_) | Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) | Event::Rule);
+        match event {
+            Event::Start(tag) => self.start(tag, line),
+            Event::End(tag) => self.end(tag),
+            Event::Text(t) if self.code => {
+                for (i, code) in t.lines().enumerate() {
+                    let code: String = code.replace('\t', "    ");
+                    let source: usize = line + i;
+                    self.out.push(Line { spans: vec![span(format!(" {code}"), Look::CodeBlock)], source, block: true });
+                }
+            }
+            Event::Text(t) => self.push_text(&t, self.look()),
+            Event::Code(t) => self.push_text(&t, Look::Code),
+            Event::SoftBreak | Event::HardBreak => self.push_text(" ", self.look()),
+            Event::TaskListMarker(done) => {
+                if let Some(item) = self.items.last_mut() {
+                    let pad: String =
+                        item.first.as_ref().and_then(|f| f.first()).map(|s| s.text.clone()).unwrap_or_default();
+                    item.first =
+                        Some(vec![span(pad.clone(), Look::Text), span(if done { "☑ " } else { "☐ " }, Look::Marker)]);
+                    item.rest = vec![span(format!("{pad}  "), Look::Text)];
+                }
+            }
+            Event::Rule => {
+                self.open(line, false);
+                self.out.push(rule(self.width, "─", line));
+            }
+            Event::Html(t) => {
+                self.open(line, false);
+                self.out.push(Line { spans: vec![span(t.trim_end(), Look::Dim)], source: line, block: false });
+            }
+            Event::InlineHtml(t) => self.push_text(&t, Look::Dim),
+            _ => {}
+        }
+        if content {
+            self.end = Some(last);
+        }
+    }
+}
+
+/// A table with box borders: column widths fit the widest cell, and the header row is bold.
+fn table_lines(rows: Vec<(usize, Vec<Vec<Span>>)>) -> Vec<Line> {
+    let cell_width = |cell: &[Span]| cell.iter().map(|s| text::str_width(&s.text)).sum::<usize>();
+    let columns: usize = rows.iter().map(|(_, cells)| cells.len()).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..columns)
+        .map(|c| rows.iter().map(|(_, cells)| cells.get(c).map_or(0, |cell| cell_width(cell))).max().unwrap_or(0))
+        .collect();
+    let start: usize = rows.first().map_or(0, |(line, _)| *line);
+    let border = |left: &str, mid: &str, right: &str| -> Line {
+        let body: Vec<String> = widths.iter().map(|w| "─".repeat(w + 2)).collect();
+        Line { spans: vec![span(format!("{left}{}{right}", body.join(mid)), Look::Rule)], source: start, block: false }
     };
-    let rest: &str = t[marker_len..].strip_prefix(' ')?;
-    Some((indent, &t[..marker_len], rest))
-}
-
-fn is_rule(t: &str) -> bool {
-    let compact: String = t.chars().filter(|c| !c.is_whitespace()).collect();
-    compact.len() >= 3 && ['-', '*', '_'].iter().any(|&m| compact.chars().all(|c| c == m))
-}
-
-fn heading(t: &str) -> Option<(u8, &str)> {
-    let level: usize = t.bytes().take_while(|&b| b == b'#').count();
-    let rest: &str = t[level..].strip_prefix(' ').or_else(|| (level == t.len()).then_some(""))?;
-    (1..=6).contains(&level).then(|| (u8::try_from(level).unwrap_or(6), rest.trim_end_matches(['#', ' '])))
-}
-
-fn table_cells(line: &str) -> Vec<String> {
-    let t: &str = line.trim();
-    let t: &str = t.strip_prefix('|').unwrap_or(t);
-    let t: &str = t.strip_suffix('|').unwrap_or(t);
-    t.split('|').map(|c| c.trim().to_owned()).collect()
-}
-
-fn is_table_separator(line: &str) -> bool {
-    let cells: Vec<String> = table_cells(line);
-    !cells.is_empty() && cells.iter().all(|c| !c.is_empty() && c.chars().all(|ch| matches!(ch, '-' | ':')))
-}
-
-/// Starts a block other than a paragraph (so a paragraph stops before it).
-fn starts_block(line: &str) -> bool {
-    let t: &str = line.trim_start();
-    t.is_empty()
-        || heading(t).is_some()
-        || t.starts_with("```")
-        || t.starts_with("~~~")
-        || t.starts_with('>')
-        || t.starts_with('|')
-        || is_rule(t)
-        || list_item(line).is_some()
+    let mut out: Vec<Line> = vec![border("┌", "┬", "┐")];
+    for (r, (source, cells)) in rows.into_iter().enumerate() {
+        let mut spans: Vec<Span> = vec![span("│", Look::Rule)];
+        for (c, w) in widths.iter().enumerate() {
+            let cell: &[Span] = cells.get(c).map_or(&[], Vec::as_slice);
+            let header = |look: Look| if r == 0 && look == Look::Text { Look::Bold } else { look };
+            let pad: Look = header(Look::Text);
+            spans.push(span(" ", pad));
+            spans.extend(cell.iter().map(|s| span(s.text.clone(), header(s.look))));
+            spans.push(span(" ".repeat(w - cell_width(cell) + 1), pad));
+            spans.push(span("│", Look::Rule));
+        }
+        out.push(Line { spans, source, block: false });
+        if r == 0 {
+            out.push(border("├", "┼", "┤"));
+        }
+    }
+    out.push(border("└", "┴", "┘"));
+    out
 }
 
 /// The whole document as preview lines `width` cells wide.
-#[expect(clippy::too_many_lines, reason = "one arm per Markdown block")]
 pub fn render(lines: &[String], width: usize) -> Vec<Line> {
-    let width: usize = width.max(10);
-    let mut out: Vec<Line> = Vec::new();
-    let blank = |out: &mut Vec<Line>, source: usize| {
-        if out.last().is_some_and(|l: &Line| !l.spans.is_empty()) {
-            out.push(Line { spans: Vec::new(), source, block: false });
-        }
+    let source: String = lines.join("\n");
+    let mut starts: Vec<usize> = vec![0];
+    starts.extend(source.match_indices('\n').map(|(i, _)| i + 1));
+    let mut r: Renderer = Renderer {
+        width: width.max(10),
+        out: Vec::new(),
+        starts,
+        spans: Vec::new(),
+        base: Look::Text,
+        bold: 0,
+        italic: 0,
+        dim: 0,
+        link: 0,
+        image: None,
+        quote: 0,
+        lists: Vec::new(),
+        items: Vec::new(),
+        code: false,
+        table: None,
+        start: 0,
+        end: None,
     };
-    let mut i: usize = 0;
-    while i < lines.len() {
-        let line: &str = &lines[i];
-        let t: &str = line.trim();
-        if t.is_empty() {
-            blank(&mut out, i);
-            i += 1;
-            continue;
-        }
-        if t.starts_with("```") || t.starts_with("~~~") {
-            let fence: &str = &t[..3];
-            let lang: &str = t[3..].trim();
-            blank(&mut out, i);
-            if !lang.is_empty() {
-                out.push(Line { spans: vec![span(format!(" {lang}"), Look::Dim)], source: i, block: true });
-            }
-            i += 1;
-            while i < lines.len() && !lines[i].trim_start().starts_with(fence) {
-                let code: String = lines[i].replace('\t', "    ");
-                out.push(Line { spans: vec![span(format!(" {code}"), Look::CodeBlock)], source: i, block: true });
-                i += 1;
-            }
-            i += 1;
-            blank(&mut out, i.min(lines.len()) - 1);
-            continue;
-        }
-        if let Some((level, title)) = heading(t) {
-            blank(&mut out, i);
-            out.extend(wrap(inline(title, Look::Heading(level)), width, Vec::new(), &[], i));
-            match level {
-                1 => out.push(rule(width, "━", i)),
-                2 => out.push(rule(width, "─", i)),
-                _ => {}
-            }
-            i += 1;
-            continue;
-        }
-        if is_rule(t) {
-            out.push(rule(width, "─", i));
-            i += 1;
-            continue;
-        }
-        if t.starts_with('|') && lines.get(i + 1).is_some_and(|l| is_table_separator(l)) {
-            let start: usize = i;
-            let mut rows: Vec<Vec<String>> = vec![table_cells(t)];
-            i += 2;
-            while i < lines.len() && lines[i].trim().starts_with('|') {
-                rows.push(table_cells(&lines[i]));
-                i += 1;
-            }
-            let columns: usize = rows.iter().map(Vec::len).max().unwrap_or(0);
-            let cell_text = |c: &str| inline(c, Look::Text).into_iter().map(|s| s.text).collect::<String>();
-            let widths: Vec<usize> = (0..columns)
-                .map(|c| rows.iter().map(|r| r.get(c).map_or(0, |s| text::str_width(&cell_text(s)))).max().unwrap_or(0))
-                .collect();
-            let border = |left: &str, mid: &str, right: &str| -> Line {
-                let body: Vec<String> = widths.iter().map(|w| "─".repeat(w + 2)).collect();
-                Line {
-                    spans: vec![span(format!("{left}{}{right}", body.join(mid)), Look::Rule)],
-                    source: start,
-                    block: false,
-                }
-            };
-            blank(&mut out, start);
-            out.push(border("┌", "┬", "┐"));
-            for (r, row) in rows.iter().enumerate() {
-                let mut spans: Vec<Span> = vec![span("│", Look::Rule)];
-                for (c, w) in widths.iter().enumerate() {
-                    let cell: &str = row.get(c).map_or("", String::as_str);
-                    let look: Look = if r == 0 { Look::Bold } else { Look::Text };
-                    spans.push(span(" ", look));
-                    let inner: Vec<Span> = inline(cell, look);
-                    let used: usize = inner.iter().map(|s| text::str_width(&s.text)).sum();
-                    spans.extend(inner);
-                    spans.push(span(" ".repeat(w - used + 1), look));
-                    spans.push(span("│", Look::Rule));
-                }
-                out.push(Line { spans, source: start + r + usize::from(r > 0), block: false });
-                if r == 0 {
-                    out.push(border("├", "┼", "┤"));
-                }
-            }
-            out.push(border("└", "┴", "┘"));
-            continue;
-        }
-        if t.starts_with('>') {
-            let start: usize = i;
-            let mut quote: Vec<String> = Vec::new();
-            while i < lines.len() && lines[i].trim_start().starts_with('>') {
-                let body: &str = lines[i].trim_start()[1..].trim_start();
-                quote.push(body.to_owned());
-                i += 1;
-            }
-            let bar: Vec<Span> = vec![span("▌ ", Look::Quote)];
-            out.extend(wrap(inline(&quote.join(" "), Look::Quote), width, bar.clone(), &bar, start));
-            continue;
-        }
-        if let Some((indent, marker, rest)) = list_item(line) {
-            let depth: usize = indent / 2;
-            let pad: String = "  ".repeat(depth);
-            let (bullet, rest): (String, &str) = if let Some(after) = rest.strip_prefix("[ ] ") {
-                ("☐".into(), after)
-            } else if let Some(after) = rest.strip_prefix("[x] ").or_else(|| rest.strip_prefix("[X] ")) {
-                ("☑".into(), after)
-            } else if marker.ends_with(['.', ')']) {
-                (marker.to_owned(), rest)
-            } else {
-                (["•", "◦", "▪"][depth % 3].to_owned(), rest)
-            };
-            let start: usize = i;
-            let mut body: String = rest.to_owned();
-            i += 1;
-            // Lazy continuation: following lines that start no block belong to the item.
-            while i < lines.len() && !starts_block(&lines[i]) {
-                body.push(' ');
-                body.push_str(lines[i].trim());
-                i += 1;
-            }
-            let hang: usize = text::str_width(&bullet) + 1;
-            let first: Vec<Span> = vec![span(pad.clone(), Look::Text), span(format!("{bullet} "), Look::Marker)];
-            let rest_prefix: Vec<Span> = vec![span(format!("{pad}{}", " ".repeat(hang)), Look::Text)];
-            out.extend(wrap(inline(&body, Look::Text), width, first, &rest_prefix, start));
-            continue;
-        }
-        if t.starts_with('<') {
-            out.push(Line { spans: vec![span(t, Look::Dim)], source: i, block: false });
-            i += 1;
-            continue;
-        }
-        let start: usize = i;
-        let mut paragraph: Vec<&str> = vec![t];
-        i += 1;
-        while i < lines.len() && !starts_block(&lines[i]) {
-            paragraph.push(lines[i].trim());
-            i += 1;
-        }
-        out.extend(wrap(inline(&paragraph.join(" "), Look::Text), width, Vec::new(), &[], start));
+    let options: Options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    for (event, range) in Parser::new_ext(&source, options).into_offset_iter() {
+        r.event(event, range);
     }
-    while out.last().is_some_and(|l| l.spans.is_empty()) {
-        out.pop();
+    r.flush();
+    while r.out.last().is_some_and(|l| l.spans.is_empty()) {
+        r.out.pop();
     }
-    out
+    r.out
 }
 
 fn style_of(t: &Theme, look: Look, bg: Rgb) -> Style {
@@ -532,7 +544,16 @@ mod tests {
 
     #[test]
     fn inline_rules() {
-        let looks = |s: &str| inline(s, Look::Text).into_iter().map(|s| (s.text, s.look)).collect::<Vec<_>>();
+        // The parser may cut a run of text into several events: neighbours with the same look are joined.
+        let looks = |s: &str| {
+            render(&doc(s), 80).remove(0).spans.into_iter().fold(Vec::<(String, Look)>::new(), |mut runs, s| {
+                match runs.last_mut() {
+                    Some((text, look)) if *look == s.look => text.push_str(&s.text),
+                    _ => runs.push((s.text, s.look)),
+                }
+                runs
+            })
+        };
         assert_eq!(looks("snake_case_name"), vec![("snake_case_name".into(), Look::Text)]);
         assert_eq!(looks("*it*"), vec![("it".into(), Look::Italic)]);
         assert_eq!(looks("\\*not\\*"), vec![("*not*".into(), Look::Text)]);

@@ -21,6 +21,7 @@ mod fuzz;
 #[cfg(test)]
 mod perf;
 mod render;
+mod repo;
 mod syntax;
 mod term;
 mod update;
@@ -58,6 +59,7 @@ fn main() -> ExitCode {
         println!("{}", config::path().map(|p| p.display().to_string()).unwrap_or_default());
         return ExitCode::SUCCESS;
     }
+    syntax::preload();
     let (config, mut warnings): (config::Config, Vec<String>) = config::load();
     let colorscheme: String = render::initial_colorscheme(&config);
     warnings.extend(render::apply_colorscheme(&colorscheme, &config));

@@ -1,7 +1,9 @@
-//! A small JSON reader (no crates). Accepts `//` and `/* */` comments and trailing commas,
-//! since config files are written by hand.
+//! JSON read through jsonc-parser: `//` and `/* */` comments and trailing commas are accepted, since config files
+//! are written by hand, and nothing looser (quotes, numbers and commas stay strict JSON).
 
 use std::fmt::{self, Write};
+
+use jsonc_parser::{JsonValue, ParseOptions, parse_to_value};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Json {
@@ -27,17 +29,37 @@ impl fmt::Display for ParseError {
     }
 }
 
-/// Nesting deeper than this is rejected instead of risking the stack.
-const MAX_DEPTH: usize = 64;
-
+/// The value in `text`; the parser bounds nesting itself, so deep input is an error, not a stack overflow.
 pub fn parse(text: &str) -> Result<Json, ParseError> {
-    let mut p: Parser = Parser { chars: text.chars().collect(), pos: 0 };
-    let value: Json = p.value(0)?;
-    p.skip_blank()?;
-    if p.pos < p.chars.len() {
-        return Err(p.error("unexpected text after the value"));
+    let options: ParseOptions = ParseOptions {
+        allow_comments: true,
+        allow_trailing_commas: true,
+        allow_loose_object_property_names: false,
+        allow_missing_commas: false,
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
+        ..ParseOptions::default()
+    };
+    match parse_to_value(text, &options) {
+        Ok(Some(value)) => Ok(convert(value)),
+        Ok(None) => Err(ParseError { line: 1, col: 1, message: "unexpected end of file".into() }),
+        Err(e) => Err(ParseError { line: e.line_display(), col: e.column_display(), message: e.kind().to_string() }),
     }
-    Ok(value)
+}
+
+fn convert(value: JsonValue<'_>) -> Json {
+    match value {
+        JsonValue::Null => Json::Null,
+        JsonValue::Boolean(b) => Json::Bool(b),
+        // The parser has checked the syntax; f64 reads every JSON number (huge ones become infinite).
+        JsonValue::Number(n) => Json::Number(n.parse().unwrap_or(f64::NAN)),
+        JsonValue::String(s) => Json::String(s.into_owned()),
+        JsonValue::Array(items) => Json::Array(items.into_iter().map(convert).collect()),
+        JsonValue::Object(fields) => {
+            Json::Object(fields.into_iter().map(|(k, v)| (k.into_owned(), convert(v))).collect())
+        }
+    }
 }
 
 impl Json {
@@ -109,187 +131,6 @@ fn write_string(out: &mut String, s: &str) {
         }
     }
     out.push('"');
-}
-
-struct Parser {
-    chars: Vec<char>,
-    pos: usize,
-}
-
-impl Parser {
-    fn error(&self, message: &str) -> ParseError {
-        let before: &[char] = &self.chars[..self.pos.min(self.chars.len())];
-        let line: usize = 1 + before.iter().filter(|&&c| c == '\n').count();
-        let col: usize = 1 + before.iter().rev().take_while(|&&c| c != '\n').count();
-        ParseError { line, col, message: message.to_owned() }
-    }
-
-    fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos).copied()
-    }
-
-    fn skip_blank(&mut self) -> Result<(), ParseError> {
-        loop {
-            match (self.peek(), self.chars.get(self.pos + 1).copied()) {
-                (Some(c), _) if c.is_whitespace() => self.pos += 1,
-                (Some('/'), Some('/')) => {
-                    while self.peek().is_some_and(|c| c != '\n') {
-                        self.pos += 1;
-                    }
-                }
-                (Some('/'), Some('*')) => {
-                    self.pos += 2;
-                    loop {
-                        match (self.peek(), self.chars.get(self.pos + 1).copied()) {
-                            (Some('*'), Some('/')) => {
-                                self.pos += 2;
-                                break;
-                            }
-                            (Some(_), _) => self.pos += 1,
-                            (None, _) => return Err(self.error("unterminated comment")),
-                        }
-                    }
-                }
-                _ => return Ok(()),
-            }
-        }
-    }
-
-    fn expect(&mut self, c: char) -> Result<(), ParseError> {
-        self.skip_blank()?;
-        if self.peek() == Some(c) {
-            self.pos += 1;
-            Ok(())
-        } else {
-            Err(self.error(&format!("expected '{c}'")))
-        }
-    }
-
-    fn value(&mut self, depth: usize) -> Result<Json, ParseError> {
-        if depth > MAX_DEPTH {
-            return Err(self.error("nested too deeply"));
-        }
-        self.skip_blank()?;
-        match self.peek() {
-            Some('{') => self.object(depth),
-            Some('[') => self.array(depth),
-            Some('"') => self.string().map(Json::String),
-            Some('t') => self.word("true", Json::Bool(true)),
-            Some('f') => self.word("false", Json::Bool(false)),
-            Some('n') => self.word("null", Json::Null),
-            Some(c) if c == '-' || c.is_ascii_digit() => self.number(),
-            Some(_) => Err(self.error("expected a value")),
-            None => Err(self.error("unexpected end of file")),
-        }
-    }
-
-    fn word(&mut self, word: &str, value: Json) -> Result<Json, ParseError> {
-        let matches: bool = word.chars().enumerate().all(|(i, c)| self.chars.get(self.pos + i) == Some(&c));
-        if !matches {
-            return Err(self.error("expected a value"));
-        }
-        self.pos += word.len();
-        Ok(value)
-    }
-
-    fn number(&mut self) -> Result<Json, ParseError> {
-        let start: usize = self.pos;
-        while self.peek().is_some_and(|c| c.is_ascii_digit() || "+-.eE".contains(c)) {
-            self.pos += 1;
-        }
-        let text: String = self.chars[start..self.pos].iter().collect();
-        text.parse().map(Json::Number).map_err(|_| self.error("invalid number"))
-    }
-
-    fn string(&mut self) -> Result<String, ParseError> {
-        self.expect('"')?;
-        let mut out: String = String::new();
-        loop {
-            let Some(c): Option<char> = self.peek() else { return Err(self.error("unterminated string")) };
-            self.pos += 1;
-            match c {
-                '"' => return Ok(out),
-                '\\' => {
-                    let Some(esc): Option<char> = self.peek() else { return Err(self.error("unterminated string")) };
-                    self.pos += 1;
-                    out.push(match esc {
-                        '"' => '"',
-                        '\\' => '\\',
-                        '/' => '/',
-                        'b' => '\u{8}',
-                        'f' => '\u{c}',
-                        'n' => '\n',
-                        'r' => '\r',
-                        't' => '\t',
-                        'u' => self.unicode_escape()?,
-                        _ => return Err(self.error("invalid escape")),
-                    });
-                }
-                '\n' => return Err(self.error("newline inside a string")),
-                c => out.push(c),
-            }
-        }
-    }
-
-    fn unicode_escape(&mut self) -> Result<char, ParseError> {
-        let hex = |p: &mut Self| -> Result<u32, ParseError> {
-            let digits: String = p.chars.get(p.pos..p.pos + 4).map(|d| d.iter().collect()).unwrap_or_default();
-            p.pos += 4;
-            u32::from_str_radix(&digits, 16).map_err(|_| p.error("invalid \\u escape"))
-        };
-        let high: u32 = hex(self)?;
-        let code: u32 = if (0xD800..0xDC00).contains(&high) {
-            if self.peek() != Some('\\') || self.chars.get(self.pos + 1) != Some(&'u') {
-                return Err(self.error("unpaired surrogate"));
-            }
-            self.pos += 2;
-            let low: u32 = hex(self)?;
-            0x10000 + ((high - 0xD800) << 10) + (low.wrapping_sub(0xDC00) & 0x3FF)
-        } else {
-            high
-        };
-        char::from_u32(code).ok_or_else(|| self.error("invalid code point"))
-    }
-
-    fn array(&mut self, depth: usize) -> Result<Json, ParseError> {
-        self.expect('[')?;
-        let mut items: Vec<Json> = Vec::new();
-        loop {
-            self.skip_blank()?;
-            if self.peek() == Some(']') {
-                self.pos += 1;
-                return Ok(Json::Array(items));
-            }
-            items.push(self.value(depth + 1)?);
-            self.skip_blank()?;
-            match self.peek() {
-                Some(',') => self.pos += 1,
-                Some(']') => {}
-                _ => return Err(self.error("expected ',' or ']'")),
-            }
-        }
-    }
-
-    fn object(&mut self, depth: usize) -> Result<Json, ParseError> {
-        self.expect('{')?;
-        let mut fields: Vec<(String, Json)> = Vec::new();
-        loop {
-            self.skip_blank()?;
-            if self.peek() == Some('}') {
-                self.pos += 1;
-                return Ok(Json::Object(fields));
-            }
-            let key: String = self.string()?;
-            self.expect(':')?;
-            fields.push((key, self.value(depth + 1)?));
-            self.skip_blank()?;
-            match self.peek() {
-                Some(',') => self.pos += 1,
-                Some('}') => {}
-                _ => return Err(self.error("expected ',' or '}'")),
-            }
-        }
-    }
 }
 
 #[cfg(test)]

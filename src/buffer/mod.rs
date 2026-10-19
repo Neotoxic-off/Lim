@@ -10,11 +10,13 @@ mod width;
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+use syntect::parsing::SyntaxReference;
 
 use crate::error::Error;
 use crate::syntax::{self, Hl, Lang};
@@ -43,6 +45,8 @@ pub struct Buffer {
     pub top: usize,
     pub left: usize,
     pub lang: Option<&'static Lang>,
+    /// The syntect grammar that highlights it (by file name and extension; also for files with no `lang`).
+    pub grammar: Option<&'static SyntaxReference>,
     /// `m{a-z}` marks, plus `'` (position before the last jump) and `^` (last insert).
     pub marks: HashMap<char, Pos>,
     /// Name shown for buffers without a file (`git show` output…).
@@ -77,6 +81,7 @@ impl Buffer {
             body.split('\n').map(|l| if crlf { l.strip_suffix('\r').unwrap_or(l) } else { l }.to_owned()).collect();
         Self {
             lang: path.as_deref().and_then(syntax::lang_for),
+            grammar: path.as_deref().and_then(syntax::grammar_for),
             marks: HashMap::new(),
             title: None,
             hex: false,
@@ -124,7 +129,7 @@ impl Buffer {
                 let mut buf: Self = Self::from_text(Some(path.into()), "");
                 buf.lines = hex::dump(e.as_bytes(), 0);
                 buf.hex = true;
-                buf.lang = None;
+                (buf.lang, buf.grammar) = (None, None);
                 Ok(buf)
             }
         }
@@ -149,6 +154,7 @@ impl Buffer {
         self.history.seal();
         self.hex = !self.hex;
         self.lang = if self.hex { None } else { self.path.as_deref().and_then(syntax::lang_for) };
+        self.grammar = if self.hex { None } else { self.path.as_deref().and_then(syntax::grammar_for) };
         self.syntax.invalidate(0);
         self.cursor = Pos::default();
         Ok(())
@@ -180,7 +186,7 @@ impl Buffer {
         write_atomic(&path, &out).map_err(|e| Error::Io(path.clone(), e))?;
         let summary: String = format!("\"{}\" {}L, {}B written", path.display(), self.lines.len(), out.len());
         if self.path.is_none() {
-            self.lang = syntax::lang_for(&path);
+            (self.lang, self.grammar) = (syntax::lang_for(&path), syntax::grammar_for(&path));
             self.syntax.invalidate(0);
             self.path = Some(path.clone());
         }
@@ -204,9 +210,10 @@ impl Buffer {
         out
     }
 
-    /// Emergency copy after an internal error; leaves the buffer's own state alone.
+    /// Emergency copy after an internal error; leaves the buffer's own state alone. The copy is new (a link or file
+    /// already at `path` is not followed or reused) and private, as it may sit in a shared temp folder.
     pub fn write_copy(&self, path: &Path) -> io::Result<()> {
-        fs::write(path, self.contents())
+        new_file(path, true)?.write_all(self.contents().as_bytes())
     }
 
     /// Restores the invariants (non-empty, cursor and scroll in range) after an internal error.
@@ -240,7 +247,7 @@ impl Buffer {
 
     /// `:saveas`: this buffer now edits `path`.
     pub fn set_path(&mut self, path: PathBuf) {
-        self.lang = syntax::lang_for(&path);
+        (self.lang, self.grammar) = (syntax::lang_for(&path), syntax::grammar_for(&path));
         self.syntax.invalidate(0);
         self.path = Some(path);
     }
@@ -251,7 +258,8 @@ impl Buffer {
         if self.is_dirty() {
             return;
         }
-        if fs::metadata(&path).is_ok_and(|m| m.len() > MAX_TEXT) {
+        // As in `open`: devices and FIFOs (the file may have been swapped for one) would block or never end.
+        if !fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= MAX_TEXT) {
             return;
         }
         let Ok(bytes): Result<Vec<u8>, io::Error> = fs::read(&path) else { return };
@@ -531,10 +539,10 @@ impl Buffer {
         }
     }
 
-    /// Highlight groups for line `y`, one per char; None for files without a known language.
+    /// Highlight groups for line `y`, one per char; None for files without a grammar.
     /// Groups for the first `limit` chars of line `y`.
     pub fn highlight_line(&mut self, y: usize, limit: usize) -> Option<Vec<Hl>> {
-        Some(self.syntax.line(&self.lines, self.lang?, y, limit))
+        Some(self.syntax.line(&self.lines, self.grammar?, y, limit))
     }
 
     fn byte(&self, p: Pos) -> usize {
@@ -608,13 +616,24 @@ pub fn canonical(path: &Path) -> PathBuf {
     resolved
 }
 
+/// Creates `path`, failing if anything (a planted symlink included) is already there; `private` makes it 0600.
+fn new_file(path: &Path, private: bool) -> io::Result<File> {
+    let mut options: OpenOptions = OpenOptions::new();
+    options.write(true).create_new(true);
+    if private {
+        crate::term::owner_only(&mut options);
+    }
+    options.open(path)
+}
+
 /// Writes through a temp file + rename, so a crash or full disk never leaves a truncated file.
 /// Follows symlinks and keeps permissions; falls back to an in-place write when the directory is read-only.
 fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
     let target: PathBuf = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let Some(name): Option<&OsStr> = target.file_name() else { return fs::write(&target, data) };
     let tmp: PathBuf = target.with_file_name(format!(".{}.lim-{}.tmp", name.to_string_lossy(), std::process::id()));
-    let staged: Result<(), io::Error> = File::create(&tmp).and_then(|mut f| {
+    // Private until the target's permissions are copied, so a 0600 file is never readable while staged.
+    let staged: Result<(), io::Error> = new_file(&tmp, target.exists()).and_then(|mut f| {
         f.write_all(data)?;
         f.sync_all()?;
         if let Ok(meta) = fs::metadata(&target) {
@@ -654,6 +673,41 @@ mod tests {
 
     fn joined(b: &Buffer) -> String {
         b.lines().join("\n")
+    }
+
+    /// A file swapped for a device is not re-read (it would never end). Emergency copies and save temp files are
+    /// new files, private, and a link planted at their name is not followed.
+    #[cfg(unix)]
+    #[test]
+    fn special_files_and_planted_links() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let dir: PathBuf = std::env::temp_dir().join(format!("lim-special-{}", std::process::id()));
+        let _: io::Result<()> = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path: PathBuf = dir.join("notes.txt");
+        fs::write(&path, "text\n").unwrap();
+        let mut b: Buffer = Buffer::open(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        symlink("/dev/zero", &path).unwrap();
+        b.reload_if_changed();
+        assert_eq!(joined(&b), "text");
+
+        let copy: PathBuf = dir.join("copy");
+        b.write_copy(&copy).unwrap();
+        assert_eq!(fs::metadata(&copy).unwrap().permissions().mode() & 0o777, 0o600);
+        let victim: PathBuf = dir.join("victim");
+        fs::write(&victim, "keep").unwrap();
+        let link: PathBuf = dir.join("link");
+        symlink(&victim, &link).unwrap();
+        assert!(b.write_copy(&link).is_err());
+
+        let target: PathBuf = dir.join("t.txt");
+        fs::write(&target, "old").unwrap();
+        symlink(&victim, dir.join(format!(".t.txt.lim-{}.tmp", std::process::id()))).unwrap();
+        write_atomic(&target, b"new").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+        let _: io::Result<()> = fs::remove_dir_all(&dir);
     }
 
     #[test]

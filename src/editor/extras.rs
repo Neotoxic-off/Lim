@@ -4,7 +4,6 @@
 use std::env;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
 use std::time::SystemTime;
 
 use super::bindings::SortBy;
@@ -19,25 +18,9 @@ pub fn on_path(program: &str) -> bool {
     env::var_os("PATH").is_some_and(|paths| env::split_paths(&paths).any(|dir| dir.join(program).is_file()))
 }
 
-/// xdg-open / open / explorer, detached from the editor.
+/// The system's default app for `target`, detached from the editor.
 pub fn open_external(target: &str) -> bool {
-    if !may_spawn() {
-        return false;
-    }
-    let opener: &str = if cfg!(windows) {
-        "explorer"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    Command::new(opener).arg(target).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok()
-}
-
-fn git(args: &[&str], dir: &Path) -> Option<String> {
-    let out: Output =
-        Command::new("git").arg("-C").arg(dir).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+    may_spawn() && open::that_detached(target).is_ok()
 }
 
 impl Editor {
@@ -251,15 +234,9 @@ impl Editor {
     /// `<Leader>go`: the current file and line on the git host.
     pub(super) fn git_browse(&mut self) {
         let Some(path): Option<PathBuf> = self.buf().path.clone() else { return self.info("Buffer has no file") };
-        let dir: PathBuf =
-            path.parent().filter(|d| !d.as_os_str().is_empty()).map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        let url: Option<String> = (|| {
-            let remote: String = git(&["remote", "get-url", "origin"], &dir)?;
-            let branch: String = git(&["rev-parse", "--abbrev-ref", "HEAD"], &dir)?;
-            let name: String = path.file_name()?.to_string_lossy().into_owned();
-            let file: String = git(&["ls-files", "--full-name", &name], &dir)?;
-            Some(format!("{}/blob/{branch}/{file}#L{}", web_url(&remote), self.buf().cursor.line + 1))
-        })();
+        let url: Option<String> = crate::repo::browse(&path).map(|(remote, branch, file)| {
+            format!("{}/blob/{branch}/{file}#L{}", web_url(&remote), self.buf().cursor.line + 1)
+        });
         match url {
             Some(url) if open_external(&url) => self.info(format!("Opening {url}")),
             Some(url) => self.info(url),

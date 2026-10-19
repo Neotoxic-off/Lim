@@ -2,10 +2,16 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::term;
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 
 pub(super) fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
+}
+
+/// Seconds east of UTC in the system's time zone at unix time `ts` (0 when it is out of range).
+pub(super) fn utc_offset(ts: i64) -> i64 {
+    Timestamp::from_second(ts).map_or(0, |t| i64::from(TimeZone::system().to_offset(t).seconds()))
 }
 
 /// Days since 1970-01-01 of a civil date (proleptic Gregorian), after Howard Hinnant's `days_from_civil`.
@@ -48,7 +54,7 @@ fn zone(offset: i64) -> String {
 
 /// A unix time described: local and UTC dates, weekday.
 fn describe(ts: i64) -> String {
-    let offset: i64 = term::utc_offset(ts);
+    let offset: i64 = utc_offset(ts);
     let weekday: &str = WEEKDAYS[usize::try_from(ts.div_euclid(86_400).rem_euclid(7)).unwrap_or(0)];
     format!("{ts} · {} {} · {} UTC · {weekday}", datetime(ts, offset), zone(offset), datetime(ts, 0))
 }
@@ -84,7 +90,7 @@ fn parse_date(words: &[&str]) -> Option<(i64, usize)> {
     let secs: i64 = clock.iter().chain([&0, &0, &0]).take(3).fold(0, |acc, n| acc * 60 + n);
     let local: i64 = days_from_civil(y, m, d) * 86_400 + secs;
     // The offset in effect at that local time: taken at the UTC guess, which is right outside the hour of a switch.
-    Some((if utc { local } else { local - term::utc_offset(local) }, used))
+    Some((if utc { local } else { local - utc_offset(local) }, used))
 }
 
 /// `now`, a unix time (seconds, or milliseconds when it is that large), a date, or two dates (their difference).

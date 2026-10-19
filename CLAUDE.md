@@ -4,9 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-lim: a Vim/AstroNvim-style modal editor in Rust (edition 2024, MSRV 1.88) with **zero crates**, for Linux, macOS
-and Windows. The terminal is driven by raw FFI: libc in `src/term/sys/unix.rs`, kernel32 in `src/term/sys/windows.rs`.
-Both expose the same functions, selected with `#[cfg]` + `#[path]` in `term/mod.rs`. Never add a dependency.
+lim: a Vim/AstroNvim-style modal editor in Rust (edition 2024, MSRV 1.88) for Linux, macOS and Windows. The
+terminal is driven by raw FFI: libc in `src/term/sys/unix.rs`, kernel32 in `src/term/sys/windows.rs`. Both expose the
+same functions, selected with `#[cfg]` + `#[path]` in `term/mod.rs`. Use a Rust crate rather than running a program
+or hand-writing what one does: gix for git (`src/repo.rs`, never `Command::new("git")`), syntect + two-face for
+highlighting, pulldown-cmark, jsonc-parser, ureq (rustls), arboard, open, and small crates for encodings, hashes,
+random bytes and time zones (see `docs/architecture.md`). A program runs only where that is the feature (config
+`commands`, the shell, `<Leader>t…` tools).
 
 ## Commands
 
@@ -40,9 +44,9 @@ wsl -d Ubuntu --cd /mnt/d/Code/Github/Lim -e bash -lc 'LIM_NVIM=$HOME/.local/nvi
   keymaps picker all read from it, so add or change keys there and nowhere else.
 - `buffer/`: text lines plus an undo `History` that records each replaced line range. The same ranges shift marks
   and jump-list entries, so a new kind of edit has to go through it.
-- `syntax/`: a keyword highlighter that caches its per-line start state and invalidates it from the first edited
-  line.
-- `config/`: a hand-written JSON parser feeding `Options`. `lim --print-config` prints the documented defaults
+- `syntax/`: syntect (bat's grammars via two-face), scopes mapped to lim's groups; caches each line's start state
+  and colors and invalidates them from the first edited line.
+- `config/`: jsonc-parser (comments, trailing commas) feeding `Options`. `lim --print-config` prints the documented defaults
   (also in `config.example.json`).
 
 ## Rules

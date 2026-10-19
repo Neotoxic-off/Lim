@@ -1,8 +1,13 @@
-//! Keyword-based highlighting standing in for treesitter, with multi-line regions
-//! (block comments, long strings) carried from line to line.
+//! Syntax highlighting through syntect with bat's grammars (two-face). Each line's start state is cached, so an
+//! edit re-parses from the edited line on; scopes map to lim's highlight groups, so the themes stay as they are.
 
 mod lang;
 mod todo;
+
+use std::path::Path;
+use std::sync::OnceLock;
+
+use syntect::parsing::{ParseState, Scope, ScopeError, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet};
 
 pub use lang::Kind;
 pub use lang::{Lang, lang_for};
@@ -24,369 +29,257 @@ pub enum Hl {
     Property,
 }
 
-/// Highlighter state at a line boundary: inside which of `Lang::regions`, if any.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct State {
-    region: Option<usize>,
+/// A line further than this past the parsed ones restarts the parse this many lines above it, as Vim's `syntax
+/// sync minlines` does, so a jump into a huge file stays fast.
+/// shortcut: a comment or string opened more than `SYNC` lines above a far jump is missed until scrolled through.
+const SYNC: usize = 300;
+/// Longer lines are drawn plain and not parsed (the state carries over), as editors do, so they stay fast.
+const MAX_LINE: usize = 20_000;
+
+/// Extensions bat has no grammar for, and the one that fits them.
+const ALIASES: &[(&str, &str)] = &[
+    ("h", "c"),
+    ("ino", "cpp"),
+    ("cu", "cpp"),
+    ("jsx", "js"),
+    ("mjs", "js"),
+    ("cjs", "js"),
+    ("mts", "ts"),
+    ("cts", "ts"),
+    ("astro", "html"),
+    ("plist", "xml"),
+    ("mdx", "md"),
+    ("jsonc", "json"),
+    ("json5", "json"),
+    ("s", "asm"),
+    ("conf", "ini"),
+];
+
+/// Scope prefixes and their group, the first matching anywhere in the scope stack winning: a JSON key is a
+/// string inside `meta.mapping.key`, and must read as a property.
+const RULES: &[(&str, Hl)] = &[
+    ("comment", Hl::Comment),
+    ("meta.mapping.key", Hl::Property),
+    ("support.type.property-name", Hl::Property),
+    ("entity.name.tag.yaml", Hl::Property),
+    ("entity.other.attribute-name", Hl::Property),
+    ("variable.other.member", Hl::Property),
+    ("variable.other.property", Hl::Property),
+    ("string", Hl::Str),
+    ("markup.raw", Hl::Str),
+    ("markup.heading", Hl::Keyword),
+    ("constant.numeric", Hl::Num),
+    ("constant", Hl::Const),
+    ("support.constant", Hl::Const),
+    ("meta.preprocessor", Hl::Macro),
+    ("support.macro", Hl::Macro),
+    ("entity.name.function.macro", Hl::Macro),
+    ("entity.name.function", Hl::Func),
+    ("support.function", Hl::Func),
+    ("variable.function", Hl::Func),
+    ("entity.name.type", Hl::Type),
+    ("entity.name.class", Hl::Type),
+    ("entity.name.struct", Hl::Type),
+    ("entity.name.enum", Hl::Type),
+    ("entity.name.section", Hl::Type),
+    ("support.type", Hl::Type),
+    ("support.class", Hl::Type),
+    ("variable.language", Hl::Builtin),
+    ("support.variable", Hl::Builtin),
+    // Operators stay plain, as before; `storage` (Rust's `fn`, `let`, C's `int`) reads as a keyword.
+    ("keyword.operator", Hl::Text),
+    ("keyword", Hl::Keyword),
+    ("storage", Hl::Keyword),
+    ("entity.name.tag", Hl::Keyword),
+];
+
+fn syntaxes() -> &'static SyntaxSet {
+    static SET: OnceLock<SyntaxSet> = OnceLock::new();
+    SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
-/// A jump further than this past the window of known states moves the window instead of growing it.
-const SYNC: usize = 2000;
-/// Lines between the saved start states a far jump scans from.
-const CHECKPOINT: usize = 4096;
+fn rules() -> &'static [(Scope, Hl)] {
+    static PARSED: OnceLock<Vec<(Scope, Hl)>> = OnceLock::new();
+    PARSED.get_or_init(|| RULES.iter().filter_map(|&(name, hl)| Some((Scope::new(name).ok()?, hl))).collect())
+}
 
-/// Start states of a window of lines (from `base` on), and of every `CHECKPOINT`-th line scanned so far; edits
-/// truncate both. States between are found with `end_state`, which only tracks regions, so a jump to the end of
-/// a 3M-line file stays exact (a comment opened on line 1 still colors it) and fast.
-#[derive(Debug, Default)]
+/// The grammar of a file: by its name (`Makefile`, `Dockerfile`, `.gitignore`), else its extension.
+pub fn grammar_for(path: &Path) -> Option<&'static SyntaxReference> {
+    let set: &SyntaxSet = syntaxes();
+    let name: &str = path.file_name()?.to_str()?;
+    if let Some(grammar) = set.find_syntax_by_extension(name) {
+        return Some(grammar);
+    }
+    let ext: String = path.extension()?.to_str()?.to_ascii_lowercase();
+    let ext: &str = ALIASES.iter().find(|(from, _)| *from == ext).map_or(ext.as_str(), |(_, to)| to);
+    set.find_syntax_by_extension(ext)
+}
+
+/// The group of the text under `stack`.
+fn group(stack: &ScopeStack) -> Hl {
+    let scopes: &[Scope] = stack.as_slice();
+    rules().iter().find(|(prefix, _)| scopes.iter().any(|s| prefix.is_prefix_of(*s))).map_or(Hl::Text, |&(_, hl)| hl)
+}
+
+/// The parser and scope stack at a line start.
+type State = (ParseState, ScopeStack);
+
+/// Parses `line` from `state`, leaving it at the next line's start; with `out`, pushes one group per char for the
+/// first `limit` chars.
+fn parse(line: &str, state: &mut State, out: Option<(&mut Vec<Hl>, usize)>) {
+    let ops: Vec<(usize, ScopeStackOp)> = if line.len() > MAX_LINE {
+        Vec::new()
+    } else {
+        state.0.parse_line(&format!("{line}\n"), syntaxes()).unwrap_or_default()
+    };
+    let stack: &mut ScopeStack = &mut state.1;
+    let mut ops = ops.iter().peekable();
+    if let Some((groups, limit)) = out {
+        let mut current: Hl = group(stack);
+        for (byte, _) in line.char_indices().take(limit) {
+            let mut moved: bool = false;
+            while let Some((_, op)) = ops.next_if(|(at, _)| *at <= byte) {
+                let _: Result<(), ScopeError> = stack.apply(op);
+                moved = true;
+            }
+            if moved {
+                current = group(stack);
+            }
+            groups.push(current);
+        }
+    }
+    for (_, op) in ops {
+        let _: Result<(), ScopeError> = stack.apply(op);
+    }
+}
+
+/// Start states of a window of lines, from `base` on, and the groups of the lines drawn (with the char limit
+/// they were drawn to), so each line is parsed once until an edit truncates both.
+#[derive(Default)]
 pub struct Cache {
     base: usize,
     starts: Vec<State>,
-    checkpoints: Vec<State>,
+    groups: Vec<Option<(usize, Vec<Hl>)>>,
+}
+
+impl std::fmt::Debug for Cache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cache {{ base: {}, states: {} }}", self.base, self.starts.len())
+    }
 }
 
 impl Cache {
-    /// Forgets states after `line`: its own start state only depends on earlier lines.
+    /// Forgets what follows from `line` on: its own start state only depends on earlier lines.
     pub fn invalidate(&mut self, line: usize) {
         if line < self.base {
-            (self.base, self.starts) = (0, Vec::new());
+            (self.base, self.starts, self.groups) = (0, Vec::new(), Vec::new());
         } else {
             self.starts.truncate(line - self.base + 1);
+            self.groups.truncate(line - self.base);
         }
-        self.checkpoints.truncate(line / CHECKPOINT + 1);
     }
 
     /// Groups for the first `limit` chars of line `y` (a long line is drawn only in part).
-    pub fn line(&mut self, lines: &[String], lang: &Lang, y: usize, limit: usize) -> Vec<Hl> {
+    pub fn line(&mut self, lines: &[String], grammar: &SyntaxReference, y: usize, limit: usize) -> Vec<Hl> {
         let known: usize = self.base + self.starts.len().saturating_sub(1);
         if self.starts.is_empty() || y < self.base || y > known + SYNC {
-            let base: usize = y.saturating_sub(SYNC);
-            let start: State = self.state_at(lines, lang, base);
-            (self.base, self.starts) = (base, vec![start]);
+            self.base = y.saturating_sub(SYNC);
+            (self.starts, self.groups) = (vec![(ParseState::new(grammar), ScopeStack::new())], Vec::new());
         }
-        let firsts: Firsts = firsts(lang);
         while self.base + self.starts.len() <= y {
             let i: usize = self.starts.len() - 1;
-            let end: State = end_state(lines[self.base + i].as_bytes(), lang, &firsts, self.starts[i]);
-            self.starts.push(end);
+            let mut next: State = self.starts[i].clone();
+            parse(&lines[self.base + i], &mut next, None);
+            self.starts.push(next);
         }
-        let chars: Vec<char> = lines[y].chars().take(limit).collect();
-        highlight(&chars, lang, self.starts[y - self.base]).0
-    }
-
-    /// The start state of line `y`, scanned from the nearest state known above it.
-    fn state_at(&mut self, lines: &[String], lang: &Lang, y: usize) -> State {
-        if self.checkpoints.is_empty() {
-            self.checkpoints.push(State::default());
+        let i: usize = y - self.base;
+        if let Some(Some((drawn, groups))) = self.groups.get(i)
+            && *drawn == limit
+        {
+            return groups.clone();
         }
-        let n: usize = (y / CHECKPOINT).min(self.checkpoints.len() - 1);
-        let (mut line, mut state): (usize, State) = (n * CHECKPOINT, self.checkpoints[n]);
-        let known: usize = self.base + self.starts.len().saturating_sub(1);
-        if !self.starts.is_empty() && (line..=y).contains(&known) {
-            (line, state) = (known, self.starts[known - self.base]);
+        let mut state: State = self.starts[i].clone();
+        let mut groups: Vec<Hl> = Vec::new();
+        parse(&lines[y], &mut state, Some((&mut groups, limit)));
+        // Drawing the last known line also gives the next line's start state.
+        if self.starts.len() == i + 1 {
+            self.starts.push(state);
         }
-        let firsts: Firsts = firsts(lang);
-        while line < y {
-            state = end_state(lines[line].as_bytes(), lang, &firsts, state);
-            line += 1;
-            if line.is_multiple_of(CHECKPOINT) && line / CHECKPOINT == self.checkpoints.len() {
-                self.checkpoints.push(state);
-            }
+        if self.groups.len() <= i {
+            self.groups.resize(i + 1, None);
         }
-        state
+        self.groups[i] = Some((limit, groups.clone()));
+        groups
     }
 }
 
-/// `end_state` for the fuzzer, which checks it against `highlight`.
-#[cfg(test)]
-pub fn fast_end_state(line: &str, lang: &Lang, state: State) -> State {
-    end_state(line.as_bytes(), lang, &firsts(lang), state)
-}
-
-/// Which bytes can start a region, a comment or a quote of a language.
-type Firsts = [bool; 256];
-
-fn firsts(lang: &Lang) -> Firsts {
-    let mut firsts: Firsts = [false; 256];
-    let openers = lang.regions.iter().map(|(open, ..)| *open).chain([lang.comment]).filter_map(|p| p.bytes().next());
-    for b in openers.chain(lang.quotes.bytes()) {
-        firsts[usize::from(b)] = true;
-    }
-    firsts
-}
-
-/// The state after `line`, like `highlight(..).1` without coloring anything. Every region, comment and quote
-/// delimiter is ASCII and none starts with a word char, so bytes can be skipped up to the next possible one.
-fn end_state(line: &[u8], lang: &Lang, firsts: &Firsts, state: State) -> State {
-    if lang.kind == Kind::Markdown && state.region.is_none() && line.first() == Some(&b'#') {
-        return state;
-    }
-    let at = |i: usize, pat: &str| line[i..].starts_with(pat.as_bytes());
-    let close = |from: usize, close: &str, escapes: bool| {
-        let mut i: usize = from;
-        while i < line.len() {
-            if escapes && line[i] == b'\\' {
-                i += 2;
-            } else if at(i, close) {
-                return Some(i + close.len());
-            } else {
-                i += 1;
-            }
-        }
-        None
-    };
-    let mut region: Option<usize> = state.region;
-    let mut i: usize = 0;
-    loop {
-        if let Some(r) = region {
-            let (_, closer, group): (&str, &str, Hl) = lang.regions[r];
-            let Some(end): Option<usize> = close(i, closer, group == Hl::Str) else { return State { region } };
-            (i, region) = (end, None);
-            continue;
-        }
-        let Some(skip): Option<usize> =
-            line.get(i..).and_then(|rest| rest.iter().position(|&b| firsts[usize::from(b)]))
-        else {
-            return State::default();
-        };
-        i += skip;
-        if let Some(r) = lang.regions.iter().position(|(open, ..)| at(i, open)) {
-            (i, region) = (i + lang.regions[r].0.len(), Some(r));
-        } else if !lang.comment.is_empty() && at(i, lang.comment) {
-            return State::default();
-        } else if lang.quotes.as_bytes().contains(&line[i]) {
-            i = close(i + 1, &char::from(line[i]).to_string(), true).unwrap_or(line.len());
-        } else {
-            i += 1;
-        }
-    }
-}
-
-/// True when `pat` (ASCII) occurs in `line` at `i`.
-fn at(line: &[char], i: usize, pat: &str) -> bool {
-    pat.chars().enumerate().all(|(k, c)| line.get(i + k) == Some(&c))
-}
-
-/// Index just past the region closer, honoring backslash escapes in strings.
-fn close_of(line: &[char], from: usize, close: &str, escapes: bool) -> Option<usize> {
-    let mut i: usize = from;
-    while i < line.len() {
-        if escapes && line[i] == '\\' {
-            i += 2;
-        } else if at(line, i, close) {
-            return Some(i + close.len());
-        } else {
-            i += 1;
-        }
-    }
-    None
-}
-
-/// One group per char of `line`, and the state the next line starts in.
-pub fn highlight(line: &[char], lang: &Lang, state: State) -> (Vec<Hl>, State) {
-    if lang.kind == Kind::Markdown && state.region.is_none() && line.first() == Some(&'#') {
-        return (vec![Hl::Keyword; line.len()], state);
-    }
-    let mut hl: Vec<Hl> = vec![Hl::Text; line.len()];
-    let mut region: Option<usize> = state.region;
-    let mut i: usize = 0;
-    while i < line.len() || region.is_some() {
-        if let Some(r) = region {
-            let (_, close, group): (&str, &str, Hl) = lang.regions[r];
-            if let Some(end) = close_of(line, i, close, group == Hl::Str) {
-                hl[i..end].fill(group);
-                i = end;
-                region = None;
-            } else {
-                hl[i..].fill(group);
-                return (hl, State { region });
-            }
-            continue;
-        }
-        if let Some(r) = lang.regions.iter().position(|(open, ..)| at(line, i, open)) {
-            let (open, _, group): (&str, &str, Hl) = lang.regions[r];
-            hl[i..i + open.len()].fill(group);
-            i += open.len();
-            region = Some(r);
-            continue;
-        }
-        let c: char = line[i];
-        let start: usize = i;
-        if !lang.comment.is_empty() && at(line, i, lang.comment) {
-            hl[i..].fill(Hl::Comment);
-            break;
-        } else if lang.quotes.contains(c) {
-            i = close_of(line, i + 1, &c.to_string(), true).unwrap_or(line.len());
-            let key: bool = lang.kind == Kind::Config && line[i..].iter().find(|c| **c != ' ') == Some(&':');
-            hl[start..i].fill(if key { Hl::Property } else { Hl::Str });
-        } else if c.is_ascii_digit() {
-            while i < line.len() && (line[i].is_alphanumeric() || line[i] == '_' || line[i] == '.') {
-                i += 1;
-            }
-            hl[start..i].fill(Hl::Num);
-        } else if c.is_alphabetic() || c == '_' {
-            while i < line.len() && (line[i].is_alphanumeric() || line[i] == '_') {
-                i += 1;
-            }
-            let word: String = line[start..i].iter().collect();
-            let next: Option<char> = line[i..].iter().find(|c| **c != ' ').copied();
-            hl[start..i].fill(classify(&word, next, &line[..start], lang));
-        } else {
-            i += 1;
-        }
-    }
-    (hl, State::default())
-}
-
-/// The group of `word`, given the first non-blank char after it and the text before it.
-fn classify(word: &str, next: Option<char>, before: &[char], lang: &Lang) -> Hl {
-    let prev: Option<char> = before.last().copied();
-    match lang.kind {
-        Kind::Markup if prev == Some('<') || before.ends_with(&['<', '/']) => return Hl::Keyword,
-        Kind::Markup if next == Some('=') => return Hl::Property,
-        Kind::Config if matches!(next, Some(':' | '=')) => return Hl::Property,
-        Kind::Config if prev == Some('[') => return Hl::Type,
-        _ => {}
-    }
-    let key: String = if lang.ignore_case { word.to_ascii_lowercase() } else { word.to_owned() };
-    let key: &str = &key;
-    if lang.keywords.contains(&key) {
-        Hl::Keyword
-    } else if lang.consts.contains(&key) {
-        Hl::Const
-    } else if lang.builtins.contains(&key) {
-        Hl::Builtin
-    } else if next == Some('!') && lang.macros {
-        Hl::Macro
-    } else if next == Some('(') {
-        Hl::Func
-    } else if word.starts_with(char::is_uppercase) {
-        if word.chars().any(char::is_lowercase) { Hl::Type } else { Hl::Const }
-    } else if prev == Some('.') {
-        Hl::Property
-    } else {
-        Hl::Text
-    }
+/// Loads the grammars on a background thread, so the first file opened does not wait for them.
+pub fn preload() {
+    std::thread::spawn(syntaxes);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
-    fn lang(file: &str) -> &'static Lang {
-        lang_for(Path::new(file)).unwrap()
-    }
-
-    fn hl(s: &str, file: &str) -> Vec<Hl> {
-        highlight(&s.chars().collect::<Vec<_>>(), lang(file), State::default()).0
+    /// Groups of each line of `text` in the file type of `file`.
+    fn hl(text: &str, file: &str) -> Vec<Vec<Hl>> {
+        let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+        let grammar: &SyntaxReference = grammar_for(Path::new(file)).unwrap();
+        let mut cache: Cache = Cache::default();
+        (0..lines.len()).map(|y| cache.line(&lines, grammar, y, usize::MAX)).collect()
     }
 
     #[test]
     fn tokens() {
-        let h: Vec<Hl> = hl(r#"fn main() { let s = "a\"b"; // hi"#, "x.rs");
-        assert_eq!(h[0], Hl::Keyword);
-        assert_eq!(h[3], Hl::Func);
-        assert_eq!(h[20], Hl::Str);
-        assert_eq!(h[25], Hl::Str); // escaped quote stays inside the string
-        assert_eq!(h[27], Hl::Text);
+        let h: Vec<Hl> = hl(r#"fn main() { let s = "a\"b"; // hi"#, "x.rs").remove(0);
+        assert_eq!(h[0], Hl::Keyword, "fn");
+        assert_eq!(h[3], Hl::Func, "main");
+        assert_eq!(h[12], Hl::Keyword, "let");
+        assert_eq!((h[20], h[23]), (Hl::Str, Hl::Str), "the escaped quote stays inside the string");
         assert_eq!(h.last(), Some(&Hl::Comment));
-        let h: Vec<Hl> = hl("x = 42 -- c", "a.lua");
+        let h: Vec<Hl> = hl("x = 42 -- c", "a.lua").remove(0);
         assert_eq!((h[4], h[8]), (Hl::Num, Hl::Comment));
     }
 
     #[test]
     fn multi_line_regions() {
-        let lines: Vec<String> =
-            ["let a = 1; /* start", "still comment", "end */ let b", "--[[ lua"].map(String::from).into();
-        let rust: &Lang = lang("x.rs");
+        let text: &str = "let a = 1; /* start\nstill comment\nend */ let b";
+        let lines: Vec<Vec<Hl>> = hl(text, "x.rs");
+        assert!(lines[1].iter().all(|h| *h == Hl::Comment));
+        assert_eq!((lines[2][5], lines[2][7]), (Hl::Comment, Hl::Keyword));
+        let mut source: Vec<String> = text.lines().map(str::to_owned).collect();
+        let grammar: &SyntaxReference = grammar_for(Path::new("x.rs")).unwrap();
         let mut cache: Cache = Cache::default();
-        assert!(cache.line(&lines, rust, 1, usize::MAX).iter().all(|h| *h == Hl::Comment));
-        let third: Vec<Hl> = cache.line(&lines, rust, 2, usize::MAX);
-        assert_eq!((third[5], third[7]), (Hl::Comment, Hl::Keyword));
+        assert_eq!(cache.line(&source, grammar, 2, usize::MAX)[0], Hl::Comment);
+        source[0] = "let a = 1;".into();
         cache.invalidate(0);
-        assert_eq!(cache.line(&lines, rust, 2, usize::MAX)[7], Hl::Keyword);
-        let lua: &Lang = lang("x.lua");
-        assert_ne!(highlight(&lines[3].chars().collect::<Vec<_>>(), lua, State::default()).1, State::default());
+        assert_eq!(cache.line(&source, grammar, 1, usize::MAX)[0], Hl::Text, "the comment is gone once re-parsed");
     }
 
-    /// A far jump keeps only a window of states, yet stays exact: a comment opened on line 1 still colors it.
+    /// A far jump parses only `SYNC` lines above it; a huge line is drawn plain without being parsed.
     #[test]
-    fn far_lines_stay_exact() {
-        let mut lines: Vec<String> = vec!["/* open".into()];
-        lines.extend((0..3 * CHECKPOINT).map(|_| "let x".to_owned()));
-        let rust: &Lang = lang("x.rs");
+    fn far_jumps_and_huge_lines_stay_bounded() {
+        let mut lines: Vec<String> = (0..10 * SYNC).map(|_| "let x = 1;".to_owned()).collect();
+        lines.push("x".repeat(MAX_LINE + 1));
+        let grammar: &SyntaxReference = grammar_for(Path::new("x.rs")).unwrap();
         let mut cache: Cache = Cache::default();
-        let far: usize = 3 * CHECKPOINT;
-        assert_eq!(cache.line(&lines, rust, far, usize::MAX)[0], Hl::Comment);
-        assert_eq!((cache.base, cache.starts.len(), cache.checkpoints.len()), (far - SYNC, SYNC + 1, 3));
-        lines[0] = "// closed".into();
-        cache.invalidate(0);
-        assert_eq!(cache.checkpoints.len(), 1, "checkpoints below the edit are dropped");
-        assert_eq!(cache.line(&lines, rust, far, usize::MAX)[0], Hl::Keyword);
-        lines[2 * CHECKPOINT + 5] = "/*".into();
-        cache.invalidate(2 * CHECKPOINT + 5);
-        assert_eq!(cache.line(&lines, rust, 5, usize::MAX)[0], Hl::Keyword, "back to the top, from a checkpoint");
-        assert_eq!(cache.line(&lines, rust, far, usize::MAX)[0], Hl::Comment);
-        lines[0] = "/* open".into();
-        lines[2 * CHECKPOINT + 5] = "let x".into();
-        let mut cache: Cache = Cache::default();
-        assert_eq!(cache.line(&lines, rust, SYNC + 500, usize::MAX)[0], Hl::Comment);
-        assert_eq!(cache.line(&lines, rust, 2 * SYNC + 1000, usize::MAX)[0], Hl::Comment, "from the window");
-        assert_eq!(cache.checkpoints.len(), 1);
+        assert_eq!(cache.line(&lines, grammar, 9 * SYNC, usize::MAX)[0], Hl::Keyword);
+        assert_eq!((cache.base, cache.starts.len()), (8 * SYNC, SYNC + 2), "and the next line's start state");
+        assert!(cache.line(&lines, grammar, 10 * SYNC, 100).iter().all(|h| *h == Hl::Text));
     }
 
-    /// `end_state` agrees with the full highlighter on every kind of delimiter.
     #[test]
-    fn end_state_matches_highlight() {
-        let files: [&str; 16] = [
-            "x.rs", "x.lua", "x.py", "x.rb", "x.pl", "x.ps1", "x.md", "x.hs", "x.js", "x.c", "x.html", "x.go", "x.sql",
-            "x.sh", "x.json", "x.toml",
-        ];
-        let samples: [&str; 18] = [
-            "",
-            "plain é words 1.5",
-            "a /* b */ c /* d",
-            "*/ x \"str /* not\" y",
-            "s = \"esc \\\" /*\" // c /*",
-            "--[[ lua ]] [[ str",
-            "]] x -- c [[",
-            "\"\"\" py ''' x",
-            "x ''' y \"\"\" z",
-            "=begin ruby",
-            "=end =pod",
-            "=cut <# ps #> <#",
-            "# title ```",
-            "``` `tick` <!-- html",
-            "--> {- hs -} {-",
-            "-} 'a\\'b' \"\\",
-            "日本 /* 語 */ \"é",
-            "x \\",
-        ];
-        for (file, lang) in files.iter().filter_map(|f| Some((f, lang_for(Path::new(f))?))) {
-            let firsts: Firsts = firsts(lang);
-            let mut state: State = State::default();
-            for line in samples {
-                let chars: Vec<char> = line.chars().collect();
-                let want: State = highlight(&chars, lang, state).1;
-                assert_eq!(end_state(line.as_bytes(), lang, &firsts, state), want, "{line:?} in {file}");
-                state = want;
-            }
+    fn grammars_and_non_code() {
+        for file in ["Makefile", "Dockerfile", ".gitignore", "x.toml", "x.yaml", "x.ts", "x.h", "x.jsonc", "x.go"] {
+            assert!(grammar_for(Path::new(file)).is_some(), "{file}");
         }
-    }
-
-    #[test]
-    fn non_code_rules() {
-        let h: Vec<Hl> = hl(r#"<a href="x">it's</a>"#, "x.html");
-        assert_eq!((h[1], h[3], h[8], h[14], h[18]), (Hl::Keyword, Hl::Property, Hl::Str, Hl::Text, Hl::Keyword));
-        let h: Vec<Hl> = hl("name: true # c", "x.yaml");
+        let h: Vec<Hl> = hl(r#"<a href="x">it's</a>"#, "x.html").remove(0);
+        assert_eq!((h[1], h[3], h[9]), (Hl::Keyword, Hl::Property, Hl::Str));
+        let h: Vec<Hl> = hl("name: true # c", "x.yaml").remove(0);
         assert_eq!((h[0], h[6], h[13]), (Hl::Property, Hl::Const, Hl::Comment));
-        let h: Vec<Hl> = hl(r#"{"k": "v"}"#, "x.json");
-        assert_eq!((h[1], h[7]), (Hl::Property, Hl::Str));
-        assert_eq!(hl("[server]", "x.toml")[1], Hl::Type);
-        let h: Vec<Hl> = hl("SELECT x FROM t", "q.sql");
-        assert_eq!((h[0], h[7], h[9]), (Hl::Keyword, Hl::Text, Hl::Keyword));
-        assert!(hl("# Title", "a.md").iter().all(|h| *h == Hl::Keyword));
-        assert!(hl("a: b", "x.css").iter().all(|h| *h != Hl::Comment), "no line comment in CSS");
+        let h: Vec<Hl> = hl(r#"{"k": "v"}"#, "x.json").remove(0);
+        assert_eq!((h[2], h[7]), (Hl::Property, Hl::Str));
+        assert!(hl("# Title", "a.md").remove(0).iter().skip(2).all(|h| *h == Hl::Keyword));
     }
 }

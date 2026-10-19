@@ -1,16 +1,26 @@
 # How lim is built
 
-No crates: the terminal is driven through a handful of libc calls (`tcsetattr`, `ioctl`, `select`, `read`,
-`signal`) or, on Windows, kernel32 console calls with VT input and output, so both send the same escape
-sequences to one key decoder. The Windows clipboard is user32. HTTPS, for the update, goes through the system:
-WinHTTP on Windows, and on Linux and macOS libcurl, loaded with `dlopen` when needed so lim does not link
-against it. Everything else is the standard library.
+The terminal is driven through a handful of libc calls (`tcsetattr`, `ioctl`, `select`, `read`, `signal`) or,
+on Windows, kernel32 console calls with VT input and output, so both send the same escape sequences to one key
+decoder.
+
+Crates do what would otherwise mean running programs, binding system libraries or writing a parser by hand:
+gix reads git repositories (`src/repo.rs`: signs, statuses, the file list, the git pickers, git browse) and
+imara-diff (through gix) diffs for gitsigns; syntect with bat's grammars (two-face) highlights, pulldown-cmark
+reads Markdown for the preview, jsonc-parser reads the config; ureq with rustls fetches the update over HTTPS;
+arboard is the system clipboard and open hands URLs and files to the default app; data-encoding,
+percent-encoding, sha2, getrandom and jiff do the encodings, hashes, random bytes and time zones.
+
+No git process runs, and nothing a repository's own `.git/config` names runs either (gix takes filter and diff
+drivers only from the user's and the system's config), so opening a folder from anywhere is safe. Programs still
+run where that is the feature: config `commands`, the shell and the `<Leader>t…` tools.
 
 ```
 src/
 ├── main.rs        startup, event loop, panic recovery
 ├── update.rs      :upgrade / <Leader>pu: the latest GitHub release's binary, swapped in
 ├── error.rs       Vim-worded errors (E32, E37, E492…)
+├── repo.rs        git through gix: index text, status, file list, log/graph, show, stashes, browse
 ├── term/          raw mode, window size, resize events, key decoding, HTTPS (sys/unix.rs, sys/windows.rs)
 ├── buffer/        lines, undo history, motions, text objects, git signs, file I/O, hex dumps
 ├── editor/        modes, operators, registers, keymaps, the built-in binding table, windows, picker,
@@ -18,8 +28,8 @@ src/
 │                  text tools, reverse-engineering commands, config commands
 │   └── tools/     the <Leader>x tools, one module each (calc, units, bases, time, color, json, case,
 │                  generated text), and their popup
-├── syntax/        keyword highlighter with multi-line state, language tables, todo-comments
-├── config/        JSON reader, key notation, options/palette/highlights/keymaps/commands
+├── syntax/        syntect highlighting with per-line state, language facts, todo-comments
+├── config/        JSON (jsonc-parser), key notation, options/palette/highlights/keymaps/commands
 └── render/        cell grid, themes and palettes, icon sets, windows, bars, floats, picker, tree, start screen
 ```
 
@@ -33,10 +43,10 @@ src/
 - **Undo** stores the lines an edit replaced, not copies of the file, and keeps 1000 steps. The same
   line-range changes move marks and jump-list anchors, so they follow the text.
 - **Completion** words are cached per buffer and re-read only when that buffer's text changed.
-- **Highlighting** state at each line start is cached and invalidated from the first edited line. A far jump
-  finds its start state with a scan that only tracks comments and strings (skipping straight to the bytes that
-  can open one) and leaves a checkpoint every 4096 lines, so it stays exact: the first `G` in a 3-million-line
-  file takes about 80 ms, later jumps well under a millisecond. Only the visible part of a long line is colored.
+- **Highlighting** is syntect with bat's grammars (two-face). The parse state at each line start and the colors
+  of each drawn line are cached, and invalidated from the first edited line, so a line is parsed once. A far jump
+  parses from 300 lines above it (Vim's `syntax sync minlines`), so a comment opened further up is missed until
+  scrolled through. Lines over 20,000 bytes are drawn plain. The grammars load on a background thread at start.
 - **Live grep** reads the project once per picker and indexes its trigrams: each key greps only the files that
   hold every trigram of the query.
 - **Hex buffers** are ordinary lines in a dump format; only the hex digits count when writing, so every Vim edit

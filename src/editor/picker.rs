@@ -1,17 +1,15 @@
 //! snacks.picker: a fuzzy finder over files, git files, text (grep), buffers, recent files,
 //! keymaps, commands and lines, with a preview.
 
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Command as Process, Output, Stdio};
-
 use super::command::Command;
 use super::{Editor, Mode};
 use crate::buffer::{Buffer, Pos, text};
 use crate::config::keys;
 use crate::term::Key;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
 /// Listing stops here so a huge tree never stalls the editor.
 const MAX_FILES: usize = 50_000;
@@ -242,30 +240,19 @@ fn list_files(all: bool) -> Vec<PathBuf> {
 }
 
 fn git_files() -> Option<Vec<PathBuf>> {
-    let out: Output = Process::new("git")
-        .args(["ls-files", "--cached", "--others", "--exclude-standard", "-z"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let text: String = String::from_utf8(out.stdout).ok()?;
-    Some(
-        text.split('\0')
-            .filter(|p| !p.is_empty() && Path::new(p).is_file())
-            .take(MAX_FILES)
-            .map(PathBuf::from)
-            .collect(),
-    )
+    Some(crate::repo::files(Path::new("."))?.into_iter().filter(|p| p.is_file()).take(MAX_FILES).collect())
+}
+
+/// A regular file small enough to grep: devices and FIFOs (the walk lists symlinks to them) would block or never end.
+fn readable(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() <= MAX_GREP_BYTES)
 }
 
 /// The text files among `files`: not too big, not binary, valid UTF-8.
 fn searchable(files: &[PathBuf]) -> Vec<(PathBuf, String)> {
     files
         .iter()
-        .filter(|path| !fs::metadata(path).is_ok_and(|m| m.len() > MAX_GREP_BYTES))
+        .filter(|path| readable(path))
         .filter_map(|path| {
             let bytes: Vec<u8> = fs::read(path).ok()?;
             if bytes.iter().take(8000).any(|&b| b == 0) {
@@ -560,7 +547,7 @@ impl Editor {
 fn todo_items(files: &[PathBuf]) -> Vec<Item> {
     let mut items: Vec<Item> = Vec::new();
     for path in files {
-        if fs::metadata(path).is_ok_and(|m| m.len() > MAX_GREP_BYTES) {
+        if !readable(path) {
             continue;
         }
         let Ok(content): io::Result<String> = fs::read_to_string(path) else { continue };
@@ -584,6 +571,14 @@ pub(super) fn file_items(files: Vec<PathBuf>) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// grep and TODO search only read regular files: a device the walk listed would never end.
+    #[cfg(unix)]
+    #[test]
+    fn devices_are_not_searched() {
+        assert!(!readable(Path::new("/dev/zero")));
+        assert!(readable(Path::new("Cargo.toml")));
+    }
 
     /// Only files holding every trigram of the folded query are grepped; short queries search them all.
     #[test]

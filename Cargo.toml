@@ -8,6 +8,23 @@ license = "MIT"
 repository = "https://github.com/Neotoxic-off/Lim"
 
 [dependencies]
+data-encoding = "2.9"
+getrandom = "0.4"
+jiff = "0.2"
+percent-encoding = "2.3"
+sha2 = "0.10"
+arboard ={ version = "3.7", default-features = false, features = ["wayland-data-control"] }
+gix = { version = "0.89", default-features = false, features = ["sha1", "status", "revision", "max-performance-safe"] }
+open = "5.4"
+ureq = { version = "3.4", default-features = false, features = ["rustls", "win-system-proxy"] }
+jsonc-parser = { version = "0.34", features = ["preserve_order"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+
+# The crates (syntect's regexes, gix) are optimized even in debug builds, so `cargo test` keeps its perf budgets.
+[profile.dev.package."*"]
+opt-level = 3
 
 [profile.release]
 opt-level = 3

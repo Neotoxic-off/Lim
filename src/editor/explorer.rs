@@ -1,15 +1,14 @@
 //! neo-tree: a file tree on the left (`<Leader>e` toggles, `<Leader>o` focuses).
 
-use std::borrow::Cow;
+use super::prompt::PromptAction;
+use super::{Editor, Mode};
+use crate::buffer::canonical;
+use crate::repo;
+use crate::term::Key;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-
-use super::prompt::PromptAction;
-use super::{Editor, Mode};
-use crate::term::Key;
 
 /// neo-tree's default window width.
 pub const WIDTH: usize = 30;
@@ -114,27 +113,19 @@ impl Explorer {
     }
 }
 
-/// `git status --porcelain` under `root`, by path relative to it.
+/// `git status` under `root`, by path relative to it.
 fn git_status(root: &Path) -> HashMap<PathBuf, GitStatus> {
-    let output: io::Result<Output> = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["status", "--porcelain", "-z", "--untracked-files=all", "--relative"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
-    let Ok(output): io::Result<Output> = output else { return HashMap::new() };
-    let text: Cow<'_, str> = String::from_utf8_lossy(&output.stdout);
-    text.split('\0')
-        .filter_map(|record| {
-            let (code, path): (&str, &str) = (record.get(..2)?, record.get(3..)?);
+    let base: PathBuf = canonical(root);
+    repo::status(root)
+        .into_iter()
+        .filter_map(|(path, code)| {
             let status: GitStatus = match code {
-                "??" => GitStatus::Untracked,
-                c if c.contains('D') => GitStatus::Deleted,
-                c if c.starts_with('A') => GitStatus::Added,
+                ['?', '?'] => GitStatus::Untracked,
+                c if c.contains(&'D') => GitStatus::Deleted,
+                ['A', _] => GitStatus::Added,
                 _ => GitStatus::Modified,
             };
-            Some((PathBuf::from(path), status))
+            Some((path.strip_prefix(&base).ok()?.to_path_buf(), status))
         })
         .collect()
 }
