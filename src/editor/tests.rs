@@ -1115,6 +1115,25 @@ fn fuzz_regressions() {
     assert_eq!(text(&ed), "é\nx");
     keys(&mut ed, ":1t.-é\n");
     assert_eq!(text(&ed), "é\nx");
+    // Seed 162: `ggVGJ` on a big document joined line by line, copying the growing line each time.
+    let mut ed: Editor = editor(&vec!["word"; 50_000].join("\n"));
+    let start: Instant = Instant::now();
+    keys(&mut ed, "ggVGJ");
+    assert!(start.elapsed().as_secs() < 1, "{:?}", start.elapsed());
+    assert_eq!((ed.buf().line_count(), ed.buf().line_len(0)), (1, 50_000 * 5 - 1));
+}
+
+#[test]
+fn join_trims_spaces_or_glues() {
+    let mut ed: Editor = editor("foo  \n  bar\n)x\n\nbaz");
+    keys(&mut ed, "5J");
+    assert_eq!((text(&ed).as_str(), ed.buf().cursor), ("foo bar)x baz", Pos::new(0, 9)), "none before ) or empty");
+    keys(&mut ed, "u");
+    assert_eq!(text(&ed), "foo  \n  bar\n)x\n\nbaz", "one undo step");
+    keys(&mut ed, "gJ");
+    assert_eq!((text(&ed).as_str(), ed.buf().cursor.col), ("foo    bar\n)x\n\nbaz", 5));
+    keys(&mut ed, "GJ");
+    assert_eq!(text(&ed), "foo    bar\n)x\n\nbaz", "nothing below the last line");
 }
 
 /// `:norm` replays keys without eating the replay budget of `.` and macros it runs.

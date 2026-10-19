@@ -519,23 +519,30 @@ impl Editor {
     /// `J` (one space between, trimmed) or `gJ` (`spaces = false`: lines glued as they are).
     pub(super) fn join(&mut self, n: usize, spaces: bool) {
         let buf: &mut Buffer = self.buf_mut();
-        for _ in 0..n.max(2) - 1 {
-            let line: usize = buf.cursor.line;
-            if line >= buf.last_line() {
-                break;
-            }
-            let (left, right): (&str, &str) = if spaces {
-                (buf.line(line).trim_end(), buf.line(line + 1).trim_start())
-            } else {
-                (buf.line(line), buf.line(line + 1))
-            };
-            let sep: &str =
-                if !spaces || left.is_empty() || right.is_empty() || right.starts_with(')') { "" } else { " " };
-            let col: usize = text::char_len(left);
-            let joined: String = format!("{left}{sep}{right}");
-            buf.splice(line..line + 2, vec![joined]);
-            buf.cursor = Pos::new(line, col);
+        let line: usize = buf.cursor.line;
+        let last: usize = (line + n.max(2) - 1).min(buf.last_line());
+        if last == line {
+            return;
         }
+        // One pass and one splice: joining a whole file line by line would copy the growing line each time.
+        let mut joined: String = buf.line(line).to_owned();
+        let (mut chars, mut col): (usize, usize) = (text::char_len(&joined), 0);
+        for l in line + 1..=last {
+            let right: &str = if spaces { buf.line(l).trim_start() } else { buf.line(l) };
+            if spaces {
+                let kept: usize = joined.trim_end().len();
+                chars -= text::char_len(&joined[kept..]);
+                joined.truncate(kept);
+            }
+            let sep: &str =
+                if !spaces || joined.is_empty() || right.is_empty() || right.starts_with(')') { "" } else { " " };
+            col = chars;
+            joined.push_str(sep);
+            joined.push_str(right);
+            chars += sep.len() + text::char_len(right);
+        }
+        buf.splice(line..last + 1, vec![joined]);
+        buf.cursor = Pos::new(line, col);
     }
 
     fn toggle_case(&mut self, n: usize) {
