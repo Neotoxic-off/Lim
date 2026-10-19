@@ -159,11 +159,14 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
     let Pos { line, col }: Pos = buf.cursor;
     let cwd: Style = t.style(Group::StatusCwd);
     let position: Style = t.style(Group::StatusPosition);
+    // The mode's grey step, mirrored: each colored block on the right rises from its own.
     right.extend([
-        (Style::new(cwd.bg, fill.bg), left_cap.into()),
+        (Style::new(step, fill.bg), left_cap.into()),
+        (Style::new(cwd.bg, step), left_cap.into()),
         (cwd, format!("{} ", if set.cwd.is_empty() { "" } else { set.cwd })),
         (section, format!(" {} ", ctx.cwd)),
-        (Style::new(position.bg, section.bg), left_cap.into()),
+        (Style::new(step, section.bg), left_cap.into()),
+        (Style::new(position.bg, step), left_cap.into()),
         (position, format!("{} ", if set.position.is_empty() { "" } else { set.position })),
         // NvChad's `%l/%v`, in the position's color.
         (Style { fg: position.bg, ..section }, format!(" {}/{} ", line + 1, col + 1)),
