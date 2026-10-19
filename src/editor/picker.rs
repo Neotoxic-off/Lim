@@ -336,58 +336,10 @@ impl Corpus {
 }
 
 impl Editor {
+    /// The `<Leader>f…` pickers: lists what `kind` picks from, filtered as you type.
     pub(super) fn open_picker(&mut self, kind: PickerKind) {
-        let items: Vec<Item> = match kind {
-            PickerKind::Files { all } => file_items(list_files(all)),
-            PickerKind::GitFiles => match git_files() {
-                Some(files) => file_items(files),
-                None => return self.info("Not a git repository"),
-            },
-            PickerKind::Grep { .. } => Vec::new(),
-            PickerKind::Buffers => self
-                .buffers
-                .iter()
-                .enumerate()
-                .map(|(i, b)| Item {
-                    label: b.path.as_ref().map_or_else(|| b.name(), |p| p.display().to_string()),
-                    target: Target::Buffer(i),
-                })
-                .collect(),
-            PickerKind::Recent => file_items(self.recent.iter().filter(|p| p.is_file()).cloned().collect()),
-            PickerKind::Keymaps => self.keymap_items(),
-            PickerKind::Commands => super::command::COMMANDS
-                .iter()
-                .copied()
-                .chain(self.config.commands.iter().map(|c| (c.name.as_str(), c.desc.as_str())))
-                .map(|(cmd, desc)| Item { label: format!("{cmd:<12}{desc}"), target: Target::Command(cmd.to_owned()) })
-                .collect(),
-            PickerKind::Lines => self
-                .buf()
-                .lines()
-                .iter()
-                .enumerate()
-                .filter(|(_, l)| !l.trim().is_empty())
-                .map(|(y, l)| Item { label: format!("{:>5}  {}", y + 1, l.trim()), target: Target::Line(y) })
-                .collect(),
-            PickerKind::Smart => {
-                let mut seen: HashSet<PathBuf> = HashSet::new();
-                let open = self.buffers.iter().filter_map(|b| b.path.clone());
-                let recent = self.recent.iter().filter(|p| p.is_file()).cloned();
-                let cwd: PathBuf = std::env::current_dir().unwrap_or_default();
-                let all: Vec<PathBuf> = open
-                    .chain(recent)
-                    .map(|p| p.strip_prefix(&cwd).map(Path::to_path_buf).unwrap_or(p))
-                    .chain(list_files(false))
-                    .filter(|p| seen.insert(p.clone()))
-                    .collect();
-                file_items(all)
-            }
-            PickerKind::Todos => todo_items(&list_files(false)),
-            other => match self.extra_items(other) {
-                Some(items) => items,
-                None => return,
-            },
-        };
+        let Some(items): Option<Vec<Item>> = self.picker_items(kind) else { return };
+        // Live grep searches as you type: it starts with the files, not with items.
         let files: Vec<PathBuf> = match kind {
             PickerKind::Grep { all } => list_files(all),
             _ => Vec::new(),
@@ -408,6 +360,67 @@ impl Editor {
         self.picker = Some(picker);
         self.mode = Mode::Picker;
         self.selection_changed();
+    }
+
+    /// What picker `kind` lists; None when it cannot open (outside a git repository, for the git files).
+    fn picker_items(&mut self, kind: PickerKind) -> Option<Vec<Item>> {
+        Some(match kind {
+            PickerKind::Files { all } => file_items(list_files(all)),
+            PickerKind::GitFiles => {
+                let Some(files): Option<Vec<PathBuf>> = git_files() else {
+                    self.info("Not a git repository");
+                    return None;
+                };
+                file_items(files)
+            }
+            PickerKind::Grep { .. } => Vec::new(),
+            PickerKind::Buffers => self.buffer_items(),
+            PickerKind::Recent => file_items(self.recent.iter().filter(|p| p.is_file()).cloned().collect()),
+            PickerKind::Keymaps => self.keymap_items(),
+            PickerKind::Commands => self.command_items(),
+            PickerKind::Lines => self.line_items(),
+            PickerKind::Smart => self.smart_items(),
+            PickerKind::Todos => todo_items(&list_files(false)),
+            other => self.extra_items(other)?,
+        })
+    }
+
+    /// The open buffers, by path (or name for an unnamed one).
+    fn buffer_items(&self) -> Vec<Item> {
+        let label = |b: &Buffer| b.path.as_ref().map_or_else(|| b.name(), |p| p.display().to_string());
+        self.buffers.iter().enumerate().map(|(i, b)| Item { label: label(b), target: Target::Buffer(i) }).collect()
+    }
+
+    /// The Ex commands lim knows, then the config's own, each with what it does.
+    fn command_items(&self) -> Vec<Item> {
+        let own = self.config.commands.iter().map(|c| (c.name.as_str(), c.desc.as_str()));
+        super::command::COMMANDS
+            .iter()
+            .copied()
+            .chain(own)
+            .map(|(cmd, desc)| Item { label: format!("{cmd:<12}{desc}"), target: Target::Command(cmd.to_owned()) })
+            .collect()
+    }
+
+    /// The current buffer's lines that are not blank, numbered.
+    fn line_items(&self) -> Vec<Item> {
+        let lines = self.buf().lines().iter().enumerate().filter(|(_, l)| !l.trim().is_empty());
+        lines.map(|(y, l)| Item { label: format!("{:>5}  {}", y + 1, l.trim()), target: Target::Line(y) }).collect()
+    }
+
+    /// snacks' smart picker: open buffers, then recent files, then the project's, each file once.
+    fn smart_items(&self) -> Vec<Item> {
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        let open = self.buffers.iter().filter_map(|b| b.path.clone());
+        let recent = self.recent.iter().filter(|p| p.is_file()).cloned();
+        let cwd: PathBuf = std::env::current_dir().unwrap_or_default();
+        let all: Vec<PathBuf> = open
+            .chain(recent)
+            .map(|p| p.strip_prefix(&cwd).map(Path::to_path_buf).unwrap_or(p))
+            .chain(list_files(false))
+            .filter(|p| seen.insert(p.clone()))
+            .collect();
+        file_items(all)
     }
 
     /// `<Leader>fc`: grep for the word under the cursor.
