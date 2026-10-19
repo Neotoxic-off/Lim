@@ -19,11 +19,12 @@ pub use theme::Theme;
 use theme::install;
 mod view;
 
+use std::env;
 use std::fmt::{self, Write};
-use std::io;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::{env, fs};
 
 use crate::buffer::{Buffer, text};
 use crate::config::Options;
@@ -83,7 +84,7 @@ impl Context {
 
 fn git_branch(mut dir: PathBuf) -> Option<String> {
     loop {
-        if let Ok(head) = fs::read_to_string(dir.join(".git/HEAD")) {
+        if let Some(head) = read_head(&dir.join(".git/HEAD")) {
             let head: &str = head.trim();
             return Some(
                 head.strip_prefix("ref: refs/heads/").map_or_else(|| head.chars().take(7).collect(), str::to_owned),
@@ -93,6 +94,22 @@ fn git_branch(mut dir: PathBuf) -> Option<String> {
             return None;
         }
     }
+}
+
+/// The start of a `HEAD` file. Any parent folder can hold one (`/tmp/.git`, an unpacked archive), so a FIFO or
+/// device there, which would block or never end, is skipped, and the read is bounded.
+/// It runs every frame: the path is only checked first on Unix, where opening a FIFO blocks.
+fn read_head(path: &Path) -> Option<String> {
+    if cfg!(unix) && !fs::metadata(path).is_ok_and(|m| m.is_file()) {
+        return None;
+    }
+    let file: File = File::open(path).ok()?;
+    if !file.metadata().is_ok_and(|m| m.is_file()) {
+        return None;
+    }
+    let mut head: String = String::new();
+    file.take(256).read_to_string(&mut head).ok()?;
+    Some(head)
 }
 
 /// A tool's popup, border included: room for a few questions and answers, not a window's worth.
@@ -377,6 +394,20 @@ mod tests {
     use super::*;
     use crate::buffer::Buffer;
     use crate::term::Key;
+
+    /// The branch comes from the nearest parent's `.git/HEAD`; a device there (it would never end) is skipped.
+    #[cfg(unix)]
+    #[test]
+    fn branch_skips_a_device_head() {
+        let dir: PathBuf = env::temp_dir().join(format!("lim-head-{}", std::process::id()));
+        let _: io::Result<()> = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("outer/.git")).unwrap();
+        fs::create_dir_all(dir.join("outer/inner/.git")).unwrap();
+        fs::write(dir.join("outer/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::os::unix::fs::symlink("/dev/zero", dir.join("outer/inner/.git/HEAD")).unwrap();
+        assert_eq!(git_branch(dir.join("outer/inner")), Some("main".into()));
+        let _: io::Result<()> = fs::remove_dir_all(&dir);
+    }
 
     /// Every mode and odd sizes render without panicking.
     #[test]

@@ -46,8 +46,11 @@ impl Row {
 
     /// Draws `c` over as many cells as it takes; a wide char that does not fit becomes padding.
     pub fn cell(&mut self, style: Style, c: char) {
-        // File contents must never reach the terminal as control sequences.
-        let c: char = if c.is_control() { '?' } else { c };
+        // File contents must never reach the terminal as control sequences, nor as bidi controls that make a terminal
+        // reorder the text (shown text differing from the file: "Trojan Source").
+        let bidi: bool =
+            matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
+        let c: char = if c.is_control() || bidi { '?' } else { c };
         match text::char_width(c) {
             0 => {
                 if let Some(last) = self.cells.iter_mut().rev().find(|c| !c.wide_tail) {
@@ -276,6 +279,9 @@ mod tests {
         let mut row: Row = Row::new(4);
         row.text(style, "a\x1b[2Jbcdef");
         assert_eq!(encode(&row.finish(style), ColorDepth::Ansi256), "\x1b[0;38;5;231;48;5;16ma?[2");
+        let mut row: Row = Row::new(4);
+        row.text(style, "a\u{202e}b\u{200f}");
+        assert_eq!(encode(&row.finish(style), ColorDepth::Ansi256), "\x1b[0;38;5;231;48;5;16ma?b?", "bidi controls");
         let mut row: Row = Row::new(4);
         row.text(style, "a日本"); // 本 needs 2 cells, 1 is left: padded instead
         let cells: Vec<Cell> = row.finish(style);

@@ -1,6 +1,6 @@
 # Development
 
-Rust 1.88+, no dependencies. The code layout and design are in [How lim is built](architecture.md).
+Rust 1.88+; the crates are listed in `Cargo.toml` (gix, syntect + two-face, pulldown-cmark, jsonc-parser, ureq, arboard, open and small encoders). The code layout and design are in [How lim is built](architecture.md).
 
 ```sh
 cargo test                     # 160+ tests: behaviour, fuzzers on every input, perf budgets

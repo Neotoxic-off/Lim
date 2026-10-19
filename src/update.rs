@@ -1,17 +1,38 @@
 //! `:upgrade` / `<Leader>pu`: asks GitHub for the latest release and, when it is newer, downloads the binary built
-//! for this platform and puts it in place of this one. HTTPS goes through the system (`WinHTTP`, libcurl), in process.
+//! for this platform and puts it in place of this one. HTTPS goes through ureq and rustls, in process.
 
 use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::time::Duration;
 use std::{env, iter};
 
 use crate::config::json::{self, Json};
-use crate::term::https_get;
 
 const LATEST: &str = "https://api.github.com/repos/Neotoxic-off/Lim/releases/latest";
 const DOWNLOAD: &str = "https://github.com/Neotoxic-off/Lim/releases/download";
+/// A release binary is a few MB; anything far bigger is not one.
+const MAX_BODY: u64 = 64 * 1024 * 1024;
+
+/// The body of `url`, over HTTPS only (redirects too), with the proxy from the environment or Windows' settings.
+/// Any status but 200 is an error (`HTTP 404`).
+fn https_get(url: &str) -> Result<Vec<u8>, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .https_only(true)
+        .http_status_as_error(false)
+        .user_agent("lim")
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_global(Some(Duration::from_secs(300)))
+        .build()
+        .into();
+    let mut response: ureq::http::Response<ureq::Body> = agent.get(url).call().map_err(|e| e.to_string())?;
+    let status: u16 = response.status().as_u16();
+    if status != 200 {
+        return Err(format!("HTTP {status}"));
+    }
+    response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(|e| e.to_string())
+}
 
 /// Runs on a background thread while editing goes on; what it returns becomes a notification.
 pub fn run() -> Result<String, String> {

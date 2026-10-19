@@ -1,8 +1,11 @@
 //! snacks.picker's default layout: input and list on the left, preview on the right.
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
+
+use syntect::parsing::SyntaxReference;
 
 use super::Theme;
 use super::row::{Cell, Grid, Row};
@@ -10,7 +13,7 @@ use super::theme::{Group, Rgb, Style, theme};
 use crate::buffer::{Buffer, text};
 use crate::editor::{Editor, Item, Picker, Rect, Target};
 use crate::render::icons::Icons;
-use crate::syntax::{self, State};
+use crate::syntax;
 
 /// Previews read at most this much of a file.
 const MAX_PREVIEW_BYTES: usize = 256 * 1024;
@@ -142,12 +145,14 @@ fn preview(ed: &Editor, grid: &mut Grid, area: Rect, fill: Style, border: Style)
     grid.float(area, border, fill, &shown.title);
     let rows: usize = area.h.saturating_sub(2);
     let first: usize = shown.focus.saturating_sub(rows / 3);
-    let lang: Option<&syntax::Lang> = shown.path.and_then(syntax::lang_for);
+    let grammar: Option<&SyntaxReference> = shown.path.and_then(syntax::grammar_for);
+    let mut cache: syntax::Cache = syntax::Cache::default();
     let number_width: usize = (first + rows).to_string().len();
     for (r, line) in shown.lines.iter().enumerate().skip(first).take(rows) {
         // The item's own line stands out, unless it is the first (a file opened at its top).
         let focused: bool = r == shown.focus && shown.focus > 0;
-        let row: Vec<Cell> = code_row(line, r + 1, number_width, lang, focused, fill, area.w - 2);
+        let groups: Option<Vec<syntax::Hl>> = grammar.map(|g| cache.line(&shown.lines, g, r, area.w));
+        let row: Vec<Cell> = code_row(line, r + 1, number_width, groups.as_deref(), focused, fill, area.w - 2);
         grid.put(area.x + 1, area.y + 1 + r - first, &row);
     }
 }
@@ -189,19 +194,26 @@ fn of_buffer(title: String, buf: &Buffer, focus: usize) -> Shown<'_> {
 
 /// The start of a text file, at most `MAX_PREVIEW_BYTES`; nothing for a binary one.
 fn read_preview(path: &Path) -> Vec<String> {
-    let Some(mut bytes): Option<Vec<u8>> = fs::read(path).ok().filter(|b| !b.iter().take(8000).any(|&c| c == 0)) else {
+    // Devices and FIFOs (a symlink in the project can point at one) would block or never end.
+    if !fs::metadata(path).is_ok_and(|m| m.is_file()) {
         return Vec::new();
-    };
-    bytes.truncate(MAX_PREVIEW_BYTES);
+    }
+    let mut bytes: Vec<u8> = Vec::new();
+    let limit: u64 = u64::try_from(MAX_PREVIEW_BYTES).unwrap_or(u64::MAX);
+    if File::open(path).and_then(|f| f.take(limit).read_to_end(&mut bytes)).is_err()
+        || bytes.iter().take(8000).any(|&c| c == 0)
+    {
+        return Vec::new();
+    }
     String::from_utf8_lossy(&bytes).lines().map(str::to_owned).collect()
 }
 
-/// A line of code with its number, highlighted for `lang`, tabs expanded.
+/// A line of code with its number, colored by `groups` (one per char), tabs expanded.
 fn code_row(
     line: &str,
     number: usize,
     number_width: usize,
-    lang: Option<&syntax::Lang>,
+    groups: Option<&[syntax::Hl]>,
     focused: bool,
     fill: Style,
     width: usize,
@@ -211,11 +223,9 @@ fn code_row(
     let plain: Style = Style { bg, ..fill };
     let mut row: Row = Row::new(width);
     row.text(t.on(Group::LineNr, bg), &format!("{number:>number_width$} "));
-    let chars: Vec<char> = line.chars().collect();
-    let groups: Option<Vec<syntax::Hl>> = lang.map(|l| syntax::highlight(&chars, l, State::default()).0);
     let mut col: usize = 0;
-    for (i, &c) in chars.iter().enumerate() {
-        let style: Style = groups.as_ref().and_then(|g| g.get(i)).map_or(plain, |&g| t.syntax(g, bg));
+    for (i, c) in line.chars().enumerate() {
+        let style: Style = groups.and_then(|g| g.get(i)).map_or(plain, |&g| t.syntax(g, bg));
         if c == '\t' {
             for _ in 0..text::tab_cells(col) {
                 row.cell(style, ' ');
@@ -235,6 +245,17 @@ mod tests {
     use crate::render::Screen;
     use crate::render::row::Cell;
     use crate::term::{ColorDepth, Key};
+
+    /// A preview reads a bounded start of a regular file, and nothing from a device (it would never end).
+    #[cfg(unix)]
+    #[test]
+    fn previews_skip_devices() {
+        assert_eq!(read_preview(Path::new("/dev/zero")), Vec::<String>::new());
+        let path: std::path::PathBuf = std::env::temp_dir().join(format!("lim-preview-{}", std::process::id()));
+        fs::write(&path, "x\n".repeat(MAX_PREVIEW_BYTES)).unwrap();
+        assert_eq!(read_preview(&path).len(), MAX_PREVIEW_BYTES / 2);
+        let _: std::io::Result<()> = fs::remove_file(&path);
+    }
 
     /// The theme picker shows its sample code, highlighted, even over an empty buffer.
     #[test]

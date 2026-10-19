@@ -2,22 +2,18 @@
 //! working directory, notifications, registers, marks, colorschemes, icon sets and sessions.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
 
 use super::picker::{Item, PickerKind, Preview, Target, file_items};
 use super::{Editor, Message, Mode, Picker, session};
-use crate::buffer::{Buffer, Pos};
+use crate::buffer::{Buffer, Pos, canonical};
+use crate::repo;
 
 /// Git log entries listed at most.
-const MAX_COMMITS: &str = "500";
+const MAX_COMMITS: usize = 500;
 
-fn git(args: &[&str]) -> Option<String> {
-    let out: Output = Command::new("git").args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-fn lines_of(output: &str) -> impl Iterator<Item = &str> {
-    output.lines().filter(|l| !l.trim().is_empty())
+/// The git pickers work on the repository of the working directory.
+fn here() -> &'static Path {
+    Path::new(".")
 }
 
 impl Editor {
@@ -26,61 +22,40 @@ impl Editor {
     pub(super) fn extra_items(&mut self, kind: PickerKind) -> Option<Vec<Item>> {
         let items: Vec<Item> = match kind {
             PickerKind::GitGraph => {
-                let out: String = git(&[
-                    "log",
-                    "--graph",
-                    "--all",
-                    "--decorate",
-                    "--date-order",
-                    "--date=short",
-                    "--pretty=format:%h %ad %d %s",
-                    "-n",
-                    MAX_COMMITS,
-                ])?;
+                let commits: Vec<repo::Commit> = repo::log(here(), true, None, MAX_COMMITS)?;
                 // Lines with a commit open it; the ones that only draw the graph do nothing.
-                lines_of(&out)
+                repo::graph(&commits)
+                    .into_iter()
                     .map(|l| {
                         let hash: &str = l.trim_start_matches(|c: char| "*|/\\_ .-".contains(c));
                         let hash: &str = hash.split(' ').next().unwrap_or_default();
                         let is_commit: bool = hash.len() >= 7 && hash.bytes().all(|b| b.is_ascii_hexdigit());
                         let target: Target = if is_commit { Target::Commit(hash.to_owned()) } else { Target::Nothing };
-                        Item { label: l.to_owned(), target }
+                        Item { label: l, target }
                     })
                     .collect()
             }
             PickerKind::GitLog { file } => {
-                let mut args: Vec<&str> = vec!["log", "--date=short", "--pretty=format:%h %ad %s", "-n", MAX_COMMITS];
-                let path: Option<String> = self.buf().path.as_ref().map(|p| p.display().to_string());
-                if file {
-                    args.push("--");
-                    args.push(path.as_deref()?);
-                }
-                let out: String = git(&args)?;
-                lines_of(&out)
-                    .map(|l| Item {
-                        label: l.to_owned(),
-                        target: Target::Commit(l.split(' ').next().unwrap_or_default().to_owned()),
-                    })
+                let path: Option<PathBuf> = if file { Some(self.buf().path.clone()?) } else { None };
+                repo::log(here(), false, path.as_deref(), MAX_COMMITS)?
+                    .into_iter()
+                    .map(|c| Item { target: Target::Commit(c.hash()), label: c.line })
                     .collect()
             }
             PickerKind::GitStatus => {
-                let out: String = git(&["status", "--porcelain", "--untracked-files=all"])?;
-                lines_of(&out)
-                    .filter_map(|l| {
-                        let path: String = l.get(3..)?.rsplit(" -> ").next()?.to_owned();
-                        Some(Item { label: l.to_owned(), target: Target::File(PathBuf::from(path), None) })
+                let cwd: PathBuf = canonical(here());
+                repo::status(here())
+                    .into_iter()
+                    .map(|(path, [x, y])| {
+                        let path: PathBuf = path.strip_prefix(&cwd).map_or_else(|_| path.clone(), Path::to_path_buf);
+                        Item { label: format!("{x}{y} {}", path.display()), target: Target::File(path, None) }
                     })
                     .collect()
             }
-            PickerKind::GitStash => {
-                let out: String = git(&["stash", "list"])?;
-                lines_of(&out)
-                    .map(|l| Item {
-                        label: l.to_owned(),
-                        target: Target::Stash(l.split(':').next().unwrap_or_default().to_owned()),
-                    })
-                    .collect()
-            }
+            PickerKind::GitStash => repo::stashes(here())
+                .into_iter()
+                .map(|(name, label)| Item { label, target: Target::Stash(name) })
+                .collect(),
             PickerKind::ConfigFiles => {
                 let path: PathBuf = crate::config::path()?;
                 let mut items: Vec<Item> = file_items(vec![path.clone()]);
@@ -162,10 +137,8 @@ impl Editor {
         let Some(picker): &mut Option<Picker> = &mut self.picker else { return };
         let target: Option<Target> = picker.selected_item().map(|i| i.target.clone());
         let preview: Option<(String, String)> = match &target {
-            Some(Target::Commit(hash)) => {
-                git(&["show", "--stat", "--patch", hash]).map(|o| (format!("commit {hash}"), o))
-            }
-            Some(Target::Stash(name)) => git(&["stash", "show", "-p", name]).map(|o| (name.clone(), o)),
+            Some(Target::Commit(hash)) => repo::show(here(), hash, true, true).map(|o| (format!("commit {hash}"), o)),
+            Some(Target::Stash(name)) => repo::show(here(), name, false, false).map(|o| (name.clone(), o)),
             _ => None,
         };
         picker.preview =
@@ -177,8 +150,10 @@ impl Editor {
 
     pub(super) fn accept_extra(&mut self, target: Target) {
         match target {
-            Target::Commit(hash) => self.show_scratch(&format!("commit {hash}"), git(&["show", &hash])),
-            Target::Stash(name) => self.show_scratch(&name, git(&["stash", "show", "-p", &name])),
+            Target::Commit(hash) => {
+                self.show_scratch(&format!("commit {hash}"), repo::show(here(), &hash, true, false));
+            }
+            Target::Stash(name) => self.show_scratch(&name, repo::show(here(), &name, false, false)),
             Target::Session { name, dir, delete: false } => self.load_session(&name, dir),
             Target::Session { name, dir, delete: true } => self.delete_session(&name, dir),
             Target::Theme(name) => self.set_colorscheme(&name, true),

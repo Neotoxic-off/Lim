@@ -1,9 +1,9 @@
 //! Raw libc bindings for termios, window size, select, read and SIGWINCH.
 //! Layouts are the 64-bit little-endian Linux (glibc/musl) and macOS ABIs.
 
-use std::ffi::{CStr, CString, c_char, c_long, c_void};
+use std::ffi::c_void;
 use std::io;
-use std::mem::{self, MaybeUninit};
+use std::mem::MaybeUninit;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -180,162 +180,7 @@ pub fn take_resized() -> bool {
     RESIZED.swap(false, Ordering::Relaxed)
 }
 
-/// `struct tm` as glibc and macOS lay it out (`tm_gmtoff` and `tm_zone` follow the POSIX fields).
-#[repr(C)]
-struct Tm {
-    sec: i32,
-    min: i32,
-    hour: i32,
-    mday: i32,
-    mon: i32,
-    year: i32,
-    wday: i32,
-    yday: i32,
-    isdst: i32,
-    gmtoff: i64,
-    zone: *const u8,
-}
-
-unsafe extern "C" {
-    fn tzset();
-    fn localtime_r(time: *const i64, result: *mut Tm) -> *mut Tm;
-}
-
-/// Seconds the local time zone is ahead of UTC at unix time `ts` (daylight saving included).
-pub fn utc_offset(ts: i64) -> i64 {
-    let mut tm: Tm = Tm {
-        sec: 0,
-        min: 0,
-        hour: 0,
-        mday: 0,
-        mon: 0,
-        year: 0,
-        wday: 0,
-        yday: 0,
-        isdst: 0,
-        gmtoff: 0,
-        zone: ptr::null(),
-    };
-    let done: *mut Tm = unsafe {
-        tzset();
-        localtime_r(&raw const ts, &raw mut tm)
-    };
-    if done.is_null() { 0 } else { tm.gmtoff }
-}
-
-const RTLD_NOW: i32 = 2;
-const CURLOPT_URL: i32 = 10_002;
-const CURLOPT_WRITEDATA: i32 = 10_001;
-const CURLOPT_USERAGENT: i32 = 10_018;
-const CURLOPT_WRITEFUNCTION: i32 = 20_011;
-const CURLOPT_FOLLOWLOCATION: i32 = 52;
-const CURLOPT_NOSIGNAL: i32 = 99;
-const CURLOPT_CONNECTTIMEOUT: i32 = 78;
-const CURLOPT_LOW_SPEED_LIMIT: i32 = 19;
-const CURLOPT_LOW_SPEED_TIME: i32 = 20;
-const CURLINFO_RESPONSE_CODE: i32 = 0x0020_0002;
-
-/// Where libcurl lives: macOS ships it, and Linux has it wherever `curl` is installed.
-const LIBCURL: &[&CStr] = if cfg!(target_os = "macos") {
-    &[c"/usr/lib/libcurl.4.dylib"]
-} else {
-    &[c"libcurl.so.4", c"libcurl-gnutls.so.4", c"libcurl.so"]
-};
-
-#[cfg_attr(target_os = "linux", link(name = "dl"))]
-unsafe extern "C" {
-    fn dlopen(file: *const c_char, mode: i32) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
-}
-
-type Easy = *mut c_void;
-type Sink = extern "C" fn(*const u8, usize, usize, *mut c_void) -> usize;
-
-/// The handful of libcurl calls a GET needs, looked up at run time so lim does not link against it.
-struct Curl {
-    init: unsafe extern "C" fn() -> Easy,
-    setopt: unsafe extern "C" fn(Easy, i32, ...) -> i32,
-    perform: unsafe extern "C" fn(Easy) -> i32,
-    getinfo: unsafe extern "C" fn(Easy, i32, ...) -> i32,
-    strerror: unsafe extern "C" fn(i32) -> *const c_char,
-    cleanup: unsafe extern "C" fn(Easy),
-}
-
-/// # Safety
-/// `T` must be the function pointer type of the C function `name`.
-unsafe fn symbol<T: Copy>(lib: *mut c_void, name: &CStr) -> Option<T> {
-    let found: *mut c_void = unsafe { dlsym(lib, name.as_ptr()) };
-    (!found.is_null()).then(|| unsafe { mem::transmute_copy::<*mut c_void, T>(&found) })
-}
-
-fn libcurl() -> Option<Curl> {
-    let lib: *mut c_void =
-        LIBCURL.iter().map(|path| unsafe { dlopen(path.as_ptr(), RTLD_NOW) }).find(|lib| !lib.is_null())?;
-    // SAFETY: each type below is the signature libcurl documents for that function.
-    unsafe {
-        Some(Curl {
-            init: symbol(lib, c"curl_easy_init")?,
-            setopt: symbol(lib, c"curl_easy_setopt")?,
-            perform: symbol(lib, c"curl_easy_perform")?,
-            getinfo: symbol(lib, c"curl_easy_getinfo")?,
-            strerror: symbol(lib, c"curl_easy_strerror")?,
-            cleanup: symbol(lib, c"curl_easy_cleanup")?,
-        })
-    }
-}
-
-extern "C" fn collect(data: *const u8, size: usize, count: usize, body: *mut c_void) -> usize {
-    let len: usize = size.saturating_mul(count);
-    // SAFETY: `body` is the `Vec` handed to CURLOPT_WRITEDATA, and `data` holds `len` bytes.
-    unsafe { (*body.cast::<Vec<u8>>()).extend_from_slice(std::slice::from_raw_parts(data, len)) };
-    len
-}
-
-/// The body of `url`, through the system's libcurl (its TLS and certificates), redirects followed, in this
-/// process. Any status but 200 is an error (`HTTP 404`).
-pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
-    let curl: Curl = libcurl().ok_or("libcurl not found (install curl)")?;
-    let url: CString = CString::new(url).map_err(|e| e.to_string())?;
-    let easy: Easy = unsafe { (curl.init)() };
-    if easy.is_null() {
-        return Err("curl_easy_init failed".into());
-    }
-    let mut body: Vec<u8> = Vec::new();
-    let mut status: c_long = 0;
-    let sink: Sink = collect;
-    let code: i32 = unsafe {
-        (curl.setopt)(easy, CURLOPT_URL, url.as_ptr());
-        (curl.setopt)(easy, CURLOPT_USERAGENT, c"lim".as_ptr());
-        (curl.setopt)(easy, CURLOPT_FOLLOWLOCATION, c_long::from(1u8));
-        (curl.setopt)(easy, CURLOPT_NOSIGNAL, c_long::from(1u8));
-        (curl.setopt)(easy, CURLOPT_CONNECTTIMEOUT, c_long::from(30u8));
-        // Give up when under 1 byte/s for a minute, however long the whole download takes.
-        (curl.setopt)(easy, CURLOPT_LOW_SPEED_LIMIT, c_long::from(1u8));
-        (curl.setopt)(easy, CURLOPT_LOW_SPEED_TIME, c_long::from(60u8));
-        (curl.setopt)(easy, CURLOPT_WRITEFUNCTION, sink);
-        (curl.setopt)(easy, CURLOPT_WRITEDATA, (&raw mut body).cast::<c_void>());
-        let code: i32 = (curl.perform)(easy);
-        (curl.getinfo)(easy, CURLINFO_RESPONSE_CODE, &raw mut status);
-        (curl.cleanup)(easy);
-        code
-    };
-    if code != 0 {
-        let why: *const c_char = unsafe { (curl.strerror)(code) };
-        let why: String = if why.is_null() {
-            format!("curl error {code}")
-        } else {
-            unsafe { CStr::from_ptr(why) }.to_string_lossy().into()
-        };
-        return Err(why);
-    }
-    if status != 200 {
-        return Err(format!("HTTP {status}"));
-    }
-    Ok(body)
-}
-
-/// Fills `buf` from the kernel's random source; false if it cannot be read.
-pub fn random(buf: &mut [u8]) -> bool {
-    use std::io::Read;
-    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(buf)).is_ok()
+/// Files `options` creates are readable by their owner only (0600).
+pub fn owner_only(options: &mut std::fs::OpenOptions) {
+    std::os::unix::fs::OpenOptionsExt::mode(options, 0o600);
 }

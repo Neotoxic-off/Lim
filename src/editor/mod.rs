@@ -497,7 +497,12 @@ impl Editor {
             if buf.is_dirty() {
                 let name: String =
                     buf.name().chars().map(|c| if c.is_alphanumeric() || c == '.' { c } else { '_' }).collect();
-                let path: PathBuf = std::env::temp_dir().join(format!("lim-recover-{}-{i}-{name}", std::process::id()));
+                // A random part, so another user of a shared temp folder cannot take the name first.
+                let mut salt: [u8; 8] = [0; 8];
+                let _: Result<(), getrandom::Error> = getrandom::fill(&mut salt);
+                let salt: u64 = u64::from_le_bytes(salt);
+                let path: PathBuf =
+                    std::env::temp_dir().join(format!("lim-recover-{}-{i}-{salt:016x}-{name}", std::process::id()));
                 if buf.write_copy(&path).is_ok() {
                     backups.push(path.display().to_string());
                 }

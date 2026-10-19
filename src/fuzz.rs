@@ -15,7 +15,7 @@ use crate::config::{Config, json, keys};
 use crate::editor::Editor;
 use crate::editor::tools::{self, Tool, WordCase};
 use crate::render::{Screen, markdown};
-use crate::syntax::{self, Lang, State};
+use crate::syntax;
 use crate::term::{ColorDepth, Key, Mouse, MouseKind, Size};
 
 /// A tiny deterministic generator (PCG-style), so a failing seed replays exactly.
@@ -504,32 +504,38 @@ fn markdown_and_highlighting_survive_any_document() {
     });
 }
 
-/// The region-only scan that far jumps use agrees with the full highlighter, line after line.
+/// Delimiter soup through every kind of grammar: one group per char, through edits that drop cached states.
 #[test]
-fn highlighter_end_states_agree() {
+fn highlighter_survives_any_lines() {
     let pieces: &[&str] = &[
         "/*", "*/", "//", "--", "--[[", "[[", "]]", "\"\"\"", "'''", "=begin", "=end", "=pod", "=cut", "<#", "#>",
-        "{-", "-}", "<!--", "-->", "```", "#", ";", "::", "x", "1.5", " ",
+        "{-", "-}", "<!--", "-->", "```", "#", ";", "::", "x", "1.5", " ", "\"", "'", "\\", "${", "}", "<a", ">",
     ];
     let names: [&str; 16] = [
-        "x.rs", "x.lua", "x.py", "x.rb", "x.pl", "x.ps1", "x.md", "x.hs", "x.js", "x.c", "x.html", "x.go", "x.sql",
-        "x.sh", "x.lisp", "x.bat",
+        "x.rs", "x.lua", "x.py", "x.rb", "x.pl", "x.yaml", "x.md", "x.hs", "x.js", "x.c", "x.html", "x.go", "x.sql",
+        "x.sh", "x.json", "x.bat",
     ];
-    fuzz("end-state", 600, |rng, log| {
+    fuzz("highlight", 300, |rng, log| {
         let name: &str = rng.pick::<&str>(&names);
-        let Some(lang): Option<&Lang> = syntax::lang_for(Path::new(name)) else { return Ok(()) };
-        let mut state: State = State::default();
-        for _ in 0..6 {
-            let line: String = (0..rng.below(16))
-                .map(|_| if rng.chance(50) { *rng.pick(pieces) } else { *rng.pick(UNICODE) })
-                .collect();
-            log.push(format!("{line:?}"));
-            let chars: Vec<char> = line.chars().collect();
-            let want: State = syntax::highlight(&chars, lang, state).1;
-            if syntax::fast_end_state(&line, lang, state) != want {
-                return Err(format!("{name}: {line:?}"));
+        let Some(grammar) = syntax::grammar_for(Path::new(name)) else { return Err(format!("no grammar for {name}")) };
+        let mut lines: Vec<String> = (0..=rng.below(8))
+            .map(|_| {
+                (0..rng.below(16))
+                    .map(|_| if rng.chance(50) { *rng.pick(pieces) } else { *rng.pick(UNICODE) })
+                    .collect()
+            })
+            .collect();
+        log.push(format!("{name}: {lines:?}"));
+        let mut cache: syntax::Cache = syntax::Cache::default();
+        for round in 0..3 {
+            for (y, line) in lines.iter().enumerate() {
+                if cache.line(&lines, grammar, y, usize::MAX).len() != line.chars().count() {
+                    return Err(format!("{name}: line {y} {line:?}"));
+                }
             }
-            state = want;
+            let y: usize = rng.below(lines.len());
+            lines[y] = rng.pick(pieces).repeat(round + 1);
+            cache.invalidate(y);
         }
         Ok(())
     });

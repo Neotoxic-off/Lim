@@ -4,8 +4,7 @@ use std::collections::hash_map::RandomState;
 use std::fmt::Write;
 use std::hash::BuildHasher;
 
-use super::time::{datetime, now};
-use crate::term;
+use super::time::{datetime, now, utc_offset};
 
 /// Text the `<Leader>x` keys insert at the cursor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,10 +16,10 @@ pub enum Generated {
     Lorem,
 }
 
-/// Random bytes from the system's source (`/dev/urandom`, `RtlGenRandom`); if that fails, `SipHash` over a counter
+/// Random bytes from the system's source (getrandom); if that fails, `SipHash` over a counter
 /// keyed by std's per-process random keys.
 fn random_bytes(n: usize) -> Vec<u8> {
-    random_bytes_from(n, term::random)
+    random_bytes_from(n, |bytes| getrandom::fill(bytes).is_ok())
 }
 
 /// `random_bytes` with the system source given, so the fallback can be tested.
@@ -67,7 +66,7 @@ consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum
 impl Generated {
     pub fn text(self) -> String {
         let now: i64 = now();
-        let local: String = datetime(now, term::utc_offset(now));
+        let local: String = datetime(now, utc_offset(now));
         match self {
             Self::Date => local[..10].to_owned(),
             Self::DateTime => local,

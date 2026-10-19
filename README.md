@@ -30,7 +30,7 @@ lim is that editor with all of it **built in**:
 - **No Lua.** One JSON file for options, colors and keymaps, or the `<Leader>,` settings screen.
 - **No plugins.** File tree, pickers, live grep, which-key, git signs, completion, sessions, 30 themes,
   text tools: part of the binary, tested together. `<Leader>pu` gets the latest release.
-- **No dependencies.** Zero crates, nothing to install beside the binary; it runs the same on Linux, macOS
+- **No dependencies.** Nothing to install beside the binary, not even git; it runs the same on Linux, macOS
   and Windows.
 - **Nothing breaks after an update.** There is no ecosystem to drift out of sync.
 - **Vim inside.** Operators, text objects, registers, macros, marks, regex `:s` and `:g`, `:norm`, visual
@@ -68,7 +68,7 @@ the start screen.
 | Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, `gn` (`cgn` then `.`), page and line scrolling, `<S-arrows>` (word / page), `zz zt zb` · `:` and `/` history |
 | Text objects | `iw` `aw` `iW` `aW` `ip` `ap` `it` `at` (HTML/XML tags) `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
 | NvChad look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · NvChad tabufline with jump labels and clickable tabs, close marks, light/dark and close-all buttons, aligned with the windows when the file tree is open · git branch and +/~/- counts in the statusline, and a hydra spinner while background commands (`:upgrade`, config commands) run · nvim-tree look for the file tree · optional winbar path and relative numbers · sign column · cursor line number (or the whole cursorline) · borderless NvChad-style floats with pill titles · notifications · start screen with the hydra and nvdash buttons |
-| Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
+| Code | syntax highlighting with Sublime grammars (syntect, bat's set) for 200+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) · Markdown preview beside the file, live as you type (`<Leader>um`) |
 | Git | signs against the index · hunk jumps · graph of every branch, log, file log, status and stash pickers with diffs · `git browse` · status colors in the file tree |
 | Files | fuzzy picker with preview (files, git files, grep, buffers, recent, smart, lines, marks, registers, notifications, keymaps, commands, TODOs, sessions) · neo-tree style explorer with create/rename/copy/move/delete · `:rename` · sessions |
@@ -107,8 +107,8 @@ curl.exe -fsSLo $env:TEMP\lim-install.bat https://raw.githubusercontent.com/Neot
 
 **Update** from inside lim with `<Leader>pu` (or `:upgrade`): it asks GitHub for the latest release and, when it is
 newer than yours, downloads the binary for your platform and puts it in place of the running one, in the background
-while you keep editing. No Rust needed: lim talks HTTPS through the system (WinHTTP on Windows, libcurl on Linux and
-macOS). A notification says when it is done; restart lim to use the new version. Release binaries exist for Linux
+while you keep editing. No Rust or curl needed: lim talks HTTPS itself (rustls, HTTPS only, the proxy from
+`HTTPS_PROXY` or Windows' settings). A notification says when it is done; restart lim to use the new version. Release binaries exist for Linux
 x86_64 and ARM64, macOS (Apple silicon and Intel) and Windows x86_64; elsewhere, run the installer again.
 
 Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim --locked`, or from a clone
@@ -118,8 +118,7 @@ Runs on Linux, macOS and Windows 10+ (Windows Terminal or the console, not mintt
 [Nerd Font](https://www.nerdfonts.com) for the default icons (or `"iconset": "unicode"` / `"ascii"`). Truecolor is
 detected; other terminals get the 256-color palette.
 
-Optional, picked up when installed: `wl-copy`/`xclip`/`xsel`/`pbcopy` (clipboard; Windows uses its own),
-`node`, `python3`, `btm`, `gdu`, `xdg-open`/`open` (`gx`, `<Leader>go`; Windows uses `explorer`).
+Optional, picked up when installed: `node`, `python3`, `btm`, `gdu`, and the TUI tools of `<Leader>t…`.
 
 ## Usage
 
@@ -153,8 +152,8 @@ search every key and command), or `<Space>` and wait for which-key.
 
 ## Limits
 
-Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics, language-aware completion; buffer-word completion is there), debugger, treesitter (a keyword
-highlighter stands in), plugins, scripting the editor (config commands only filter text through a process), an
+Not there, by design: LSP (`<Leader>l…`, `gd`, diagnostics, language-aware completion; buffer-word completion is there), debugger, treesitter (syntect
+grammars stand in), plugins, scripting the editor (config commands only filter text through a process), an
 embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
 line wrapping, folds, spell checking, persistent undo. Files are read whole into memory, as in Vim: text files
 over 512 MB and binaries over 64 MB (their hex dump takes about 7 times their size) are refused with a message.
