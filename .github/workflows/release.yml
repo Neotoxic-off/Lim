@@ -1,16 +1,21 @@
-# Every push to master that passes the checks becomes a release with a binary per platform, which `<Leader>pu`
-# (`:upgrade`) downloads.
+# Checks every push to dev and master and every pull request. A pushed `vX.Y.Z` tag, on the commit that sets that
+# version in Cargo.toml, also becomes a release with a binary per platform, which `<Leader>pu` (`:upgrade`)
+# downloads. A change to the docs alone is not checked.
 name: Release
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
+    tags: ["v*"]
+    paths-ignore: ["docs/**", "**.md", LICENSE]
+  pull_request:
+    paths-ignore: ["docs/**", "**.md", LICENSE]
 
 permissions:
   contents: write
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -28,54 +33,33 @@ jobs:
       # The perf budgets are set for a dev machine; shared runners are slower and noisy, so they run locally only.
       - run: "cargo test -- --skip perf::"
 
-  tag:
-    needs: check
+  # The binaries report Cargo.toml's version, so it must be the tag's, or `<Leader>pu` would offer the release forever.
+  version:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      # major.minor from Cargo.toml, patch = commits on master: always increasing, the same on a re-run.
-      - name: Version
-        id: version
-        run: |
-          base=$(sed -n 's/^version = "\([0-9]*\.[0-9]*\)\..*"/\1/p' Cargo.toml | head -n 1)
-          echo "version=$base.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
-      # The tag points at a commit with that version in Cargo.toml, so the built lim knows it is up to date.
-      # Only the tag is pushed; master is left as it is.
-      - name: Tag
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null; then
-            echo "v$VERSION already exists"
-            exit 0
+      - run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but Cargo.toml says $version"
+            exit 1
           fi
-          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" Cargo.toml
-          cargo update --workspace --offline
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "Release v$VERSION"
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
 
   # Asset names are lim-{ARCH}-{OS}{EXE_SUFFIX} from std::env::consts, as src/update.rs looks them up.
   build:
-    needs: tag
+    needs: [check, version]
     strategy:
       matrix:
         include:
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, asset: lim-x86_64-linux }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, asset: lim-aarch64-linux }
           - { os: macos-latest, target: aarch64-apple-darwin, asset: lim-aarch64-macos }
           - { os: macos-latest, target: x86_64-apple-darwin, asset: lim-x86_64-macos }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, asset: lim-x86_64-windows.exe }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v${{ needs.tag.outputs.version }}
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Name the binary
@@ -90,7 +74,7 @@ jobs:
           path: ${{ matrix.asset }}
 
   release:
-    needs: [tag, build]
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,10 +85,9 @@ jobs:
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.tag.outputs.version }}
         run: |
-          if gh release view "v$VERSION" >/dev/null 2>&1; then
-            gh release upload "v$VERSION" assets/* --clobber
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" assets/* --clobber
           else
-            gh release create "v$VERSION" assets/* --verify-tag --title "lim v$VERSION" --generate-notes
+            gh release create "$GITHUB_REF_NAME" assets/* --verify-tag --title "lim $GITHUB_REF_NAME" --generate-notes
           fi

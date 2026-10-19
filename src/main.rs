@@ -49,7 +49,7 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     if args.iter().any(|a| a == "-V" || a == "--version") {
-        println!("lim {}", env!("LIM_VERSION"));
+        println!("lim {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
     if args.iter().any(|a| a == "--print-config") {
