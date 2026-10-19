@@ -62,7 +62,8 @@ wsl -d Ubuntu --cd /mnt/d/Code/Github/Lim -e bash -lc 'LIM_NVIM=$HOME/.local/nvi
   file storage is disabled. Tests must use `std::env::temp_dir()`.
 - Tests live in `#[cfg(test)]` modules next to the code. Editor behaviour tests go in `editor/tests.rs`, which uses
   helpers that feed key strings (`keys(&mut ed, "dw")`) and check the resulting text.
-- When you add a feature, also update README.md (features table, keymaps, limits).
+- When you add a feature, also update the docs: README.md (features table, limits) and the matching page in
+  `docs/` (keymaps in `docs/keymaps.md`, options in `docs/configuration.md`, ...).
 - Benchmark every change: run `cargo test --release perf -- --nocapture` before and after, and compare. The
   `perf` test fails on a budget overrun; a new hot path (per key, per frame, per line) gets a case there.
 - lim stays faster than Neovim (`-u NONE`, no plugins) on every operation `vs_neovim` compares; run it after any

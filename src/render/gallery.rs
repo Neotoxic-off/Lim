@@ -1,4 +1,4 @@
-//! The README gallery: real frames drawn by the renderer, written as SVG to `docs/gallery`.
+//! The gallery of `docs/themes.md`: real frames drawn by the renderer, written as SVG to `docs/gallery`.
 //! Regenerate with `cargo test gallery -- --ignored` after changing a theme, an icon set or the bars.
 
 use std::fmt::{self, Write};

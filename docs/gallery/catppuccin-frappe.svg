@@ -23,18 +23,18 @@
 <text x="594" y="49" fill="#c6d0f5">;</text>
 <rect x="0" y="54" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="54" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90" y="67" fill="#8caaee">▸examples</text>
+<text x="9 27 36 45" y="67" fill="#8caaee">▸src</text>
 <text x="270" y="67" fill="#232634">│</text>
 <text x="306" y="67" fill="#51576d">7</text>
 <rect x="0" y="72" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="72" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45" y="85" fill="#8caaee">▸src</text>
+<text x="9 27 36 45 54 63" y="85" fill="#8caaee">▸state</text>
 <text x="270" y="85" fill="#232634">│</text>
 <text x="306" y="85" fill="#51576d">6</text>
 <text x="333 342 351 369 378 387 396 405 414 432 441 450 459 477 486 495 504 522 531 549 558 567 576 585 594 603" y="85" fill="#949cbb" font-style="italic">///Countseachwordof`text`.</text>
 <rect x="0" y="90" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="90" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63" y="103" fill="#8caaee">▸state</text>
+<text x="9 27 36 45 54 63 72" y="103" fill="#8caaee">▸target</text>
 <text x="270" y="103" fill="#232634">│</text>
 <text x="306" y="103" fill="#51576d">5</text>
 <text x="333 342" y="103" fill="#ca9ee6">fn</text>
@@ -52,7 +52,7 @@
 <rect x="270" y="108" width="171" height="18" fill="#303446"/>
 <rect x="441" y="108" width="54" height="18" fill="#51576d"/>
 <rect x="495" y="108" width="405" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72" y="121" fill="#8caaee">▸target</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108" y="121" fill="#c6d0f5">▫Cargo.lock</text>
 <text x="270" y="121" fill="#232634">│</text>
 <text x="306" y="121" fill="#51576d">4</text>
 <text x="333" y="121" fill="#51576d">▏</text>
@@ -71,7 +71,7 @@
 <text x="828 837 846" y="121" fill="#c6d0f5">();</text>
 <rect x="0" y="126" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="126" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108" y="139" fill="#c6d0f5">▫Cargo.lock</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108" y="139" fill="#c6d0f5">▫Cargo.toml</text>
 <text x="270" y="139" fill="#232634">│</text>
 <text x="306" y="139" fill="#51576d">3</text>
 <text x="333" y="139" fill="#51576d">▏</text>
@@ -87,7 +87,7 @@
 <rect x="468" y="144" width="306" height="18" fill="#303446"/>
 <rect x="774" y="144" width="54" height="18" fill="#8caaee"/>
 <rect x="828" y="144" width="72" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108" y="157" fill="#c6d0f5">▫Cargo.toml</text>
+<text x="9 27 36 45 54 63 72 81 90 99" y="157" fill="#c6d0f5">▫CLAUDE.md</text>
 <text x="270" y="157" fill="#232634">│</text>
 <text x="306" y="157" fill="#51576d">2</text>
 <text x="333" y="157" fill="#51576d">▏</text>
@@ -106,7 +106,7 @@
 <text x="837 846 855 864 873 882" y="157" fill="#8caaee" font-style="italic">ignore</text>
 <rect x="0" y="162" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="162" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99" y="175" fill="#c6d0f5">▫CLAUDE.md</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162 171 180 189" y="175" fill="#c6d0f5">▫config.example.json</text>
 <text x="270" y="175" fill="#232634">│</text>
 <text x="306" y="175" fill="#51576d">1</text>
 <text x="333" y="175" fill="#51576d">▏</text>
@@ -116,25 +116,25 @@
 <rect x="333" y="180" width="36" height="18" fill="#3b3f52"/>
 <rect x="369" y="180" width="54" height="18" fill="#51576d"/>
 <rect x="423" y="180" width="477" height="18" fill="#3b3f52"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162 171 180 189" y="193" fill="#c6d0f5">▫config.example.json</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117" y="193" fill="#c6d0f5">▫install.bat</text>
 <text x="270" y="193" fill="#232634">│</text>
 <text x="306" y="193" fill="#babbf1">9</text>
 <text x="333" y="193" fill="#51576d">▏</text>
 <text x="369 378 387 396 405 414" y="193" fill="#c6d0f5">counts</text>
 <rect x="0" y="198" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="198" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117" y="211" fill="#c6d0f5">▫install.bat</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108" y="211" fill="#c6d0f5">▫install.sh</text>
 <text x="270" y="211" fill="#232634">│</text>
 <text x="306" y="211" fill="#51576d">1</text>
 <text x="333" y="211" fill="#c6d0f5">}</text>
 <rect x="0" y="216" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="216" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108" y="229" fill="#c6d0f5">▫install.sh</text>
+<text x="9 27 36 45 54 63 72 81 90 99" y="229" fill="#c6d0f5">▫README.md</text>
 <text x="270" y="229" fill="#232634">│</text>
 <text x="306" y="229" fill="#51576d">2</text>
 <rect x="0" y="234" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="234" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162" y="247" fill="#c6d0f5">▫PONYTAIL-DEBT.md</text>
+<text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="247" fill="#c6d0f5">▫rustfmt.toml</text>
 <text x="270" y="247" fill="#232634">│</text>
 <text x="306" y="247" fill="#51576d">3</text>
 <text x="333 342" y="247" fill="#ca9ee6">fn</text>
@@ -142,7 +142,6 @@
 <text x="396 405 423" y="247" fill="#c6d0f5">(){</text>
 <rect x="0" y="252" width="270" height="18" fill="#292c3c"/>
 <rect x="270" y="252" width="630" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99" y="265" fill="#c6d0f5">▫README.md</text>
 <text x="270" y="265" fill="#232634">│</text>
 <text x="306" y="265" fill="#51576d">4</text>
 <text x="333" y="265" fill="#51576d">▏</text>
@@ -155,7 +154,6 @@
 <rect x="270" y="270" width="135" height="18" fill="#303446"/>
 <rect x="405" y="270" width="54" height="18" fill="#51576d"/>
 <rect x="459" y="270" width="441" height="18" fill="#303446"/>
-<text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="283" fill="#c6d0f5">▫rustfmt.toml</text>
 <text x="270" y="283" fill="#232634">│</text>
 <text x="306" y="283" fill="#51576d">5</text>
 <text x="333" y="283" fill="#51576d">▏</text>

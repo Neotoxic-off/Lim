@@ -104,7 +104,7 @@ impl Buffer {
         if fs::metadata(path).is_ok_and(|m| !m.is_file()) {
             return Err(Error::NotAFile(path.into()));
         }
-        // shortcut: the whole file is read into memory, so huge ones are refused; page it in if lim must edit them.
+        // The whole file is read into memory, so huge ones are refused.
         if fs::metadata(path).is_ok_and(|m| m.len() > MAX_TEXT) {
             return Err(too_big(path, MAX_TEXT));
         }

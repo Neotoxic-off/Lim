@@ -21,18 +21,18 @@
 <text x="594" y="49" fill="#abb2bf">;</text>
 <rect x="0" y="54" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="54" width="630" height="18" fill="#1e222a"/>
-<text x="9 27 36 45 54 63 72 81 90" y="67" fill="#61afef">+examples</text>
+<text x="9 27 36 45" y="67" fill="#61afef">+src</text>
 <text x="270" y="67" fill="#31353d">│</text>
 <text x="306" y="67" fill="#42464e">7</text>
 <rect x="0" y="72" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="72" width="630" height="18" fill="#1e222a"/>
-<text x="9 27 36 45" y="85" fill="#61afef">+src</text>
+<text x="9 27 36 45 54 63" y="85" fill="#61afef">+state</text>
 <text x="270" y="85" fill="#31353d">│</text>
 <text x="306" y="85" fill="#42464e">6</text>
 <text x="333 342 351 369 378 387 396 405 414 432 441 450 459 477 486 495 504 522 531 549 558 567 576 585 594 603" y="85" fill="#565c64" font-style="italic">///Countseachwordof`text`.</text>
 <rect x="0" y="90" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="90" width="630" height="18" fill="#1e222a"/>
-<text x="9 27 36 45 54 63" y="103" fill="#61afef">+state</text>
+<text x="9 27 36 45 54 63 72" y="103" fill="#61afef">+target</text>
 <text x="270" y="103" fill="#31353d">│</text>
 <text x="306" y="103" fill="#42464e">5</text>
 <text x="333 342" y="103" fill="#c678dd">fn</text>
@@ -50,7 +50,7 @@
 <rect x="270" y="108" width="171" height="18" fill="#1e222a"/>
 <rect x="441" y="108" width="54" height="18" fill="#282c34"/>
 <rect x="495" y="108" width="405" height="18" fill="#1e222a"/>
-<text x="9 27 36 45 54 63 72" y="121" fill="#61afef">+target</text>
+<text x="9 18 27 36 45 54 63 72 81 90" y="121" fill="#abb2bf">Cargo.lock</text>
 <text x="270" y="121" fill="#31353d">│</text>
 <text x="306" y="121" fill="#42464e">4</text>
 <text x="333" y="121" fill="#42464e">▏</text>
@@ -69,7 +69,7 @@
 <text x="828 837 846" y="121" fill="#abb2bf">();</text>
 <rect x="0" y="126" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="126" width="630" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81 90" y="139" fill="#abb2bf">Cargo.lock</text>
+<text x="9 18 27 36 45 54 63 72 81 90" y="139" fill="#abb2bf">Cargo.toml</text>
 <text x="270" y="139" fill="#31353d">│</text>
 <text x="306" y="139" fill="#42464e">3</text>
 <text x="333" y="139" fill="#42464e">▏</text>
@@ -85,7 +85,7 @@
 <rect x="468" y="144" width="306" height="18" fill="#1e222a"/>
 <rect x="774" y="144" width="54" height="18" fill="#61afef"/>
 <rect x="828" y="144" width="72" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81 90" y="157" fill="#abb2bf">Cargo.toml</text>
+<text x="9 18 27 36 45 54 63 72 81" y="157" fill="#abb2bf">CLAUDE.md</text>
 <text x="270" y="157" fill="#31353d">│</text>
 <text x="306" y="157" fill="#42464e">2</text>
 <text x="333" y="157" fill="#42464e">▏</text>
@@ -104,7 +104,7 @@
 <text x="837 846 855 864 873 882" y="157" fill="#61afef" font-style="italic">ignore</text>
 <rect x="0" y="162" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="162" width="630" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81" y="175" fill="#abb2bf">CLAUDE.md</text>
+<text x="9 18 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162 171" y="175" fill="#abb2bf">config.example.json</text>
 <text x="270" y="175" fill="#31353d">│</text>
 <text x="306" y="175" fill="#42464e">1</text>
 <text x="333" y="175" fill="#42464e">▏</text>
@@ -114,25 +114,25 @@
 <rect x="333" y="180" width="36" height="18" fill="#252931"/>
 <rect x="369" y="180" width="54" height="18" fill="#282c34"/>
 <rect x="423" y="180" width="477" height="18" fill="#252931"/>
-<text x="9 18 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162 171" y="193" fill="#abb2bf">config.example.json</text>
+<text x="9 18 27 36 45 54 63 72 81 90 99" y="193" fill="#abb2bf">install.bat</text>
 <text x="270" y="193" fill="#31353d">│</text>
 <text x="306" y="193" fill="#c8ccd4">9</text>
 <text x="333" y="193" fill="#42464e">▏</text>
 <text x="369 378 387 396 405 414" y="193" fill="#abb2bf">counts</text>
 <rect x="0" y="198" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="198" width="630" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81 90 99" y="211" fill="#abb2bf">install.bat</text>
+<text x="9 18 27 36 45 54 63 72 81 90" y="211" fill="#abb2bf">install.sh</text>
 <text x="270" y="211" fill="#31353d">│</text>
 <text x="306" y="211" fill="#42464e">1</text>
 <text x="333" y="211" fill="#abb2bf">}</text>
 <rect x="0" y="216" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="216" width="630" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81 90" y="229" fill="#abb2bf">install.sh</text>
+<text x="9 18 27 36 45 54 63 72 81" y="229" fill="#abb2bf">README.md</text>
 <text x="270" y="229" fill="#31353d">│</text>
 <text x="306" y="229" fill="#42464e">2</text>
 <rect x="0" y="234" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="234" width="630" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81 90 99 108 117 126 135 144" y="247" fill="#abb2bf">PONYTAIL-DEBT.md</text>
+<text x="9 18 27 36 45 54 63 72 81 90 99 108" y="247" fill="#abb2bf">rustfmt.toml</text>
 <text x="270" y="247" fill="#31353d">│</text>
 <text x="306" y="247" fill="#42464e">3</text>
 <text x="333 342" y="247" fill="#c678dd">fn</text>
@@ -140,7 +140,6 @@
 <text x="396 405 423" y="247" fill="#abb2bf">(){</text>
 <rect x="0" y="252" width="270" height="18" fill="#1b1f27"/>
 <rect x="270" y="252" width="630" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81" y="265" fill="#abb2bf">README.md</text>
 <text x="270" y="265" fill="#31353d">│</text>
 <text x="306" y="265" fill="#42464e">4</text>
 <text x="333" y="265" fill="#42464e">▏</text>
@@ -153,7 +152,6 @@
 <rect x="270" y="270" width="135" height="18" fill="#1e222a"/>
 <rect x="405" y="270" width="54" height="18" fill="#282c34"/>
 <rect x="459" y="270" width="441" height="18" fill="#1e222a"/>
-<text x="9 18 27 36 45 54 63 72 81 90 99 108" y="283" fill="#abb2bf">rustfmt.toml</text>
 <text x="270" y="283" fill="#31353d">│</text>
 <text x="306" y="283" fill="#42464e">5</text>
 <text x="333" y="283" fill="#42464e">▏</text>
