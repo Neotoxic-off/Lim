@@ -1,16 +1,20 @@
 # Every push to master that passes the checks becomes a release with a binary per platform, which `<Leader>pu`
-# (`:upgrade`) downloads.
+# (`:upgrade`) downloads. Pushes to dev and pull requests run the checks only. A change to the docs alone is not a
+# new lim.
 name: Release
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
+    paths-ignore: ["docs/**", "**.md", LICENSE]
+  pull_request:
+    paths-ignore: ["docs/**", "**.md", LICENSE]
 
 permissions:
   contents: write
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -30,6 +34,7 @@ jobs:
 
   tag:
     needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -68,6 +73,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, asset: lim-x86_64-linux }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, asset: lim-aarch64-linux }
           - { os: macos-latest, target: aarch64-apple-darwin, asset: lim-aarch64-macos }
           - { os: macos-latest, target: x86_64-apple-darwin, asset: lim-x86_64-macos }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, asset: lim-x86_64-windows.exe }

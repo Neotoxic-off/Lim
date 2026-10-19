@@ -105,7 +105,7 @@ curl.exe -fsSLo $env:TEMP\lim-install.bat https://raw.githubusercontent.com/Neot
 newer than yours, downloads the binary for your platform and puts it in place of the running one, in the background
 while you keep editing. No Rust needed: lim talks HTTPS through the system (WinHTTP on Windows, libcurl on Linux and
 macOS). A notification says when it is done; restart lim to use the new version. Release binaries exist for Linux
-x86_64, macOS (Apple silicon and Intel) and Windows x86_64; elsewhere, run the installer again.
+x86_64 and ARM64, macOS (Apple silicon and Intel) and Windows x86_64; elsewhere, run the installer again.
 
 Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim --locked`, or from a clone
 `cargo build --release` and copy `target/release/lim` (`lim.exe`) onto your `PATH`.
@@ -155,3 +155,7 @@ embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
 line wrapping, folds, spell checking, persistent undo. Files are read whole into memory, as in Vim: text files
 over 512 MB and binaries over 64 MB (their hex dump takes about 7 times their size) are refused with a message.
 There is no disassembler.
+
+## License
+
+[MIT](LICENSE).
