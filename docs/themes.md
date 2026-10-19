@@ -30,7 +30,7 @@ draws with. nvchad (NvChad's base46 onedark) is the default.
 | <img src="gallery/solarized-light.svg" alt="solarized-light" width="300"> | <img src="gallery/github-dark.svg" alt="github-dark" width="300"> | <img src="gallery/ayu-dark.svg" alt="ayu-dark" width="300"> |
 | `solarized-light` | `github-dark` | `ayu-dark` |
 
-Switch in the settings (`<Leader>,`), with `<Leader>ft` (the editor recolors as you move through the list;
+Switch in the settings (`<Leader>,`), with `<Leader>ft` (the editor recolors as you move through the list, and the preview shows a code sample in every color;
 `<Esc>` puts the old one back), or `<Leader>ub` for the light/dark sibling. The last one picked is remembered; set
 `"colorscheme"` in the config to pin one. [`palette` and `highlights`](configuration.md#palette) overrides apply on
 top of any theme.

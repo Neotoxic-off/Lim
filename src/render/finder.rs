@@ -15,6 +15,26 @@ use crate::syntax::{self, State};
 /// Previews read at most this much of a file.
 const MAX_PREVIEW_BYTES: usize = 256 * 1024;
 
+/// What the theme picker previews: a bit of every color, whatever buffer is open.
+const THEME_SAMPLE: &str = r#"/// A hydra grows two heads for each one cut.
+use std::collections::HashMap;
+
+const LIMIT: usize = 9;
+
+#[derive(Debug, Clone)]
+struct Hydra {
+    name: String,
+    heads: u32,
+}
+
+fn cut(hydra: &mut Hydra, count: u32) -> bool {
+    // TODO: Heracles burns the stumps
+    hydra.heads += count * 2;
+    println!("{} has {} heads", hydra.name, hydra.heads);
+    let seen: HashMap<&str, f64> = HashMap::new();
+    hydra.heads as usize > LIMIT && seen.is_empty()
+}"#;
+
 /// Draws the open picker over the screen; returns the cursor cell in its input.
 pub fn picker(ed: &Editor, grid: &mut Grid) -> Option<(usize, usize)> {
     let picker: &Picker = ed.picker.as_ref()?;
@@ -106,8 +126,12 @@ fn preview(ed: &Editor, grid: &mut Grid, area: Rect, fill: Style, border: Style)
             None => return,
         },
         Target::Line(y) => (ed.buf().name(), ed.buf().lines().to_vec(), *y, ed.buf().path.as_deref()),
-        // Themes and icon sets preview on the current buffer, already redrawn in them.
-        Target::Theme(name) | Target::IconSet(name) => {
+        // The screen is already redrawn in the theme under the cursor; the sample shows each of its colors.
+        Target::Theme(name) => {
+            (name.clone(), THEME_SAMPLE.lines().map(str::to_owned).collect(), 0, Some(Path::new("sample.rs")))
+        }
+        // Icon sets preview on the current buffer, already redrawn in them.
+        Target::IconSet(name) => {
             (name.clone(), ed.buf().lines().to_vec(), ed.buf().cursor.line, ed.buf().path.as_deref())
         }
         _ => match &ed.picker.as_ref().and_then(|p| p.preview.clone()) {
@@ -141,5 +165,39 @@ fn preview(ed: &Editor, grid: &mut Grid, area: Rect, fill: Style, border: Style)
             }
         }
         grid.put(area.x + 1, area.y + 1 + r - first, &row.finish(Style { bg, ..fill }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::Screen;
+    use crate::render::row::Cell;
+    use crate::term::{ColorDepth, Key};
+
+    /// The theme picker shows its sample code, highlighted, even over an empty buffer.
+    #[test]
+    fn the_theme_picker_previews_a_sample() {
+        let mut ed: Editor = Editor::new(&[]);
+        ed.dashboard = false;
+        for c in " ft".chars() {
+            ed.handle(Key::Char(c));
+        }
+        let (grid, _): (Grid, Option<(usize, usize)>) = Screen::new(ColorDepth::TrueColor).compose(&mut ed, 120, 40);
+        let row: Option<usize> = (0..grid.height).find(|&y| {
+            let line: String = grid.row(y).iter().map(|c| c.ch).collect();
+            line.contains("struct Hydra {")
+        });
+        let y: usize = row.expect("the sample is in the preview");
+        let cells: &[Cell] = grid.row(y);
+        let at = |word: &str| -> Rgb {
+            let chars: Vec<char> = word.chars().collect();
+            let start: Option<usize> =
+                cells.windows(chars.len()).position(|w| w.iter().map(|c| c.ch).eq(chars.iter().copied()));
+            start.map_or(Rgb(0), |i| cells[i].style.fg)
+        };
+        assert_eq!(at("struct"), theme().fg(Group::Keyword));
+        assert_eq!(at("Hydra"), theme().fg(Group::Type));
+        ed.handle(Key::Esc);
     }
 }
