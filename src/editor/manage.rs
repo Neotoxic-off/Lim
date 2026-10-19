@@ -105,11 +105,20 @@ impl Editor {
         self.remove_buffer(self.current, force)
     }
 
-    /// Removes buffer `i`; windows showing it fall back to the previous buffer.
+    /// Removes buffer `i`; windows showing it fall back to the previous buffer, except a tool's, which close.
     pub(super) fn remove_buffer(&mut self, i: usize, force: bool) -> Result<(), Error> {
         let Some(buf): Option<&Buffer> = self.buffers.get(i) else { return Ok(()) };
         if !force && buf.is_dirty() {
             return Err(Error::Unsaved(buf.name()));
+        }
+        // A tool's window was split for it alone: it goes with the buffer, unless it is the last window.
+        if buf.throwaway {
+            while self.windows.len() > 1
+                && let Some(window) = self.windows.iter().position(|w| w.buffer == i)
+            {
+                self.focus(window);
+                self.close_window();
+            }
         }
         let fallback: Option<usize> = self.previous_buffer.filter(|&p| p != i && p < self.buffers.len());
         self.buffers.remove(i);

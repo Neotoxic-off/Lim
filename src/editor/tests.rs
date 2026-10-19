@@ -1448,3 +1448,30 @@ fn user_commands_with_a_stand_in_runner() {
     }
     assert_eq!(ed.message_text(), "3 lines | ok");
 }
+
+/// `<Leader>c` on a tool closes its window with it, as `:q` does; other buffers keep their windows.
+#[test]
+fn closing_a_tool_buffer_closes_its_window() {
+    let mut ed: Editor = editor("code");
+    keys(
+        &mut ed, " xc2+2
+",
+    );
+    assert_eq!((ed.buffers.len(), ed.windows.len()), (2, 2));
+    keys(&mut ed, " c");
+    assert_eq!((ed.buffers.len(), ed.windows.len(), text(&ed).as_str()), (1, 1, "code"));
+    keys(
+        &mut ed,
+        ":vsplit
+:enew
+ c",
+    );
+    assert_eq!(ed.windows.len(), 2, "a plain buffer leaves its window to the next one");
+    keys(
+        &mut ed,
+        ":only
+ xu:only
+ c",
+    );
+    assert_eq!((ed.buffers.len(), ed.windows.len(), text(&ed).as_str()), (1, 1, "code"), "the last window stays");
+}

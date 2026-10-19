@@ -8,7 +8,8 @@ buffer (`[Calculator]`, `[Convert]`, `[Bases]`, `[Time]`, `[Color]`), in insert 
 answer lands on the line below (`= 152.4 cm`, or `! why` when it is wrong) and a fresh line waits. The buffer is
 the history: scroll it, search it, yank from it, edit an old question and `<CR>` on it (in insert or normal mode)
 to answer it again in place. Each answer also goes to the `"` register, so `p` in your code pastes it. `:q`
-closes the window without asking to save; the same key brings it back with everything still in it.
+closes the window without asking to save; the same key brings it back with everything still in it. `<Leader>c`
+closes the window with its buffer, history included.
 
 ```
 2+3*4
