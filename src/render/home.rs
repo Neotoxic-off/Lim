@@ -106,8 +106,11 @@ fn width(art: &[&str]) -> usize {
 pub fn dashboard(grid: &mut Grid, area: Rect, startup: Duration, splash: Splash) {
     let monster: Option<&[&str]> = art(splash, area);
     let style: Style = theme().style(Group::Normal);
-    let footer: String =
-        format!("neovim, batteries included - v{} - {:.2}ms", env!("CARGO_PKG_VERSION"), startup.as_secs_f64() * 1000.0);
+    let footer: String = format!(
+        "neovim, batteries included - v{} - {:.2}ms",
+        env!("CARGO_PKG_VERSION"),
+        startup.as_secs_f64() * 1000.0
+    );
     // Without room for a hydra the wordmark stays, then only the text.
     let show_word: bool = area.h >= WORDMARK.len() + 5 && area.w >= width(WORDMARK) + 2;
     let height: usize = monster.map_or(0, |m| m.len() + 2) + if show_word { WORDMARK.len() + 2 } else { 0 } + 3;
