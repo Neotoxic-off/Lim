@@ -1479,4 +1479,10 @@ fn closing_a_tool_buffer_closes_its_window() {
  c",
     );
     assert_eq!((ed.buffers.len(), ed.windows.len(), text(&ed).as_str()), (1, 1, "code"), "the last window stays");
+    // Over an empty buffer or the start screen there is no code to keep in view: no split.
+    for start in [editor(""), Editor::new(&[])] {
+        let mut ed: Editor = start;
+        keys(&mut ed, " xc");
+        assert_eq!((ed.windows.len(), ed.buf().title.as_deref()), (1, Some("[Calculator]")));
+    }
 }

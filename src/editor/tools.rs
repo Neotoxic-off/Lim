@@ -1171,10 +1171,16 @@ impl Editor {
             self.buffers.push(buf);
             self.buffers.len() - 1
         });
+        // The split keeps the code in view; over the start screen or an empty buffer there is nothing to keep.
+        let buf: &Buffer = self.buf();
+        let nothing_shown: bool =
+            self.dashboard || (buf.path.is_none() && !buf.throwaway && buf.line_count() == 1 && buf.line(0).is_empty());
         if let Some(window) = self.windows.iter().position(|w| w.buffer == index) {
             self.focus(window);
         } else {
-            self.split(false);
+            if !nothing_shown {
+                self.split(false);
+            }
             self.switch_to(index);
         }
         self.dashboard = false;

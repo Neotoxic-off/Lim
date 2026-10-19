@@ -3,7 +3,8 @@
 `<Leader>x` opens the tools menu (which-key shows it; the cheat sheet documents every syntax under "Tools").
 For the `:` text tools (`:base64`, `:json`, `:case`…), see [Vim editing › Text tools](vim.md#text-tools).
 
-The calculator, converter, bases, time and color tools are **windows**: each opens once, split below, on its own
+The calculator, converter, bases, time and color tools are **windows**: each opens once, split below (or in place
+over an empty buffer or the start screen, where there is no code to keep in view), on its own
 buffer (`[Calculator]`, `[Convert]`, `[Bases]`, `[Time]`, `[Color]`), in insert mode. Type a line and `<CR>`: the
 answer lands on the line below (`= 152.4 cm`, or `! why` when it is wrong) and a fresh line waits. The buffer is
 the history: scroll it, search it, yank from it, edit an old question and `<CR>` on it (in insert or normal mode)
