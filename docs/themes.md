@@ -60,13 +60,13 @@ two cells each) and `ascii`. Switch in the settings (`<Leader>,`), `<Leader>fI`,
 
 ## Start screen
 
-The Lernaean Hydra, lim's symbol, in three drawings. By default (`splash` = `"random"`) each start
-shows a random one among those that fit the window; set `"classic"`, `"braille"` or `"small"` to keep one. The
-braille ones are NvChad's hydra as found online: the [gist by kevinfengcs88](https://gist.github.com/kevinfengcs88/75457d6b401fbab2326450dcbf64a429)
+The Lernaean Hydra, lim's symbol, in two braille drawings. By default (`splash` = `"random"`) each start
+shows a random one among those that fit the window; set `"braille"` or `"small"` to keep one. They
+are NvChad's hydra as found online: the [gist by kevinfengcs88](https://gist.github.com/kevinfengcs88/75457d6b401fbab2326450dcbf64a429)
 and the small one from [twitchquotes](https://www.twitchquotes.com/copypastas/3638). Under it, when there is room, NvChad's
 nvdash buttons list the keys for files, recent files, words, themes and mappings (`<Leader>ff fo fw ft fk`).
 
-| | | |
-|---|---|---|
-| <img src="gallery/splash-classic.svg" alt="classic" width="300"> | <img src="gallery/splash-braille.svg" alt="braille" width="300"> | <img src="gallery/splash-small.svg" alt="small" width="300"> |
-| `classic` (ASCII) | `braille` | `small` (fits small windows) |
+| | |
+|---|---|
+| <img src="gallery/splash-braille.svg" alt="braille" width="300"> | <img src="gallery/splash-small.svg" alt="small" width="300"> |
+| `braille` | `small` (fits small windows) |

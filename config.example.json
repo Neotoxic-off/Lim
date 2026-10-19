@@ -40,7 +40,7 @@
     "iconset": "nerd",            // "nerd", "unicode" or "ascii"
     "completion": true,           // words from open buffers while typing
     "statusline_style": "rounded", // "rounded", "slanted", "arrow" or "flat" (Nerd Font icon set)
-    "splash": "random",           // start screen hydra: "random" (one that fits), "classic", "braille" or "small"
+    "splash": "random",           // start screen hydra: "random" (one that fits), "braille" or "small"
     "mouse": true                 // click, drag, wheel; false keeps the terminal's own selection for copying
   },
 

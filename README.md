@@ -41,7 +41,7 @@ lim is that editor with all of it **built in**:
   (format on save, git), without an embedded language to learn.
 
 **The symbol.** lim's emblem is the Lernaean Hydra, the many-headed serpent of the lake (λίμνη, *limnē*)
-of Lerna: one body, many heads, like one editor working many windows. It greets you, in plain ASCII, on
+of Lerna: one body, many heads, like one editor working many windows. It greets you, in braille, on
 the start screen.
 
 ![Editing: file tree, git signs, indent guides, TODO and color highlights](docs/screenshots/editor.png)

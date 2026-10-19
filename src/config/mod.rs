@@ -90,18 +90,16 @@ pub struct Options {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Splash {
     Random,
-    Classic,
     Braille,
     Small,
 }
 
 impl Splash {
-    pub const ALL: [Self; 4] = [Self::Random, Self::Classic, Self::Braille, Self::Small];
+    pub const ALL: [Self; 3] = [Self::Random, Self::Braille, Self::Small];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Random => "random",
-            Self::Classic => "classic",
             Self::Braille => "braille",
             Self::Small => "small",
         }

@@ -59,7 +59,7 @@ Names and defaults follow AstroNvim.
 | `colorscheme` | unset | A theme name; unset uses the last one picked (nvchad at first) |
 | `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` |
 | `statusline_style` | `"rounded"` | Statusline section ends: `"rounded"`, `"slanted"`, `"arrow"` or `"flat"` (Nerd Font icon set only) |
-| `splash` | `"random"` | Start screen hydra: `"random"` (one that fits, each start), `"classic"`, `"braille"` or `"small"` |
+| `splash` | `"random"` | Start screen hydra: `"random"` (one that fits, each start), `"braille"` or `"small"` |
 | `mouse` | `true` | Click (text, tabs, tabline buttons), drag to select, wheel; `false` gives the terminal its own selection back (to copy) |
 | `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |

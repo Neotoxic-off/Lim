@@ -1,5 +1,5 @@
-//! The start screen: the Lernaean Hydra rising from its lake, lim's symbol, over nvdash's buttons. Three drawings
-//! of it: lim's ASCII one and two braille ones found online (the `splash` option); by default a random one that fits.
+//! The start screen: the Lernaean Hydra rising from its lake, lim's symbol, over nvdash's buttons. Two braille
+//! drawings of it found online (the `splash` option); by default a random one that fits.
 
 use std::sync::Arc;
 
@@ -11,31 +11,6 @@ use crate::config::{Options, Splash, keys};
 use crate::editor::Rect;
 use crate::render::theme::Style;
 use crate::term::Key;
-
-/// lim's own: '#' body, '@' eyes, '~' the lake; `'` and `.` are half-filled cells.
-const HYDRA: &[&str] = &[
-    "                         #.                               ",
-    "                     '#.. '#.                             ",
-    "             .          '#####.               .           ",
-    "           .#'            ####@@###.          '#.         ",
-    "         .###.#'          ####@@''''        '#..##.       ",
-    "       .#####'            ######. .           '#####.     ",
-    "  .####@@####             ####''###.           ####@@####.",
-    "       ######            '####                 ######     ",
-    "    #.#####'              #####                 '#####.#  ",
-    "   .#####'               ''####.                  '#####. ",
-    "    #####'                .#####.                 '#####  ",
-    "    #####'                  #####.                '#####  ",
-    "     #####' .              '######             . '#####   ",
-    "     '#######  .            ######          .  #######'   ",
-    "       '########.. .        ######      . ..########'     ",
-    "         '###########......#######.....###########'     . ",
-    "            ''################################''        ##",
-    "                '''######################'''            ##",
-    "                    ####################.            ..## ",
-    "                     '#######################.....#####'  ",
-    "    ~~~~~~~~~~~~~~~   ~##############~'''#########'''~~   ",
-];
 
 /// `NvChad`'s hydra in braille, from the gist "Epic hydra ASCII art (`NvChad`)" by `kevinfengcs88`.
 const BRAILLE: &[&str] = &[
@@ -91,10 +66,9 @@ pub const SPINNER_FRAME_MS: u128 = 120;
 fn art(splash: Splash, area: Rect) -> Option<&'static [&'static str]> {
     let fits = |art: &&[&str]| area.h >= art.len() + 2 && area.w >= width(art) + 2;
     let wanted: &[&[&str]] = match splash {
-        Splash::Classic => &[HYDRA],
         Splash::Braille => &[BRAILLE],
         Splash::Small => &[SMALL],
-        Splash::Random => &[HYDRA, BRAILLE, SMALL],
+        Splash::Random => &[BRAILLE, SMALL],
     };
     let fitting: Vec<&[&str]> = wanted.iter().copied().filter(|a| fits(a)).collect();
     let seed: usize = usize::try_from(std::process::id()).unwrap_or(0);
@@ -156,7 +130,7 @@ mod tests {
 
     #[test]
     fn art_is_rectangular_and_picked_to_fit() {
-        for art in [HYDRA, BRAILLE, SMALL] {
+        for art in [BRAILLE, SMALL] {
             assert!(art.iter().all(|l| text::str_width(l) == width(art)));
         }
         let roomy: Rect = Rect { x: 0, y: 0, w: 120, h: 50 };
