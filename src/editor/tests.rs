@@ -1325,9 +1325,14 @@ fn background_commands_apply_when_done() {
     keys(&mut ed, "l");
     assert_eq!(text(&ed), "b\na", "still running");
     assert!(ed.deadline().is_some(), "the loop wakes up to check it");
+    let mut screen: crate::render::Screen = crate::render::Screen::new(crate::term::ColorDepth::TrueColor);
+    let mut frame = |ed: &mut Editor| screen.draw(ed, crate::term::Size { cols: 80, rows: 10 });
+    let running: String = frame(&mut ed);
+    assert!(crate::render::SPINNER.iter().any(|f| running.contains(&format!("{f} Sort"))), "the hydra spins");
     send.send(Ok("a\nb\n".into())).unwrap();
     ed.tick();
     assert_eq!(text(&ed), "a\nb");
+    assert!(ed.running_jobs().is_none() && !frame(&mut ed).contains(" Sort  "), "and stops when done");
     let (send, result): (Sender<Outcome>, Receiver<Outcome>) = mpsc::channel();
     ed.start_job("Sort", CommandOutput::Replace, all, result);
     keys(&mut ed, "x");

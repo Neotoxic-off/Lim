@@ -5,6 +5,8 @@ mod finder;
 #[cfg(test)]
 mod gallery;
 mod home;
+#[cfg(test)]
+pub use home::SPINNER;
 pub mod icons;
 pub mod markdown;
 pub mod palettes;

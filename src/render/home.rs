@@ -80,6 +80,13 @@ const SMALL: &[&str] = &[
     "⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣶⣶⣾⣿⣿⣿⣿⣿⣿⣿⣿⡟⢀⣀⣤⣾⡿⠃⠀⠀⠀⠀",
 ];
 
+/// The spinner for work in the background: a neck of the hydra swimming through its lake, in the drawings' own
+/// characters ('@' the eye, '#' the body, '.' the tail, '~' the lake).
+pub const SPINNER: [&str; 8] = ["@~~~~", "#@~~~", ".#@~~", "~.#@~", "~~.#@", "~~~.#", "~~~~.", "~~~~~"];
+
+/// Time each spinner frame stays.
+pub const SPINNER_FRAME_MS: u128 = 120;
+
 /// The drawing to show in `area`, if one fits. `Random` picks among those that fit, the same one for the whole run.
 fn art(splash: Splash, area: Rect) -> Option<&'static [&'static str]> {
     let fits = |art: &&[&str]| area.h >= art.len() + 2 && area.w >= width(art) + 2;
@@ -157,6 +164,17 @@ mod tests {
         // Only the small one fits 20 rows by 60 columns, so random has to pick it.
         assert_eq!(art(Splash::Random, Rect { x: 0, y: 0, w: 60, h: 20 }), Some(SMALL));
         assert_eq!(art(Splash::Random, Rect { x: 0, y: 0, w: 20, h: 10 }), None);
+    }
+
+    #[test]
+    fn the_spinner_keeps_its_width_and_swims_through() {
+        assert!(SPINNER.iter().all(|f| text::str_width(f) == 5));
+        let heads: Vec<Option<usize>> = SPINNER.iter().map(|f| f.find('@')).collect();
+        assert_eq!(
+            heads,
+            [Some(0), Some(1), Some(2), Some(3), Some(4), None, None, None],
+            "the eye leads, left to right"
+        );
     }
 
     #[test]

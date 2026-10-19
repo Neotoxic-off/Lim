@@ -1,6 +1,7 @@
 //! NvChad-style tabufline and statusline, command line and notifications.
 
 use super::Context;
+use super::home::{SPINNER, SPINNER_FRAME_MS};
 use super::icons::{Icons, icons};
 use super::row::{Grid, Row};
 use super::theme::{Group, Rgb, Style, mode_group, theme};
@@ -153,6 +154,12 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
         }
     }
     let mut right: Vec<(Style, String)> = Vec::new();
+    // Background work, where NvChad shows LSP progress.
+    if let Some((names, elapsed)) = ed.running_jobs() {
+        let frames: usize = SPINNER.len();
+        let frame: &str = SPINNER[usize::try_from(elapsed.as_millis() / SPINNER_FRAME_MS).unwrap_or(0) % frames];
+        right.push((t.style(Group::StatusJob), format!("{frame} {names}  ")));
+    }
     if let Some(reg) = ed.recording() {
         right.push((t.style(Group::StatusRecording), format!("{}@{reg}  ", Icons::spaced(set.recording))));
     }

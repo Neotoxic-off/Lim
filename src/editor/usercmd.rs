@@ -33,6 +33,7 @@ pub struct Job {
     /// The buffer's revision when the command started: replacing waits for text that has not changed since.
     revision: u64,
     result: Receiver<Outcome>,
+    started: Instant,
 }
 
 impl Editor {
@@ -93,8 +94,15 @@ impl Editor {
     /// Tracks a background command on the current buffer until `result` arrives.
     pub(super) fn start_job(&mut self, name: &str, output: CommandOutput, lines: LineRange, result: Receiver<Outcome>) {
         let revision: u64 = self.buf().revision();
-        self.jobs.push(Job { name: name.into(), output, lines, revision, result });
+        self.jobs.push(Job { name: name.into(), output, lines, revision, result, started: Instant::now() });
         self.info(format!("{name}: running"));
+    }
+
+    /// The background commands still running and how long the oldest has run, for the statusline's spinner.
+    pub fn running_jobs(&self) -> Option<(String, Duration)> {
+        let oldest: &Job = self.jobs.first()?;
+        let names: Vec<&str> = self.jobs.iter().map(|j| j.name.as_str()).collect();
+        Some((names.join(", "), oldest.started.elapsed()))
     }
 
     /// Applies the finished background commands; called on every key and timer tick.

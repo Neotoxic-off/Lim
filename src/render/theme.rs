@@ -70,6 +70,7 @@ groups! {
     StatusRecording = "StatusLineRecording",
     StatusModeSep = "StatusLineModeSep",
     StatusGit = "StatusLineGit",
+    StatusJob = "StatusLineJob",
     TabLine = "TabLine",
     TabLineSel = "TabLineSel",
     TabLineFill = "TabLineFill",
@@ -301,6 +302,8 @@ fn default_group(group: Group, p: &dyn Fn(&str) -> Option<Rgb>) -> Highlight {
         Group::StatusRecording => bold(on("ui.orange", "ui.statusline")),
         Group::StatusModeSep => hl(None, p("ui.none_text")),
         Group::StatusGit => bold(on("ui.winbar", "ui.statusline")),
+        // St_LspMsg: progress in green.
+        Group::StatusJob => on("ui.green", "ui.statusline"),
         Group::TabLine => on("ui.text_inactive", "ui.tabline"),
         Group::TabLineSel => on("ui.text", "ui.base"),
         Group::TabLineFill => hl(None, p("ui.tabline")),
