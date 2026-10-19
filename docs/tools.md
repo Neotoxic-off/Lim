@@ -4,7 +4,7 @@
 For the `:` text tools (`:base64`, `:json`, `:case`…), see [Vim editing › Text tools](vim.md#text-tools).
 
 The calculator, converter, bases, time and color tools open in a **popup**: a small float centred over the
-windows (the tools share it), on their own buffer (`[Calculator]`, `[Convert]`, `[Bases]`, `[Time]`, `[Color]`),
+windows (the tools share it; its bottom border shows what to type), on their own buffer (`[Calculator]`, `[Convert]`, `[Bases]`, `[Time]`, `[Color]`),
 in insert mode. Type a line and `<CR>`: the answer lands on the line below (`= 152.4 cm`, or `! why` when it is wrong) and a fresh line waits. The buffer is
 the history: scroll it, search it, yank from it, edit an old question and `<CR>` on it (in insert or normal mode)
 to answer it again in place. Each answer also goes to the `"` register, so `p` in your code pastes it. `<Esc>`

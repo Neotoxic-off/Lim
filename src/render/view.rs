@@ -23,7 +23,12 @@ pub fn window(ed: &mut Editor, index: usize, rect: Rect, grid: &mut Grid) -> Opt
         normal_mode: ed.mode == Mode::Normal,
         selection: if active { ed.selection() } else { None },
         pattern: if ed.highlight_search && ed.options.hlsearch { ed.search.clone() } else { String::new() },
-        options: if ed.zen { zen_options(&ed.options) } else { ed.options.clone() },
+        // A popup is bare, as zen mode: no numbers, signs or winbar.
+        options: if ed.zen || ed.windows.get(index).is_some_and(|w| w.floating) {
+            zen_options(&ed.options)
+        } else {
+            ed.options.clone()
+        },
         base: theme().bg(if active { Group::Normal } else { Group::NormalNC }),
     };
     ed.with_view(index, |buf| {

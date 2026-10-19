@@ -136,7 +136,7 @@ impl Tool {
         }
     }
 
-    /// What to type, shown when the window opens.
+    /// What to type, shown in the popup's bottom border.
     fn hint(self) -> &'static str {
         match self {
             Self::Calc => "2+3*4, sqrt(2), 2pi, ans*2",
@@ -1189,7 +1189,13 @@ impl Editor {
         let last: usize = buf.last_line();
         buf.cursor = Pos::new(last, buf.line_len(last));
         self.mode = super::Mode::Insert;
-        self.info(format!("{}: {} · <CR> answers, on any line", tool.title(), tool.hint()));
+    }
+
+    /// The help a tool's popup shows in its bottom border, when `buffer` is a tool's.
+    pub fn popup_hint(&self, buffer: usize) -> Option<String> {
+        let buf: &Buffer = self.buffers.get(buffer)?;
+        let tool: Tool = Tool::ALL.into_iter().find(|t| buf.throwaway && buf.title.as_deref() == Some(t.title()))?;
+        Some(format!("{} · <CR> answers", tool.hint()))
     }
 
     /// The tool whose window holds the current buffer.

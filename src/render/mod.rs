@@ -286,8 +286,17 @@ impl Screen {
             let frame: Rect = Rect { x: area.x + (area.w - w) / 2, y: area.y + (area.h - h) / 2, w, h };
             let title: String = ed.buffers.get(ed.windows[index].buffer).map(Buffer::name).unwrap_or_default();
             let t: Arc<Theme> = theme();
-            grid.float(frame, t.style(Group::FloatBorder), t.style(Group::NormalFloat), title.trim_matches(['[', ']']));
-            let inside: Rect = Rect { x: frame.x + 1, y: frame.y + 1, w: w - 2, h: h - 2 };
+            // Drawn as the notifications are: the editor's background inside a colored rounded border.
+            let fill: Style = t.style(Group::Normal);
+            let border: Style = Style::new(t.bg(Group::FloatTitle), fill.bg);
+            grid.float(frame, border, fill, title.trim_matches(['[', ']']));
+            if let Some(hint) = ed.popup_hint(ed.windows[index].buffer) {
+                let hint: String = format!(" {hint} ");
+                let room: usize = text::str_width(&hint).min(w - 4);
+                grid.text(frame.x + 2, frame.y + h - 1, room, t.on(Group::LineNr, fill.bg), &hint);
+            }
+            // A column of air on each side, inside the border.
+            let inside: Rect = Rect { x: frame.x + 2, y: frame.y + 1, w: w - 4, h: h - 2 };
             if index == ed.active {
                 ed.view_height = inside.h;
             }

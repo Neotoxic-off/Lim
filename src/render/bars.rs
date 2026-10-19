@@ -203,9 +203,6 @@ pub fn notification(ed: &Editor, grid: &mut Grid, top: usize) {
         Some(Message::Info(m)) if !m.is_empty() => (m, Group::NotifyInfo, icons(&ed.options).info),
         _ => return,
     };
-    // The editor's background, not the float's: a toast sits on the text, and a darker block there clashes.
-    let fill: Style = t.style(Group::Normal);
-    let border: Style = t.on(group, fill.bg);
     let max: usize = (grid.width / 2).max(20).min(grid.width.saturating_sub(2));
     let body: String = format!("{}{text}", Icons::spaced(icon));
     let width: usize = (text::str_width(&body) + 4).min(max);
@@ -213,6 +210,11 @@ pub fn notification(ed: &Editor, grid: &mut Grid, top: usize) {
         return;
     }
     let x: usize = grid.width - width - 1;
+    // The background of what the toast sits on (an unfocused window is darker), not the float's: a block of
+    // another shade there clashes.
+    let under: Rgb = grid.row(top + 1).get(x).map_or_else(|| t.bg(Group::Normal), |c| c.style.bg);
+    let fill: Style = Style { bg: under, ..t.style(Group::Normal) };
+    let border: Style = t.on(group, fill.bg);
     grid.float(Rect { x, y: top, w: width, h: 3 }, border, fill, "");
     grid.text(x + 2, top + 1, width - 4, Style { fg: border.fg, ..fill }, &body);
 }
