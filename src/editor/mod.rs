@@ -50,7 +50,7 @@ use crate::term::Key;
 pub use cheatsheet::{Card, Cheatsheet};
 use cmdhistory::CmdHistory;
 pub use complete::{Completion, MENU_HEIGHT, words_of};
-pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
+pub use explorer::{Entry, Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
 use motion::Motion;
 pub use mouse::{Pane, TabClick, TabHit};
 use operator::Operator;
