@@ -58,7 +58,6 @@ pub use picker::{Item, Picker, Target};
 pub use prompt::Prompt;
 pub use setup::{SETTINGS, Setup};
 pub use ui::MenuEntry;
-pub use usercmd::pipe;
 pub use wildmenu::CmdCompletion;
 pub use window::{Layout, Rect, Separator, View, Window, WindowId};
 

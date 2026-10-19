@@ -679,7 +679,7 @@ mod tests {
     #[test]
     fn runaway_patterns_end() {
         let line: String = "a".repeat(5000);
-        assert!(spans("\\(a*\\)*b", &line).is_empty());
+        assert_eq!(spans("\\(a*\\)*b", &line), Vec::<Range<usize>>::new());
         assert_eq!(spans(".*", &line), vec![0..5000]);
         // Repeated groups run on the machine's own stack: any number of rounds, even on a small thread stack.
         let small_stack = std::thread::Builder::new().stack_size(128 * 1024).spawn(|| {
@@ -694,7 +694,7 @@ mod tests {
         // The line holds the `b` the pattern requires, so it is searched: exponential, until the budget ends it.
         let line: String = "a".repeat(40) + "cb";
         let start: std::time::Instant = std::time::Instant::now();
-        assert!(spans("\\(a\\|a\\)*c\\(a\\|a\\)*\\(a\\|a\\)*d\\|\\(a\\|a\\)*xb", &line).is_empty());
+        assert_eq!(spans("\\(a\\|a\\)*c\\(a\\|a\\)*\\(a\\|a\\)*d\\|\\(a\\|a\\)*xb", &line), Vec::<Range<usize>>::new());
         assert!(start.elapsed() < std::time::Duration::from_secs(2), "{:?}", start.elapsed());
         assert_eq!(spans("\\v(a)\\m\\(b\\)\\M.\\Vc", "abxc"), vec![0..4], "back to magic, nomagic, very nomagic");
         assert_eq!(spans("\\l\\+", "ABcdE"), vec![2..4]);

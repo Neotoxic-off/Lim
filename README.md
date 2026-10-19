@@ -76,11 +76,11 @@ the start screen.
 | Hex & RE | binary files open as an editable hex dump, written back as bytes · `:hexedit` · `:detect` (ELF/PE/Mach-O and 20 formats, architecture, entropy, UPX) · `:strings` · `:inspect` · `:pack` · `:xor` |
 | Commands | `:Commands` in the config pipe the lines through a program in any language and put its output back or show it · format on save |
 | Robustness | atomic saves · refuses to clobber other files · a broken hex dump is never written · files too big for memory are refused, not half-loaded · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
-| Updates | `<Leader>pu` or `:upgrade` checks the latest GitHub release and rebuilds lim from it, from inside the editor |
+| Updates | `<Leader>pu` or `:upgrade` downloads the latest GitHub release's binary and swaps it in, from inside the editor |
 
 ## Install
 
-One line. The installer builds lim from source with Rust 1.88+ ([rustup](https://rustup.rs); on Windows with the
+One line. The installer builds the latest release from source with Rust 1.88+ ([rustup](https://rustup.rs); on Windows with the
 MSVC build tools it offers) and puts it in `~/.cargo/bin`, which rustup already adds to your `PATH`.
 
 **Linux, macOS**
@@ -102,9 +102,10 @@ curl.exe -fsSLo $env:TEMP\lim-install.bat https://raw.githubusercontent.com/Neot
 ```
 
 **Update** from inside lim with `<Leader>pu` (or `:upgrade`): it asks GitHub for the latest release and, when it is
-newer than yours, rebuilds lim from that tag with cargo in the background while you keep editing (it needs `curl`,
-present on Linux, macOS and Windows 10+). A notification says when it is done; restart lim to use the new version.
-Running the installer again also updates.
+newer than yours, downloads the binary for your platform and puts it in place of the running one, in the background
+while you keep editing. No Rust needed: lim talks HTTPS through the system (WinHTTP on Windows, libcurl on Linux and
+macOS). A notification says when it is done; restart lim to use the new version. Release binaries exist for Linux
+x86_64, macOS (Apple silicon and Intel) and Windows x86_64; elsewhere, run the installer again.
 
 Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim --locked`, or from a clone
 `cargo build --release` and copy `target/release/lim` (`lim.exe`) onto your `PATH`.

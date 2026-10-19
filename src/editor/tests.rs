@@ -220,7 +220,7 @@ fn user_commands_complete_and_run() {
     let (config, warnings): (Config, Vec<String>) = Config::from_str(
         r#"{ "commands": { "Sort": { "run": ["sort"], "output": "replace", "desc": "Sort lines" } } }"#,
     );
-    assert!(warnings.is_empty());
+    assert_eq!(warnings, Vec::<String>::new());
     let mut ed: Editor = editor("b\na");
     ed.configure(&config);
     keys(&mut ed, ":So");
@@ -238,7 +238,7 @@ fn user_keymaps_and_leader() {
         r#"{ "options": { "mapleader": "," },
              "keymaps": { "i": { "jk": "<Esc>" }, "n": { "<Leader>d": "dd", "Q": false, "H": "^" } } }"#,
     );
-    assert!(warnings.is_empty());
+    assert_eq!(warnings, Vec::<String>::new());
     let mut ed: Editor = editor("  abc\nxyz");
     ed.configure(&config);
     keys(&mut ed, "$H");

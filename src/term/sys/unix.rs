@@ -1,8 +1,9 @@
 //! Raw libc bindings for termios, window size, select, read and SIGWINCH.
 //! Layouts are the 64-bit little-endian Linux (glibc/musl) and macOS ABIs.
 
+use std::ffi::{CStr, CString, c_char, c_long, c_void};
 use std::io;
-use std::mem::MaybeUninit;
+use std::mem::{self, MaybeUninit};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -104,7 +105,7 @@ unsafe extern "C" {
     fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
     fn tcsetattr(fd: i32, action: i32, termios: *const Termios) -> i32;
     fn ioctl(fd: i32, request: u64, ...) -> i32;
-    fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
+    fn read(fd: i32, buf: *mut c_void, count: usize) -> isize;
     fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;
     // `poll` cannot wait on ttys on macOS, `select` can everywhere.
     fn select(nfds: i32, read: *mut FdSet, write: *mut FdSet, except: *mut FdSet, timeout: *mut TimeVal) -> i32;
@@ -157,7 +158,7 @@ pub fn wait_readable(timeout_ms: Option<u32>) -> io::Result<bool> {
 
 pub fn read_stdin(buf: &mut [u8]) -> io::Result<usize> {
     // A negative count is read(2)'s error return.
-    usize::try_from(unsafe { read(STDIN, buf.as_mut_ptr(), buf.len()) }).map_err(|_| io::Error::last_os_error())
+    usize::try_from(unsafe { read(STDIN, buf.as_mut_ptr().cast(), buf.len()) }).map_err(|_| io::Error::last_os_error())
 }
 
 fn interrupted_is<T>(value: T) -> io::Result<T> {
@@ -220,6 +221,117 @@ pub fn utc_offset(ts: i64) -> i64 {
         localtime_r(&raw const ts, &raw mut tm)
     };
     if done.is_null() { 0 } else { tm.gmtoff }
+}
+
+const RTLD_NOW: i32 = 2;
+const CURLOPT_URL: i32 = 10_002;
+const CURLOPT_WRITEDATA: i32 = 10_001;
+const CURLOPT_USERAGENT: i32 = 10_018;
+const CURLOPT_WRITEFUNCTION: i32 = 20_011;
+const CURLOPT_FOLLOWLOCATION: i32 = 52;
+const CURLOPT_NOSIGNAL: i32 = 99;
+const CURLOPT_CONNECTTIMEOUT: i32 = 78;
+const CURLOPT_LOW_SPEED_LIMIT: i32 = 19;
+const CURLOPT_LOW_SPEED_TIME: i32 = 20;
+const CURLINFO_RESPONSE_CODE: i32 = 0x0020_0002;
+
+/// Where libcurl lives: macOS ships it, and Linux has it wherever `curl` is installed.
+const LIBCURL: &[&CStr] = if cfg!(target_os = "macos") {
+    &[c"/usr/lib/libcurl.4.dylib"]
+} else {
+    &[c"libcurl.so.4", c"libcurl-gnutls.so.4", c"libcurl.so"]
+};
+
+#[cfg_attr(target_os = "linux", link(name = "dl"))]
+unsafe extern "C" {
+    fn dlopen(file: *const c_char, mode: i32) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
+}
+
+type Easy = *mut c_void;
+type Sink = extern "C" fn(*const u8, usize, usize, *mut c_void) -> usize;
+
+/// The handful of libcurl calls a GET needs, looked up at run time so lim does not link against it.
+struct Curl {
+    init: unsafe extern "C" fn() -> Easy,
+    setopt: unsafe extern "C" fn(Easy, i32, ...) -> i32,
+    perform: unsafe extern "C" fn(Easy) -> i32,
+    getinfo: unsafe extern "C" fn(Easy, i32, ...) -> i32,
+    strerror: unsafe extern "C" fn(i32) -> *const c_char,
+    cleanup: unsafe extern "C" fn(Easy),
+}
+
+/// # Safety
+/// `T` must be the function pointer type of the C function `name`.
+unsafe fn symbol<T: Copy>(lib: *mut c_void, name: &CStr) -> Option<T> {
+    let found: *mut c_void = unsafe { dlsym(lib, name.as_ptr()) };
+    (!found.is_null()).then(|| unsafe { mem::transmute_copy::<*mut c_void, T>(&found) })
+}
+
+fn libcurl() -> Option<Curl> {
+    let lib: *mut c_void =
+        LIBCURL.iter().map(|path| unsafe { dlopen(path.as_ptr(), RTLD_NOW) }).find(|lib| !lib.is_null())?;
+    // SAFETY: each type below is the signature libcurl documents for that function.
+    unsafe {
+        Some(Curl {
+            init: symbol(lib, c"curl_easy_init")?,
+            setopt: symbol(lib, c"curl_easy_setopt")?,
+            perform: symbol(lib, c"curl_easy_perform")?,
+            getinfo: symbol(lib, c"curl_easy_getinfo")?,
+            strerror: symbol(lib, c"curl_easy_strerror")?,
+            cleanup: symbol(lib, c"curl_easy_cleanup")?,
+        })
+    }
+}
+
+extern "C" fn collect(data: *const u8, size: usize, count: usize, body: *mut c_void) -> usize {
+    let len: usize = size.saturating_mul(count);
+    // SAFETY: `body` is the `Vec` handed to CURLOPT_WRITEDATA, and `data` holds `len` bytes.
+    unsafe { (*body.cast::<Vec<u8>>()).extend_from_slice(std::slice::from_raw_parts(data, len)) };
+    len
+}
+
+/// The body of `url`, through the system's libcurl (its TLS and certificates), redirects followed, in this
+/// process. Any status but 200 is an error (`HTTP 404`).
+pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
+    let curl: Curl = libcurl().ok_or("libcurl not found (install curl)")?;
+    let url: CString = CString::new(url).map_err(|e| e.to_string())?;
+    let easy: Easy = unsafe { (curl.init)() };
+    if easy.is_null() {
+        return Err("curl_easy_init failed".into());
+    }
+    let mut body: Vec<u8> = Vec::new();
+    let mut status: c_long = 0;
+    let sink: Sink = collect;
+    let code: i32 = unsafe {
+        (curl.setopt)(easy, CURLOPT_URL, url.as_ptr());
+        (curl.setopt)(easy, CURLOPT_USERAGENT, c"lim".as_ptr());
+        (curl.setopt)(easy, CURLOPT_FOLLOWLOCATION, c_long::from(1u8));
+        (curl.setopt)(easy, CURLOPT_NOSIGNAL, c_long::from(1u8));
+        (curl.setopt)(easy, CURLOPT_CONNECTTIMEOUT, c_long::from(30u8));
+        // Give up when under 1 byte/s for a minute, however long the whole download takes.
+        (curl.setopt)(easy, CURLOPT_LOW_SPEED_LIMIT, c_long::from(1u8));
+        (curl.setopt)(easy, CURLOPT_LOW_SPEED_TIME, c_long::from(60u8));
+        (curl.setopt)(easy, CURLOPT_WRITEFUNCTION, sink);
+        (curl.setopt)(easy, CURLOPT_WRITEDATA, (&raw mut body).cast::<c_void>());
+        let code: i32 = (curl.perform)(easy);
+        (curl.getinfo)(easy, CURLINFO_RESPONSE_CODE, &raw mut status);
+        (curl.cleanup)(easy);
+        code
+    };
+    if code != 0 {
+        let why: *const c_char = unsafe { (curl.strerror)(code) };
+        let why: String = if why.is_null() {
+            format!("curl error {code}")
+        } else {
+            unsafe { CStr::from_ptr(why) }.to_string_lossy().into()
+        };
+        return Err(why);
+    }
+    if status != 200 {
+        return Err(format!("HTTP {status}"));
+    }
+    Ok(body)
 }
 
 /// Fills `buf` from the kernel's random source; false if it cannot be read.

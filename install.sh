@@ -12,8 +12,19 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Building lim from $repo (about a minute)..."
-cargo install --git "$repo" --locked --force lim
+# The latest release, so lim knows its version; master when there is none (or for LIM_REPO).
+tag=""
+if [ -z "${LIM_REPO:-}" ]; then
+    tag=$(curl -fsSL https://api.github.com/repos/Neotoxic-off/Lim/releases/latest 2>/dev/null |
+        sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1) || tag=""
+fi
+
+echo "Building lim ${tag:-master} from $repo (about a minute)..."
+if [ -n "$tag" ]; then
+    cargo install --git "$repo" --tag "$tag" --locked --force lim
+else
+    cargo install --git "$repo" --locked --force lim
+fi
 
 bin="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}/bin"
 echo "lim installed: $bin/lim"

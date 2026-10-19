@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(split_sizes(21, 2, &[-2, 2]), [8, 12]);
         assert_eq!(split_sizes(21, 2, &[-50, 50]), [1, 19], "each child keeps a cell");
         assert_eq!(split_sizes(3, 3, &[]), [1, 1, 1]);
-        assert!(split_sizes(10, 0, &[]).is_empty());
+        assert_eq!(split_sizes(10, 0, &[]), Vec::<usize>::new());
     }
 
     #[test]

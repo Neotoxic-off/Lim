@@ -92,8 +92,9 @@ Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
 
 ## Packages
 
-`<Leader>pu` (or `:upgrade`) updates lim in the background: when GitHub has a newer release, cargo rebuilds it
-while you keep editing, then a notification says to restart lim. *lim*: there are no plugins to update.
+`<Leader>pu` (or `:upgrade`) updates lim in the background: when GitHub has a newer release, lim downloads its
+binary while you keep editing, checks that it starts, swaps it in, then a notification says to restart lim.
+*lim*: there are no plugins to update.
 
 ## UI toggles
 

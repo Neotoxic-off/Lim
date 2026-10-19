@@ -1,0 +1,109 @@
+# Every push to master that passes the checks becomes a release with a binary per platform, which `<Leader>pu`
+# (`:upgrade`) downloads.
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  tag:
+    needs: check
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # major.minor from Cargo.toml, patch = commits on master: always increasing, the same on a re-run.
+      - name: Version
+        id: version
+        run: |
+          base=$(sed -n 's/^version = "\([0-9]*\.[0-9]*\)\..*"/\1/p' Cargo.toml | head -n 1)
+          echo "version=$base.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+      # The tag points at a commit with that version in Cargo.toml, so the built lim knows it is up to date.
+      # Only the tag is pushed; master is left as it is.
+      - name: Tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null; then
+            echo "v$VERSION already exists"
+            exit 0
+          fi
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" Cargo.toml
+          cargo update --workspace --offline
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release v$VERSION"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+
+  # Asset names are lim-{ARCH}-{OS}{EXE_SUFFIX} from std::env::consts, as src/update.rs looks them up.
+  build:
+    needs: tag
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, asset: lim-x86_64-linux }
+          - { os: macos-latest, target: aarch64-apple-darwin, asset: lim-aarch64-macos }
+          - { os: macos-latest, target: x86_64-apple-darwin, asset: lim-x86_64-macos }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, asset: lim-x86_64-windows.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.tag.outputs.version }}
+      - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Name the binary
+        shell: bash
+        run: |
+          exe=target/${{ matrix.target }}/release/lim
+          [ -f "$exe.exe" ] && exe="$exe.exe"
+          cp "$exe" "${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  release:
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" assets/* --clobber
+          else
+            gh release create "v$VERSION" assets/* --verify-tag --title "lim v$VERSION" --generate-notes
+          fi

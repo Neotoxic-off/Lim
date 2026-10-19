@@ -1,5 +1,5 @@
-//! `:upgrade` / `<Leader>pu`: asks GitHub for the latest release and, when it is newer, rebuilds lim from that tag
-//! with cargo, as the installer does. curl ships with Linux, macOS and Windows 10+, so lim needs no TLS of its own.
+//! `:upgrade` / `<Leader>pu`: asks GitHub for the latest release and, when it is newer, downloads the binary built
+//! for this platform and puts it in place of this one. HTTPS goes through the system (`WinHTTP`, libcurl), in process.
 
 use std::fs;
 use std::io;
@@ -8,53 +8,69 @@ use std::process::{Command, Output, Stdio};
 use std::{env, iter};
 
 use crate::config::json::{self, Json};
-use crate::editor::pipe;
+use crate::term::https_get;
 
-const REPO: &str = "https://github.com/Neotoxic-off/Lim";
 const LATEST: &str = "https://api.github.com/repos/Neotoxic-off/Lim/releases/latest";
+const DOWNLOAD: &str = "https://github.com/Neotoxic-off/Lim/releases/download";
 
 /// Runs on a background thread while editing goes on; what it returns becomes a notification.
 pub fn run() -> Result<String, String> {
     let current: &str = env!("CARGO_PKG_VERSION");
-    let argv: Vec<String> = ["curl", "-fsSL", "-H", "User-Agent: lim", LATEST].map(str::to_owned).to_vec();
-    let reply: String = pipe(&argv, "").map_err(|e| {
+    let reply: Vec<u8> = https_get(LATEST).map_err(|e| {
         if e.contains("404") {
             "no release published on GitHub yet".into()
         } else {
             format!("cannot reach GitHub ({e})")
         }
     })?;
-    let tag: String = latest_tag(&reply).ok_or("GitHub's answer has no release tag")?;
+    let tag: String = latest_tag(&String::from_utf8_lossy(&reply)).ok_or("GitHub's answer has no release tag")?;
     if !newer(&tag, current) {
         return Ok(format!("lim {current} is up to date (latest release: {tag})"));
     }
-    // Windows cannot overwrite a running exe but can rename it, so this one steps aside for cargo.
-    let exe: Option<PathBuf> = env::current_exe().ok().filter(|_| cfg!(windows));
-    let old: Option<PathBuf> = exe.as_ref().map(|e| e.with_extension("old"));
-    if let (Some(exe), Some(old)) = (&exe, &old) {
-        let _: io::Result<()> = fs::remove_file(old);
-        let _: io::Result<()> = fs::rename(exe, old);
-    }
-    // Captured, so cargo's progress never draws over the editor.
-    let built: io::Result<Output> = Command::new("cargo")
-        .args(["install", "--git", REPO, "--tag", &tag, "--locked", "--force", "lim"])
-        .stdin(Stdio::null())
-        .output();
-    // Back in place unless cargo put the new one there (this exe was not the installed one, or the build failed).
-    if let (Some(exe), Some(old)) = (&exe, &old)
-        && !exe.exists()
-    {
-        let _: io::Result<()> = fs::rename(old, exe);
-    }
-    match built {
-        Ok(out) if out.status.success() => Ok(format!("lim updated to {tag}: restart lim to use it")),
-        Ok(out) => {
-            let stderr: String = String::from_utf8_lossy(&out.stderr).into_owned();
-            let error: &str = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
-            Err(format!("cargo {}: {}", out.status, error.trim()))
+    let asset: String = asset();
+    let binary: Vec<u8> = https_get(&format!("{DOWNLOAD}/{tag}/{asset}")).map_err(|e| {
+        if e.contains("404") {
+            format!("{tag} has no {asset}; reinstall with the installer")
+        } else {
+            format!("download: {e}")
         }
-        Err(e) => Err(format!("cargo: {e} (install Rust from https://rustup.rs)")),
+    })?;
+    let exe: PathBuf = env::current_exe().map_err(|e| format!("cannot find lim's own file: {e}"))?;
+    let new: PathBuf = exe.with_extension("new");
+    let written: io::Result<()> = fs::write(&new, &binary)
+        .and_then(|()| fs::metadata(&exe))
+        .and_then(|m| fs::set_permissions(&new, m.permissions()));
+    if let Err(e) = written {
+        let _: io::Result<()> = fs::remove_file(&new);
+        return Err(format!("cannot write {}: {e}", new.display()));
     }
+    // The one process: the new binary must start here and say its version before it replaces this one.
+    let expected: String = format!("lim {}", tag.trim_start_matches('v'));
+    let says: io::Result<Output> = Command::new(&new).arg("--version").stdin(Stdio::null()).output();
+    if !says.as_ref().is_ok_and(|out| String::from_utf8_lossy(&out.stdout).trim() == expected) {
+        let _: io::Result<()> = fs::remove_file(&new);
+        return Err(format!("the {tag} binary does not run on this system; lim {current} kept"));
+    }
+    replace(&exe, &new).map_err(|e| format!("cannot replace {}: {e}", exe.display()))?;
+    Ok(format!("lim updated to {tag}: restart lim to use it"))
+}
+
+/// The release asset for this platform, as the release workflow names it: `lim-x86_64-linux`, `lim-x86_64-windows.exe`.
+fn asset() -> String {
+    format!("lim-{}-{}{}", env::consts::ARCH, env::consts::OS, env::consts::EXE_SUFFIX)
+}
+
+/// Puts `new` in place of the running `exe`. Windows cannot overwrite a running exe but can rename it.
+fn replace(exe: &PathBuf, new: &PathBuf) -> io::Result<()> {
+    if !cfg!(windows) {
+        return fs::rename(new, exe);
+    }
+    let old: PathBuf = exe.with_extension("old");
+    let _: io::Result<()> = fs::remove_file(&old);
+    fs::rename(exe, &old)?;
+    fs::rename(new, exe).inspect_err(|_| {
+        let _: io::Result<()> = fs::rename(&old, exe);
+    })
 }
 
 /// `tag_name` of GitHub's releases/latest answer.
@@ -81,6 +97,8 @@ fn newer(tag: &str, current: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -104,5 +122,36 @@ mod tests {
         assert!(!newer("v0.0.9", "0.1.0"));
         assert!(!newer("nightly", "0.1.0"));
         assert!(!newer("v2.0.0-rc1", "0.1.0"));
+    }
+
+    #[test]
+    fn names_the_asset_of_this_platform() {
+        let name: String = asset();
+        assert!(name.starts_with("lim-") && name.contains(env::consts::OS), "{name}");
+        assert_eq!(Path::new(&name).extension().is_some_and(|e| e == "exe"), cfg!(windows));
+    }
+
+    #[test]
+    #[ignore = "network: cargo test https -- --ignored"]
+    fn https_reaches_github() {
+        let reply: Vec<u8> = https_get("https://api.github.com/repos/cli/cli/releases/latest").unwrap();
+        let tag: String = latest_tag(&String::from_utf8_lossy(&reply)).unwrap();
+        // A release asset redirects to another host, as lim's own binaries do.
+        let url: String = format!("https://github.com/cli/cli/releases/download/{tag}/gh_{}_checksums.txt", &tag[1..]);
+        assert!(String::from_utf8_lossy(&https_get(&url).unwrap()).contains("linux_amd64"));
+        assert_eq!(https_get("https://api.github.com/repos/cli/cli/releases/tags/no-such-tag"), Err("HTTP 404".into()));
+    }
+
+    #[test]
+    fn replaces_a_file_in_place() {
+        let dir: PathBuf = env::temp_dir().join(format!("lim-replace-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (exe, new): (PathBuf, PathBuf) = (dir.join("lim"), dir.join("lim.new"));
+        fs::write(&exe, "old").unwrap();
+        fs::write(&new, "new").unwrap();
+        replace(&exe, &new).unwrap();
+        assert_eq!(fs::read_to_string(&exe).unwrap(), "new");
+        assert!(!new.exists());
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

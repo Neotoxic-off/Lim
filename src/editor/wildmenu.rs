@@ -116,6 +116,6 @@ mod tests {
         let (start, items): (usize, Vec<(String, String)>) = candidates("e src/edi", &[]);
         assert_eq!(start, 2);
         assert!(items.iter().any(|(p, _)| p == "src/editor/"));
-        assert!(candidates("frob x", &[]).1.is_empty());
+        assert_eq!(candidates("frob x", &[]).1, Vec::<(String, String)>::new());
     }
 }

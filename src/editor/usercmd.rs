@@ -164,12 +164,8 @@ impl Editor {
     }
 }
 
-/// Runs `argv` with `input` on stdin. Its stdout with `\r\n` folded, or why it failed (its first stderr line).
-pub fn pipe(argv: &[String], input: &str) -> Result<String, String> {
-    pipe_for(argv, input, SAVE_TIMEOUT)
-}
-
-/// `pipe`, killing the program after `timeout`.
+/// Runs `argv` with `input` on stdin, killing it after `timeout`. Its stdout with `\r\n` folded, or why it failed
+/// (its first stderr line).
 fn pipe_for(argv: &[String], input: &str, timeout: Duration) -> Result<String, String> {
     let Some((program, rest)): Option<(&String, &[String])> = argv.split_first() else {
         return Err("nothing to run".into());
@@ -229,6 +225,7 @@ mod tests {
 
     #[test]
     fn pipes_through_a_program() {
+        let pipe = |argv: &[String], input: &str| pipe_for(argv, input, SAVE_TIMEOUT);
         let filter: &str = if cfg!(windows) { "findstr" } else { "grep" };
         assert_eq!(pipe(&[filter.into(), "b".into()], "b\na\nxb\n").unwrap(), "b\nxb\n");
         assert!(pipe(&[filter.into(), "b".into()], "a\n").is_err(), "no match exits with 1");

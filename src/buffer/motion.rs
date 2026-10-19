@@ -422,7 +422,7 @@ impl Buffer {
             }
             escaped = c == '\\' && !escaped;
         }
-        let pairs: Vec<(usize, usize)> = quotes.chunks_exact(2).map(|p| (p[0], p[1])).collect();
+        let pairs: Vec<(usize, usize)> = quotes.as_chunks::<2>().0.iter().map(|&[s, e]| (s, e)).collect();
         let (s, e): (usize, usize) = pairs
             .iter()
             .copied()

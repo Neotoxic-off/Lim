@@ -16,6 +16,15 @@ cargo test gallery -- --ignored   # redraws docs/gallery
 Before sending a change: tests and clippy pass on both Windows and Linux, the perf table did not regress, a
 new key, command or parser is reachable by the fuzzers, and the matching page in `docs/` is updated.
 
+## Releases
+
+Every push to `master` runs `.github/workflows/release.yml`: `cargo fmt --check`, clippy and the tests on Linux,
+macOS and Windows, then a GitHub release `vMAJOR.MINOR.N`, where `N` is the number of commits on master. The tag
+points at a commit that writes that version into `Cargo.toml` (master keeps its own), so the binaries built from it
+know their version. Each release carries `lim-x86_64-linux`, `lim-aarch64-macos`, `lim-x86_64-macos` and
+`lim-x86_64-windows.exe`, the names `src/update.rs` asks for. Bump major or minor in `Cargo.toml` on master by
+hand. `cargo test https -- --ignored` checks the in-process HTTPS against GitHub.
+
 ## No crash, no hang
 
 `src/fuzz.rs`: fuzzers feed random input to every entry point and check that nothing

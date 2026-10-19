@@ -14,8 +14,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Building lim from %repo% (about a minute)...
-cargo install --git "%repo%" --locked --force lim
+rem The latest release, so lim knows its version; master when there is none (or for LIM_REPO).
+set "tag="
+if not defined LIM_REPO for /f "delims=" %%t in ('powershell -NoProfile -Command "try { (Invoke-RestMethod https://api.github.com/repos/Neotoxic-off/Lim/releases/latest).tag_name } catch {}"') do set "tag=%%t"
+
+if defined tag (
+    echo Building lim %tag% from %repo% ^(about a minute^)...
+    cargo install --git "%repo%" --tag "%tag%" --locked --force lim
+) else (
+    echo Building lim master from %repo% ^(about a minute^)...
+    cargo install --git "%repo%" --locked --force lim
+)
 if errorlevel 1 exit /b 1
 
 set "bin=%USERPROFILE%\.cargo\bin"

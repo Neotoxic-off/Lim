@@ -2,14 +2,16 @@
 
 No crates: the terminal is driven through a handful of libc calls (`tcsetattr`, `ioctl`, `select`, `read`,
 `signal`) or, on Windows, kernel32 console calls with VT input and output, so both send the same escape
-sequences to one key decoder. The Windows clipboard is user32. Everything else is the standard library.
+sequences to one key decoder. The Windows clipboard is user32. HTTPS, for the update, goes through the system:
+WinHTTP on Windows, and on Linux and macOS libcurl, loaded with `dlopen` when needed so lim does not link
+against it. Everything else is the standard library.
 
 ```
 src/
 ├── main.rs        startup, event loop, panic recovery
-├── update.rs      :upgrade / <Leader>pu: the latest GitHub release, rebuilt with cargo
+├── update.rs      :upgrade / <Leader>pu: the latest GitHub release's binary, swapped in
 ├── error.rs       Vim-worded errors (E32, E37, E492…)
-├── term/          raw mode, window size, resize events, key decoding (sys/unix.rs, sys/windows.rs)
+├── term/          raw mode, window size, resize events, key decoding, HTTPS (sys/unix.rs, sys/windows.rs)
 ├── buffer/        lines, undo history, motions, text objects, git signs, file I/O, hex dumps
 ├── editor/        modes, operators, registers, keymaps, the built-in binding table, windows, picker,
 │                  file tree, which-key, cheat sheet, completion, sessions, prompts, clipboard, macros,

@@ -307,7 +307,7 @@ mod tests {
         cache.invalidate(0);
         assert_eq!(cache.line(&lines, rust, 2, usize::MAX)[7], Hl::Keyword);
         let lua: &Lang = lang("x.lua");
-        assert!(highlight(&lines[3].chars().collect::<Vec<_>>(), lua, State::default()).1 != State::default());
+        assert_ne!(highlight(&lines[3].chars().collect::<Vec<_>>(), lua, State::default()).1, State::default());
     }
 
     /// A far jump keeps only a window of states, yet stays exact: a comment opened on line 1 still colors it.

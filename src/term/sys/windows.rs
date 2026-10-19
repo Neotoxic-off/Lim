@@ -4,6 +4,7 @@
 
 use std::ffi::c_void;
 use std::io;
+use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 type Handle = *mut c_void;
@@ -133,6 +134,117 @@ pub fn random(buf: &mut [u8]) -> bool {
         let len: u32 = u32::try_from(chunk.len()).unwrap_or(0);
         unsafe { RtlGenRandom(chunk.as_mut_ptr(), len) != 0 }
     })
+}
+
+const WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY: u32 = 4;
+const WINHTTP_FLAG_SECURE: u32 = 0x0080_0000;
+const WINHTTP_QUERY_STATUS_CODE: u32 = 19;
+const WINHTTP_QUERY_FLAG_NUMBER: u32 = 0x2000_0000;
+const HTTPS_PORT: u16 = 443;
+
+#[link(name = "winhttp")]
+unsafe extern "system" {
+    fn WinHttpOpen(agent: *const u16, access: u32, proxy: *const u16, bypass: *const u16, flags: u32) -> Handle;
+    fn WinHttpConnect(session: Handle, server: *const u16, port: u16, reserved: u32) -> Handle;
+    fn WinHttpOpenRequest(
+        connect: Handle,
+        verb: *const u16,
+        object: *const u16,
+        version: *const u16,
+        referrer: *const u16,
+        accept: *const *const u16,
+        flags: u32,
+    ) -> Handle;
+    fn WinHttpSendRequest(
+        request: Handle,
+        headers: *const u16,
+        headers_len: u32,
+        optional: *const c_void,
+        optional_len: u32,
+        total_len: u32,
+        context: usize,
+    ) -> i32;
+    fn WinHttpReceiveResponse(request: Handle, reserved: *mut c_void) -> i32;
+    fn WinHttpQueryHeaders(
+        request: Handle,
+        level: u32,
+        name: *const u16,
+        buffer: *mut c_void,
+        len: *mut u32,
+        index: *mut u32,
+    ) -> i32;
+    fn WinHttpReadData(request: Handle, buffer: *mut c_void, len: u32, read: *mut u32) -> i32;
+    fn WinHttpCloseHandle(handle: Handle) -> i32;
+}
+
+/// A `WinHTTP` handle, closed when dropped.
+struct Internet(Handle);
+
+impl Drop for Internet {
+    fn drop(&mut self) {
+        unsafe { WinHttpCloseHandle(self.0) };
+    }
+}
+
+fn internet(handle: Handle, what: &str) -> Result<Internet, String> {
+    if handle.is_null() { Err(format!("{what}: {}", io::Error::last_os_error())) } else { Ok(Internet(handle)) }
+}
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain([0]).collect()
+}
+
+/// The body of `url` (`https://` only), through `WinHTTP`: the system's TLS, certificates and proxy, redirects
+/// followed. Any status but 200 is an error (`HTTP 404`).
+pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
+    let rest: &str = url.strip_prefix("https://").ok_or("not an https URL")?;
+    let (host, path): (&str, &str) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let path: &str = if path.is_empty() { "/" } else { path };
+    let null: *const u16 = ptr::null();
+    let session: Internet = internet(
+        unsafe { WinHttpOpen(wide("lim").as_ptr(), WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) },
+        "WinHttpOpen",
+    )?;
+    let connect: Internet =
+        internet(unsafe { WinHttpConnect(session.0, wide(host).as_ptr(), HTTPS_PORT, 0) }, "WinHttpConnect")?;
+    let request: Internet = internet(
+        unsafe {
+            WinHttpOpenRequest(
+                connect.0,
+                wide("GET").as_ptr(),
+                wide(path).as_ptr(),
+                null,
+                null,
+                ptr::null(),
+                WINHTTP_FLAG_SECURE,
+            )
+        },
+        "WinHttpOpenRequest",
+    )?;
+    let fail = |e: io::Error| format!("{host}: {e}");
+    check(unsafe { WinHttpSendRequest(request.0, null, 0, ptr::null(), 0, 0, 0) }).map_err(fail)?;
+    check(unsafe { WinHttpReceiveResponse(request.0, ptr::null_mut()) }).map_err(fail)?;
+    let (mut status, mut len): (u32, u32) = (0, 4);
+    let level: u32 = WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER;
+    check(unsafe {
+        WinHttpQueryHeaders(request.0, level, null, (&raw mut status).cast(), &raw mut len, ptr::null_mut())
+    })
+    .map_err(fail)?;
+    if status != 200 {
+        return Err(format!("HTTP {status}"));
+    }
+    let mut body: Vec<u8> = Vec::new();
+    let mut chunk: Vec<u8> = vec![0; 1 << 16];
+    loop {
+        let mut read: u32 = 0;
+        let room: u32 = u32::try_from(chunk.len()).unwrap_or(u32::MAX);
+        check(unsafe { WinHttpReadData(request.0, chunk.as_mut_ptr().cast(), room, &raw mut read) }).map_err(fail)?;
+        let read: usize = usize::try_from(read).unwrap_or(0);
+        if read == 0 {
+            return Ok(body);
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
 }
 
 /// The input and output console modes, saved on entry and restored on exit.
