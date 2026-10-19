@@ -3,7 +3,7 @@
 Rust 1.88+, no dependencies. The code layout and design are in [How lim is built](architecture.md).
 
 ```sh
-cargo test                     # 125+ tests: behaviour, fuzzers on every input, perf budgets
+cargo test                     # 160+ tests: behaviour, fuzzers on every input, perf budgets
 cargo clippy --all-targets     # pedantic, zero warnings; unwrap/expect/panic are denied
 cargo fmt --check              # rustfmt.toml, 120 columns
 cargo test --release perf -- --nocapture   # the benchmark table: run it before and after a change
@@ -80,4 +80,14 @@ of 5, Neovim 0.12 with `-u NONE` (no config, no plugins: its fastest). lim must 
 
 (Linux in WSL, release build.)
 
-Screenshots are real lim frames captured in a pseudo-terminal and rasterised.
+## Screenshots
+
+The README's screenshots and the gallery of [Themes and icons](themes.md) are real lim frames, drawn by the
+renderer itself. `cargo test gallery -- --ignored` rewrites the gallery's SVGs in `docs/gallery`.
+`cargo test screenshots -- --ignored` plays each README scene with real keys in a small demo project and writes its
+frame as SVG to `target/screenshots`; run it on Linux (in WSL), so paths read `src/main.rs`. Each SVG is then
+rasterised to `docs/screenshots/<scene>.png` at its own size by a headless browser, with a Nerd Font installed:
+
+```powershell
+msedge --headless --disable-gpu --hide-scrollbars --screenshot=docs\screenshots\editor.png --window-size=1080,612 target\screenshots\editor.svg
+```

@@ -44,17 +44,21 @@ lim is that editor with all of it **built in**:
 of Lerna: one body, many heads, like one editor working many windows. It greets you, in braille, on
 the start screen.
 
-![Editing: file tree, git signs, indent guides, TODO and color highlights](docs/screenshots/editor.png)
+![Editing: file tree, indent guides, TODO, URL and color highlights](docs/screenshots/editor.png)
 
-| Start screen | Find files |
+| **Start screen** (the hydra and nvdash's buttons) | **Find files** (with preview) |
 |---|---|
 | ![Start screen with the hydra](docs/screenshots/dashboard.png) | ![File picker with preview](docs/screenshots/picker.png) |
-| **Grep** | **which-key over two splits** |
+| **Live grep** | **which-key** (`<Leader>`) |
 | ![Live grep](docs/screenshots/grep.png) | ![which-key menu](docs/screenshots/whichkey.png) |
-| **Cheat sheet** (`<F1>`) | **Theme switcher** (`<Leader>ft`, live preview) |
+| **Cheat sheet** (`<F1>`) | **Theme switcher** (`<Leader>ft`, live on a code sample) |
 | ![Cheat sheet](docs/screenshots/cheatsheet.png) | ![Theme picker](docs/screenshots/themes.png) |
-| **Completion** (words from open buffers) | **Command-line completion** (tabs aligned with the windows) |
+| **Completion** (words from open buffers) | **Command-line completion** |
 | ![Completion menu](docs/screenshots/completion.png) | ![Command-line completion](docs/screenshots/cmdline.png) |
+| **Tools** (`<Leader>xc`, a popup that keeps its history) | **Visual line selection** |
+| ![Calculator popup](docs/screenshots/tools.png) | ![Visual line selection](docs/screenshots/visual.png) |
+| **Settings** (`<Leader>,`, every option, searchable) | |
+| ![Settings](docs/screenshots/settings.png) | |
 
 ## Features
 
@@ -63,7 +67,7 @@ the start screen.
 | Vim editing | Normal, insert, replace, visual, visual-line and visual-block modes · counts · operators `d c y > < gu gU g~ gc` over any motion or text object · `.` · macros · undo/redo (1000 levels) · named registers (`"a`, `"A` append, `"0`, `"1`–`"9` shifting, `"-`, `"_`, `"+`) · marks and jump list that follow edits · Vim regexes in `/`, `?`, `*`, `:s`, `:g` · `:g`/`:v`, `:norm`, `:sort`, `:m`, `:t`, `:r` · line ranges with offsets |
 | Motions | `h j k l w b e ge W B E gE 0 ^ $ g_ { } % gg G H M L f F t T ; , n N * #`, `gn` (`cgn` then `.`), page and line scrolling, `<S-arrows>` (word / page), `zz zt zb` · `:` and `/` history |
 | Text objects | `iw` `aw` `iW` `aW` `ip` `ap` `it` `at` (HTML/XML tags) `i(` `a(` `i[` `a[` `i{` `a{` `i<` `a<` `i"` `a"` `i'` `a'` `` i` `` `` a` `` |
-| AstroNvim look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · NvChad tabufline with jump labels and clickable tabs, close marks, light/dark and close-all buttons, aligned with the windows when the file tree is open · git branch and +/~/- counts in the statusline, and a hydra spinner while background commands (`:upgrade`, config commands) run · nvim-tree look for the file tree · optional winbar path and relative numbers · sign column · cursorline · borderless NvChad-style floats with pill titles · notifications · start screen with the hydra and nvdash buttons |
+| NvChad look | 30 colorschemes (NvChad's onedark by default) · NvChad-style statusline (rounded, slanted, arrow or flat ends) · NvChad tabufline with jump labels and clickable tabs, close marks, light/dark and close-all buttons, aligned with the windows when the file tree is open · git branch and +/~/- counts in the statusline, and a hydra spinner while background commands (`:upgrade`, config commands) run · nvim-tree look for the file tree · optional winbar path and relative numbers · sign column · cursor line number (or the whole cursorline) · borderless NvChad-style floats with pill titles · notifications · start screen with the hydra and nvdash buttons |
 | Code | keyword highlighting for 40+ languages and formats (Rust, Python, JS/TS, C/C++, C#, Java, Kotlin, Go, PHP, Ruby, Swift, Dart, Scala, Lua, SQL, HTML/XML, CSS/SCSS, Markdown, JSON/YAML/TOML, shell, PowerShell, batch, Makefile, Dockerfile, CMake, Zig, Haskell, Elixir, R, Perl, asm, Nix, Terraform...) with multi-line comments and strings, HTML tags and config keys · blink.cmp-style completion from the words of open buffers · autopairs · auto-indent · comment toggling |
 | Helpers | indent guides · matching bracket · references of the word under the cursor (`]r`) · URLs (`gx`) · `#RRGGBB` shown in its color · `TODO:`/`FIX:`/`HACK:`… highlighted (`]T`) · Markdown preview beside the file, live as you type (`<Leader>um`) |
 | Git | signs against the index · hunk jumps · graph of every branch, log, file log, status and stash pickers with diffs · `git browse` · status colors in the file tree |
