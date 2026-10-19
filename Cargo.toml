@@ -1,6 +1,6 @@
 [package]
 name = "lim"
-version = "0.1.0"
+version = "0.1.19"
 edition = "2024"
 rust-version = "1.88"
 description = "Neovim, fully set up, without Lua, plugin managers or dependencies"
