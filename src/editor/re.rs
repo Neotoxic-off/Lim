@@ -242,76 +242,85 @@ fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
 /// The file type from its first bytes, with the architecture of executables.
 fn detect(bytes: &[u8]) -> String {
     if bytes.starts_with(b"\x7fELF") {
-        let bits: &str = if bytes.get(4) == Some(&2) { "64" } else { "32" };
-        let big: bool = bytes.get(5) == Some(&2);
-        let machine: &str = match u16_at(bytes, 18, big) {
-            Some(3) => "x86",
-            Some(0x3e) => "x86-64",
-            Some(0x28) => "ARM",
-            Some(0xb7) => "AArch64",
-            Some(0xf3) => "RISC-V",
-            Some(8) => "MIPS",
-            Some(0x14 | 0x15) => "PowerPC",
-            _ => "unknown machine",
-        };
-        let kind: &str = match u16_at(bytes, 16, big) {
-            Some(1) => "relocatable",
-            Some(2) => "executable",
-            Some(3) => "shared object",
-            Some(4) => "core",
-            _ => "",
-        };
-        return format!("ELF {bits}-bit {} {kind} {machine}", if big { "MSB" } else { "LSB" });
+        return elf(bytes);
     }
     if bytes.starts_with(b"MZ") {
-        let pe: Option<usize> = u32_at(bytes, 0x3c).and_then(|o| usize::try_from(o).ok());
-        let Some(pe): Option<usize> = pe.filter(|o| bytes.get(*o..).is_some_and(|r| r.starts_with(b"PE\0\0"))) else {
-            return "MS-DOS executable".into();
-        };
-        let machine: &str = match u16_at(bytes, pe + 4, false) {
-            Some(0x14c) => "x86",
-            Some(0x8664) => "x86-64",
-            Some(0xaa64) => "ARM64",
-            Some(0x1c0 | 0x1c4) => "ARM",
-            _ => "unknown machine",
-        };
-        let dll: bool = u16_at(bytes, pe + 22, false).is_some_and(|c| c & 0x2000 != 0);
-        let plus: bool = u16_at(bytes, pe + 24, false) == Some(0x20b);
-        let dotnet: bool = find(bytes, b"mscoree.dll").is_some() || find(bytes, b"#Strings").is_some();
-        return format!(
-            "PE32{} {} {machine}{}",
-            if plus { "+" } else { "" },
-            if dll { "DLL" } else { "executable" },
-            if dotnet { " .NET" } else { "" }
-        );
+        return pe(bytes);
     }
-    let magics: &[(&[u8], &str)] = &[
-        (b"\xcf\xfa\xed\xfe", "Mach-O 64-bit"),
-        (b"\xce\xfa\xed\xfe", "Mach-O 32-bit"),
-        (b"\xca\xfe\xba\xbe", "Mach-O universal or Java class"),
-        (b"dex\n", "Android DEX"),
-        (b"\0asm", "WebAssembly"),
-        (b"PK\x03\x04", "ZIP (also jar, apk, docx)"),
-        (b"\x1f\x8b", "gzip"),
-        (b"BZh", "bzip2"),
-        (b"\xfd7zXZ\0", "xz"),
-        (b"\x28\xb5\x2f\xfd", "zstd"),
-        (b"7z\xbc\xaf\x27\x1c", "7-Zip"),
-        (b"Rar!", "RAR"),
-        (b"MSCF", "Microsoft Cabinet"),
-        (b"\xd0\xcf\x11\xe0", "OLE compound file (doc, xls, msi)"),
-        (b"%PDF", "PDF"),
-        (b"\x89PNG", "PNG"),
-        (b"\xff\xd8\xff", "JPEG"),
-        (b"GIF8", "GIF"),
-        (b"SQLite format 3\0", "SQLite database"),
-        (b"#!", "script"),
-    ];
-    magics.iter().find(|(magic, _)| bytes.starts_with(magic)).map_or_else(
-        || if std::str::from_utf8(bytes).is_ok() { "text".into() } else { "data".into() },
-        |(_, name)| (*name).to_owned(),
-    )
+    match MAGICS.iter().find(|(magic, _)| bytes.starts_with(magic)) {
+        Some((_, name)) => (*name).to_owned(),
+        None if std::str::from_utf8(bytes).is_ok() => "text".into(),
+        None => "data".into(),
+    }
 }
+
+/// An ELF header: class, byte order, file kind and machine.
+fn elf(bytes: &[u8]) -> String {
+    let bits: &str = if bytes.get(4) == Some(&2) { "64" } else { "32" };
+    let big: bool = bytes.get(5) == Some(&2);
+    let machine: &str = match u16_at(bytes, 18, big) {
+        Some(3) => "x86",
+        Some(0x3e) => "x86-64",
+        Some(0x28) => "ARM",
+        Some(0xb7) => "AArch64",
+        Some(0xf3) => "RISC-V",
+        Some(8) => "MIPS",
+        Some(0x14 | 0x15) => "PowerPC",
+        _ => "unknown machine",
+    };
+    let kind: &str = match u16_at(bytes, 16, big) {
+        Some(1) => "relocatable",
+        Some(2) => "executable",
+        Some(3) => "shared object",
+        Some(4) => "core",
+        _ => "",
+    };
+    format!("ELF {bits}-bit {} {kind} {machine}", if big { "MSB" } else { "LSB" })
+}
+
+/// An `MZ` file: a PE (32 or 32+, executable or DLL, machine, .NET), or a plain MS-DOS executable.
+fn pe(bytes: &[u8]) -> String {
+    let header: Option<usize> = u32_at(bytes, 0x3c).and_then(|o| usize::try_from(o).ok());
+    let Some(pe): Option<usize> = header.filter(|o| bytes.get(*o..).is_some_and(|r| r.starts_with(b"PE\0\0"))) else {
+        return "MS-DOS executable".into();
+    };
+    let machine: &str = match u16_at(bytes, pe + 4, false) {
+        Some(0x14c) => "x86",
+        Some(0x8664) => "x86-64",
+        Some(0xaa64) => "ARM64",
+        Some(0x1c0 | 0x1c4) => "ARM",
+        _ => "unknown machine",
+    };
+    let dll: bool = u16_at(bytes, pe + 22, false).is_some_and(|c| c & 0x2000 != 0);
+    let plus: &str = if u16_at(bytes, pe + 24, false) == Some(0x20b) { "+" } else { "" };
+    let dotnet: bool = find(bytes, b"mscoree.dll").is_some() || find(bytes, b"#Strings").is_some();
+    let kind: &str = if dll { "DLL" } else { "executable" };
+    format!("PE32{plus} {kind} {machine}{}", if dotnet { " .NET" } else { "" })
+}
+
+/// Other formats by their magic bytes.
+const MAGICS: &[(&[u8], &str)] = &[
+    (b"\xcf\xfa\xed\xfe", "Mach-O 64-bit"),
+    (b"\xce\xfa\xed\xfe", "Mach-O 32-bit"),
+    (b"\xca\xfe\xba\xbe", "Mach-O universal or Java class"),
+    (b"dex\n", "Android DEX"),
+    (b"\0asm", "WebAssembly"),
+    (b"PK\x03\x04", "ZIP (also jar, apk, docx)"),
+    (b"\x1f\x8b", "gzip"),
+    (b"BZh", "bzip2"),
+    (b"\xfd7zXZ\0", "xz"),
+    (b"\x28\xb5\x2f\xfd", "zstd"),
+    (b"7z\xbc\xaf\x27\x1c", "7-Zip"),
+    (b"Rar!", "RAR"),
+    (b"MSCF", "Microsoft Cabinet"),
+    (b"\xd0\xcf\x11\xe0", "OLE compound file (doc, xls, msi)"),
+    (b"%PDF", "PDF"),
+    (b"\x89PNG", "PNG"),
+    (b"\xff\xd8\xff", "JPEG"),
+    (b"GIF8", "GIF"),
+    (b"SQLite format 3\0", "SQLite database"),
+    (b"#!", "script"),
+];
 
 /// Runs of 4+ printable ASCII chars, each `width` bytes (2: UTF-16LE, the high byte zero), with their offsets.
 fn strings(bytes: &[u8], width: usize) -> Vec<(usize, String)> {
