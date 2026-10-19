@@ -165,101 +165,56 @@ impl Screen {
         out
     }
 
-    /// The frame as cells, and the cursor's screen cell if it shows.
+    /// The frame as cells, and the cursor's screen cell if it shows. Drawn back to front: the tabline, the side
+    /// panels, the windows, the bars at the bottom, then the floats over everything.
     fn compose(&mut self, ed: &mut Editor, width: usize, height: usize) -> (Grid, Option<(usize, usize)>) {
         ed.refresh_completion();
         ed.panes.clear();
         ed.tab_hits.clear();
-        let t: Arc<Theme> = theme();
         let options: Options = ed.options.clone();
-        let mut grid: Grid = Grid::new(width, height, t.style(Group::Normal));
-        let roomy: bool = height > 3;
-        let top: usize = usize::from(options.showtabline && roomy);
-        let status: usize = usize::from(options.laststatus && roomy);
-        let prompt: bool = matches!(ed.mode, Mode::Command | Mode::Search);
-        // With cmdheight=0, typing `:` or `/` borrows a line as Neovim does, pushing the statusline up.
-        let cmd: usize = (options.cmdheight.min(1) | usize::from(prompt)) * usize::from(roomy);
-        let text_height: usize = height.saturating_sub(top + status + cmd).max(1);
-
+        let mut grid: Grid = Grid::new(width, height, theme().style(Group::Normal));
+        let rows: Rows = Rows::of(&options, ed.mode, height);
         // Columns taken by the file tree and its border, shared by the tabline and the windows.
         let tree_width: usize = if ed.explorer.is_some() && width >= 20 { EXPLORER_WIDTH.min(width / 2) } else { 0 };
-        if top == 1 {
+        if rows.tabline {
             ed.tab_hits = bars::tabline(ed, &mut grid, 0, if tree_width > 0 { tree_width + 1 } else { 0 });
         }
-        let mut area: Rect = Rect { x: 0, y: top, w: width, h: text_height };
-        let mut cursor: Option<(usize, usize)> = None;
-        if tree_width > 0 {
-            cursor = tree::explorer(ed, &mut grid, Rect { w: tree_width, ..area });
-            // NvChad hides this separator: the tree's color alone sets it apart.
-            let tree_bg: Rgb = t.bg(Group::ExplorerNormal);
-            grid.vline(tree_width, area.y..area.y + area.h, Style::new(tree_bg, tree_bg));
-            area = Rect { x: tree_width + 1, w: width - tree_width - 1, ..area };
-        }
-        // The Markdown preview takes the right half, past a separator, while a Markdown buffer is shown.
-        if ed.markdown_preview && !ed.zen && area.w >= 40 && markdown::is_markdown(ed.buf()) {
-            let panel_width: usize = area.w / 2;
-            area.w -= panel_width + 1;
-            let separator: usize = area.x + area.w;
-            grid.vline(separator, area.y..area.y + area.h, theme().style(Group::WinSeparator));
-            markdown::preview(ed, &mut grid, Rect { x: separator + 1, w: panel_width, ..area });
-        }
-        let windows_cursor: Option<(usize, usize)> = if ed.zen {
-            // snacks.zen: the focused window alone, centred, at most 120 columns wide.
-            let w: usize = 120.min(area.w * 3 / 4).max(area.w.min(20));
-            let zen: Rect = Rect { x: area.x + (area.w - w) / 2, w, ..area };
-            ed.area = zen;
-            ed.view_height = zen.h;
-            view::window(ed, ed.active, zen, &mut grid)
-        } else {
-            Self::windows(ed, area, &mut grid)
-        };
-        if ed.dashboard {
-            grid.fill(area, theme().style(Group::Normal));
-            home::dashboard(&mut grid, area, &options);
-        } else if ed.mode != Mode::Explorer {
-            cursor = windows_cursor;
-        }
+        let screen: Rect = Rect { x: 0, y: rows.top(), w: width, h: rows.text };
+        let (area, tree_cursor): (Rect, Option<(usize, usize)>) = side_panels(ed, &mut grid, screen, tree_width);
+        let mut cursor: Option<(usize, usize)> = text_area(ed, &mut grid, area, &options, tree_cursor);
         popup::completion(ed, &mut grid, cursor);
         popup::which_key(ed, &mut grid, area);
-        if status == 1 {
+        self.bottom_bars(ed, &mut grid, &rows, &options);
+        if rows.prompt {
+            cursor = Some((height - 1, 1 + text::str_width(&ed.cmdline)));
+        }
+        let cursor: Option<(usize, usize)> = overlays(ed, &mut grid, cursor);
+        (grid, cursor)
+    }
+
+    /// The statusline, then the command line (or the last message, or a notification).
+    fn bottom_bars(&mut self, ed: &mut Editor, grid: &mut Grid, rows: &Rows, options: &Options) {
+        if rows.status {
             // The branch can change under us (a shell, another terminal): re-read HEAD, a tiny file.
             self.ctx.branch = env::current_dir().ok().and_then(git_branch);
             // The counts come with the signs, cached per buffer version; the gutter may not have asked for them.
             if options.gitsigns {
                 ed.buf_mut().git_signs();
             }
-            bars::statusline(ed, &self.ctx, &mut grid, top + text_height);
+            bars::statusline(ed, &self.ctx, grid, rows.top() + rows.text);
         }
-        if cmd == 1 || prompt {
-            bars::cmdline(ed, &mut grid, height - 1);
+        if rows.cmd || rows.prompt {
+            bars::cmdline(ed, grid, rows.height - 1);
         } else if options.notifications {
-            bars::notification(ed, &mut grid, top);
+            bars::notification(ed, grid, rows.top());
         }
-        if prompt {
-            cursor = Some((height - 1, 1 + text::str_width(&ed.cmdline)));
-        }
-        if let Some(input) = finder::picker(ed, &mut grid) {
-            cursor = Some(input);
-        }
-        popup::cmd_completion(ed, &mut grid);
-        popup::cheatsheet(ed, &mut grid);
-        popup::setup(ed, &mut grid);
-        if matches!(ed.mode, Mode::Cheatsheet | Mode::Setup) {
-            cursor = None;
-        }
-        if let Some(input) = popup::prompt(ed, &mut grid) {
-            cursor = Some(input);
-        }
-        (grid, cursor)
     }
 
-    /// Every window and split border inside `area`; returns the focused cursor's screen cell.
+    /// Every window and split border inside `area`, then the popups over them; returns the focused cursor's cell.
     fn windows(ed: &mut Editor, area: Rect, grid: &mut Grid) -> Option<(usize, usize)> {
         ed.area = area;
         let mut rects: Vec<(WindowId, Rect)> = Vec::new();
         ed.layout.rects(area, &mut rects);
-        let mut separators: Vec<Separator> = Vec::new();
-        ed.layout.separators(area, &mut separators);
         let mut cursor: Option<(usize, usize)> = None;
         for (id, rect) in rects {
             let Some(index): Option<usize> = ed.windows.iter().position(|w| w.id == id) else { continue };
@@ -268,42 +223,151 @@ impl Screen {
             }
             cursor = cursor.or(view::window(ed, index, rect, grid));
         }
-        let border: Style = theme().style(Group::WinSeparator);
-        for sep in separators {
-            if sep.vertical {
-                grid.vline(sep.x, sep.y..sep.y + sep.len, border);
-            } else {
-                grid.text(sep.x, sep.y, sep.len, border, &"\u{2500}".repeat(sep.len));
-            }
-        }
-        // Popups (the tools) over the windows: small, centred, a float with the tool's name as title.
+        separators(ed, area, grid);
         let popups: Vec<usize> = (0..ed.windows.len()).filter(|&i| ed.windows[i].floating).collect();
         for index in popups {
-            let (w, h): (usize, usize) = (POPUP_WIDTH.min(area.w.saturating_sub(4)), POPUP_HEIGHT.min(area.h));
-            if w < 10 || h < 3 {
-                continue;
-            }
-            let frame: Rect = Rect { x: area.x + (area.w - w) / 2, y: area.y + (area.h - h) / 2, w, h };
-            let title: String = ed.buffers.get(ed.windows[index].buffer).map(Buffer::name).unwrap_or_default();
-            let t: Arc<Theme> = theme();
-            // Drawn as the notifications are: the editor's background inside a colored rounded border.
-            let fill: Style = t.style(Group::Normal);
-            let border: Style = Style::new(t.bg(Group::FloatTitle), fill.bg);
-            grid.float(frame, border, fill, title.trim_matches(['[', ']']));
-            if let Some(hint) = ed.popup_hint(ed.windows[index].buffer) {
-                let hint: String = format!(" {hint} ");
-                let room: usize = text::str_width(&hint).min(w - 4);
-                grid.text(frame.x + 2, frame.y + h - 1, room, t.on(Group::LineNr, fill.bg), &hint);
-            }
-            // A column of air on each side, inside the border.
-            let inside: Rect = Rect { x: frame.x + 2, y: frame.y + 1, w: w - 4, h: h - 2 };
-            if index == ed.active {
-                ed.view_height = inside.h;
-            }
-            cursor = view::window(ed, index, inside, grid).or(cursor);
+            cursor = popup_window(ed, index, area, grid).or(cursor);
         }
         cursor
     }
+}
+
+/// How the screen's rows are shared: tabline, text, statusline and command line.
+#[expect(clippy::struct_excessive_bools, reason = "one per bar the screen may show")]
+struct Rows {
+    height: usize,
+    tabline: bool,
+    status: bool,
+    /// A command line row: `cmdheight` asks for it, or a `:` / `/` prompt borrows it (as Neovim does with
+    /// `cmdheight=0`), pushing the statusline up.
+    cmd: bool,
+    prompt: bool,
+    /// The rows left for the windows.
+    text: usize,
+}
+
+impl Rows {
+    fn of(options: &Options, mode: Mode, height: usize) -> Self {
+        // Below four rows only the text shows.
+        let roomy: bool = height > 3;
+        let prompt: bool = matches!(mode, Mode::Command | Mode::Search);
+        let tabline: bool = options.showtabline && roomy;
+        let status: bool = options.laststatus && roomy;
+        let cmd: bool = (options.cmdheight > 0 || prompt) && roomy;
+        let bars: usize = usize::from(tabline) + usize::from(status) + usize::from(cmd);
+        Self { height, tabline, status, cmd, prompt, text: height.saturating_sub(bars).max(1) }
+    }
+
+    /// The first text row.
+    fn top(&self) -> usize {
+        usize::from(self.tabline)
+    }
+}
+
+/// The file tree on the left and the Markdown preview on the right, around the windows; returns the area left for
+/// the windows, and the cursor in the tree when it has focus.
+fn side_panels(ed: &mut Editor, grid: &mut Grid, mut area: Rect, tree_width: usize) -> (Rect, Option<(usize, usize)>) {
+    let mut cursor: Option<(usize, usize)> = None;
+    if tree_width > 0 {
+        cursor = tree::explorer(ed, grid, Rect { w: tree_width, ..area });
+        // NvChad hides this separator: the tree's color alone sets it apart.
+        let tree_bg: Rgb = theme().bg(Group::ExplorerNormal);
+        grid.vline(tree_width, area.y..area.y + area.h, Style::new(tree_bg, tree_bg));
+        area = Rect { x: tree_width + 1, w: area.w - tree_width - 1, ..area };
+    }
+    // The Markdown preview takes the right half, past a separator, while a Markdown buffer is shown.
+    if ed.markdown_preview && !ed.zen && area.w >= 40 && markdown::is_markdown(ed.buf()) {
+        let panel_width: usize = area.w / 2;
+        area.w -= panel_width + 1;
+        let separator: usize = area.x + area.w;
+        grid.vline(separator, area.y..area.y + area.h, theme().style(Group::WinSeparator));
+        markdown::preview(ed, grid, Rect { x: separator + 1, w: panel_width, ..area });
+    }
+    (area, cursor)
+}
+
+/// The windows (or the zen window, or the start screen) in `area`; returns where the cursor shows, the tree's
+/// while the tree has focus.
+fn text_area(
+    ed: &mut Editor,
+    grid: &mut Grid,
+    area: Rect,
+    options: &Options,
+    tree_cursor: Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    let windows_cursor: Option<(usize, usize)> = if ed.zen {
+        // snacks.zen: the focused window alone, centred, at most 120 columns wide.
+        let w: usize = 120.min(area.w * 3 / 4).max(area.w.min(20));
+        let zen: Rect = Rect { x: area.x + (area.w - w) / 2, w, ..area };
+        ed.area = zen;
+        ed.view_height = zen.h;
+        view::window(ed, ed.active, zen, grid)
+    } else {
+        Screen::windows(ed, area, grid)
+    };
+    if ed.dashboard {
+        grid.fill(area, theme().style(Group::Normal));
+        home::dashboard(grid, area, options);
+        tree_cursor
+    } else if ed.mode == Mode::Explorer {
+        tree_cursor
+    } else {
+        windows_cursor
+    }
+}
+
+/// The floats over everything: pickers, the command-line menu, the cheat sheet, the settings and prompts.
+fn overlays(ed: &mut Editor, grid: &mut Grid, mut cursor: Option<(usize, usize)>) -> Option<(usize, usize)> {
+    if let Some(input) = finder::picker(ed, grid) {
+        cursor = Some(input);
+    }
+    popup::cmd_completion(ed, grid);
+    popup::cheatsheet(ed, grid);
+    popup::setup(ed, grid);
+    if matches!(ed.mode, Mode::Cheatsheet | Mode::Setup) {
+        cursor = None;
+    }
+    popup::prompt(ed, grid).or(cursor)
+}
+
+/// The borders between split windows.
+fn separators(ed: &Editor, area: Rect, grid: &mut Grid) {
+    let mut separators: Vec<Separator> = Vec::new();
+    ed.layout.separators(area, &mut separators);
+    let border: Style = theme().style(Group::WinSeparator);
+    for sep in separators {
+        if sep.vertical {
+            grid.vline(sep.x, sep.y..sep.y + sep.len, border);
+        } else {
+            grid.text(sep.x, sep.y, sep.len, border, &"\u{2500}".repeat(sep.len));
+        }
+    }
+}
+
+/// A tool's popup, small and centred over the windows: drawn as the notifications are, the editor's background in
+/// a colored rounded border, the tool's name on top and what to type at the bottom.
+fn popup_window(ed: &mut Editor, index: usize, area: Rect, grid: &mut Grid) -> Option<(usize, usize)> {
+    let (w, h): (usize, usize) = (POPUP_WIDTH.min(area.w.saturating_sub(4)), POPUP_HEIGHT.min(area.h));
+    if w < 10 || h < 3 {
+        return None;
+    }
+    let frame: Rect = Rect { x: area.x + (area.w - w) / 2, y: area.y + (area.h - h) / 2, w, h };
+    let buffer: usize = ed.windows[index].buffer;
+    let title: String = ed.buffers.get(buffer).map(Buffer::name).unwrap_or_default();
+    let t: Arc<Theme> = theme();
+    let fill: Style = t.style(Group::Normal);
+    grid.float(frame, Style::new(t.bg(Group::FloatTitle), fill.bg), fill, title.trim_matches(['[', ']']));
+    if let Some(hint) = ed.popup_hint(buffer) {
+        let hint: String = format!(" {hint} ");
+        let room: usize = text::str_width(&hint).min(w - 4);
+        grid.text(frame.x + 2, frame.y + h - 1, room, t.on(Group::LineNr, fill.bg), &hint);
+    }
+    // A column of air on each side, inside the border.
+    let inside: Rect = Rect { x: frame.x + 2, y: frame.y + 1, w: w - 4, h: h - 2 };
+    if index == ed.active {
+        ed.view_height = inside.h;
+    }
+    view::window(ed, index, inside, grid)
 }
 
 #[cfg(test)]
