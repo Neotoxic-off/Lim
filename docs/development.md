@@ -18,11 +18,12 @@ new key, command or parser is reachable by the fuzzers, and the matching page in
 
 ## Releases
 
-Every push to `master` runs `.github/workflows/release.yml`: `cargo fmt --check`, clippy and the tests on Linux,
-macOS and Windows, then a GitHub release `vMAJOR.MINOR.N`, where `N` is the number of commits on master. The tag
+Work goes to `dev`; `master` only receives releases. Every push that touches more than the docs runs
+`.github/workflows/release.yml`: `cargo fmt --check`, clippy and the tests on Linux, macOS and Windows. A push to
+`dev` or a pull request stops there; a push to `master` then makes a GitHub release `vMAJOR.MINOR.N`, where `N` is the number of commits on master. The tag
 points at a commit that writes that version into `Cargo.toml` (master keeps its own), so the binaries built from it
 know their version. A build from a clone of master gets the same number from `build.rs`, which counts the
-commits, so a lim built from the released source is not offered that release again. Each release carries `lim-x86_64-linux`, `lim-aarch64-macos`, `lim-x86_64-macos` and
+commits, so a lim built from the released source is not offered that release again. Each release carries `lim-x86_64-linux`, `lim-aarch64-linux`, `lim-aarch64-macos`, `lim-x86_64-macos` and
 `lim-x86_64-windows.exe`, the names `src/update.rs` asks for. Bump major or minor in `Cargo.toml` on master by
 hand. `cargo test https -- --ignored` checks the in-process HTTPS against GitHub.
 
