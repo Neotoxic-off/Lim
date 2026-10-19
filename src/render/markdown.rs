@@ -56,84 +56,110 @@ pub fn is_markdown(buf: &Buffer) -> bool {
 /// `**bold**`, `*italic*` / `_italic_`, `` `code` ``, `[text](url)`, `![alt](src)`, `~~gone~~`, `\*` escapes.
 fn inline(source: &str, base: Look) -> Vec<Span> {
     let chars: Vec<char> = source.chars().collect();
-    let mut spans: Vec<Span> = Vec::new();
-    let mut current: String = String::new();
-    let (mut bold, mut italic, mut dim): (bool, bool, bool) = (false, false, false);
-    let look = |bold: bool, italic: bool, dim: bool| match (dim, bold, italic) {
-        (true, _, _) => Look::Dim,
-        (_, true, _) => Look::Bold,
-        (_, _, true) => Look::Italic,
-        _ => base,
-    };
-    let flush = |current: &mut String, spans: &mut Vec<Span>, look: Look| {
-        if !current.is_empty() {
-            spans.push(span(std::mem::take(current), look));
-        }
-    };
+    let mut text: Inline =
+        Inline { base, spans: Vec::new(), current: String::new(), bold: false, italic: false, dim: false };
     let mut i: usize = 0;
-    while i < chars.len() {
-        let c: char = chars[i];
+    while let Some(&c) = chars.get(i) {
         let next: Option<char> = chars.get(i + 1).copied();
-        let here: Look = look(bold, italic, dim);
-        match c {
-            '\\' if next.is_some_and(|n| n.is_ascii_punctuation()) => {
-                current.push(next.unwrap_or(c));
-                i += 2;
-                continue;
-            }
-            '`' => {
-                if let Some(len) = chars[i + 1..].iter().position(|&x| x == '`') {
-                    flush(&mut current, &mut spans, here);
-                    spans.push(span(chars[i + 1..i + 1 + len].iter().collect::<String>(), Look::Code));
-                    i += len + 2;
-                    continue;
-                }
-            }
-            '*' | '_' if next == Some(c) => {
-                flush(&mut current, &mut spans, here);
-                bold = !bold;
-                i += 2;
-                continue;
-            }
-            '~' if next == Some('~') => {
-                flush(&mut current, &mut spans, here);
-                dim = !dim;
-                i += 2;
-                continue;
-            }
-            // `_` inside a word (snake_case) is not emphasis.
-            '*' | '_' if c == '*' || i == 0 || !chars[i - 1].is_alphanumeric() || italic => {
-                flush(&mut current, &mut spans, here);
-                italic = !italic;
-                i += 1;
-                continue;
-            }
-            '!' | '[' => {
-                let image: bool = c == '!';
-                let open: usize = if image { i + 1 } else { i };
-                if chars.get(open) == Some(&'[')
-                    && let Some(close) = chars[open..].iter().position(|&x| x == ']').map(|p| open + p)
-                    && chars.get(close + 1) == Some(&'(')
-                    && let Some(end) = chars[close..].iter().position(|&x| x == ')').map(|p| close + p)
-                {
-                    flush(&mut current, &mut spans, here);
-                    let label: String = chars[open + 1..close].iter().collect();
-                    if image {
-                        spans.push(span(format!("▣ {label}"), Look::Dim));
-                    } else {
-                        spans.extend(inline(&label, Look::Link));
-                    }
-                    i = end + 1;
-                    continue;
-                }
-            }
-            _ => {}
+        // A code span or a link takes several chars; an unclosed one is plain text.
+        let span: Option<usize> = match c {
+            '`' => code_span(&chars, i, &mut text),
+            '!' | '[' => link(&chars, i, &mut text),
+            _ => None,
+        };
+        if let Some(len) = span {
+            i += len;
+            continue;
         }
-        current.push(c);
-        i += 1;
+        i += match c {
+            '\\' if next.is_some_and(|n| n.is_ascii_punctuation()) => {
+                text.current.push(next.unwrap_or(c));
+                2
+            }
+            '*' | '_' if next == Some(c) => text.toggle(|t| &mut t.bold, 2),
+            '~' if next == Some('~') => text.toggle(|t| &mut t.dim, 2),
+            // `_` inside a word (snake_case) is not emphasis.
+            '*' | '_' if c == '*' || i == 0 || !chars[i - 1].is_alphanumeric() || text.italic => {
+                text.toggle(|t| &mut t.italic, 1)
+            }
+            _ => {
+                text.current.push(c);
+                1
+            }
+        };
     }
-    flush(&mut current, &mut spans, look(bold, italic, dim));
-    spans
+    text.flush();
+    text.spans
+}
+
+/// The spans read so far, the text not yet in one, and the emphasis it is in.
+struct Inline {
+    base: Look,
+    spans: Vec<Span>,
+    current: String,
+    bold: bool,
+    italic: bool,
+    dim: bool,
+}
+
+impl Inline {
+    /// What the current text looks like: struck-through wins over bold, bold over italic.
+    fn look(&self) -> Look {
+        match (self.dim, self.bold, self.italic) {
+            (true, _, _) => Look::Dim,
+            (_, true, _) => Look::Bold,
+            (_, _, true) => Look::Italic,
+            _ => self.base,
+        }
+    }
+
+    /// Ends the text in the current emphasis as a span.
+    fn flush(&mut self) {
+        if !self.current.is_empty() {
+            let look: Look = self.look();
+            self.spans.push(span(std::mem::take(&mut self.current), look));
+        }
+    }
+
+    /// A `**`, `~~` or `*` marker: the text so far keeps its emphasis, the emphasis flips. Returns `len`, the
+    /// marker's length.
+    fn toggle(&mut self, emphasis: fn(&mut Self) -> &mut bool, len: usize) -> usize {
+        self.flush();
+        let flag: &mut bool = emphasis(self);
+        *flag = !*flag;
+        len
+    }
+}
+
+/// `` `code` `` at `i`: a code span, and the chars it took; None when the backtick is not closed.
+fn code_span(chars: &[char], i: usize, text: &mut Inline) -> Option<usize> {
+    let len: usize = chars[i + 1..].iter().position(|&x| x == '`')?;
+    text.flush();
+    text.spans.push(span(chars[i + 1..i + 1 + len].iter().collect::<String>(), Look::Code));
+    Some(len + 2)
+}
+
+/// `[text](url)` (the text, styled as a link) or `![alt](src)` (a dimmed placeholder) at `i`, and the chars it
+/// took; None when the brackets do not make one.
+fn link(chars: &[char], i: usize, text: &mut Inline) -> Option<usize> {
+    let image: bool = chars[i] == '!';
+    let open: usize = if image { i + 1 } else { i };
+    if chars.get(open) != Some(&'[') {
+        return None;
+    }
+    let close: usize = open + chars[open..].iter().position(|&x| x == ']')?;
+    if chars.get(close + 1) != Some(&'(') {
+        return None;
+    }
+    let end: usize = close + chars[close..].iter().position(|&x| x == ')')?;
+    text.flush();
+    let label: String = chars[open + 1..close].iter().collect();
+    if image {
+        text.spans.push(span(format!("▣ {label}"), Look::Dim));
+    } else {
+        text.spans.extend(inline(&label, Look::Link));
+    }
+    Some(end + 1 - i)
 }
 
 /// Word-wraps `spans` into lines of `width` cells: the first starts with `first`, the rest with `rest`.

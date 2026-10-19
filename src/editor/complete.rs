@@ -30,26 +30,40 @@ fn is_word(c: char) -> bool {
 /// Candidates for `prefix` from word lists (current buffer first), smartcase, best first.
 pub fn candidates<'a>(prefix: &str, sources: impl Iterator<Item = &'a [String]>) -> Vec<String> {
     let sensitive: bool = prefix.chars().any(char::is_uppercase);
+    // Plain ASCII on both sides compares bytes; anything else lowercases (the Kelvin sign is a `k`).
+    let ascii: bool = prefix.is_ascii();
     // Compared char by char: lowercasing every word of every buffer on each key was the slow part.
     let matches = |w: &str| {
         if sensitive {
             return w.starts_with(prefix);
         }
+        if ascii && w.is_ascii() {
+            return w.len() >= prefix.len() && w.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes());
+        }
         let mut word = w.chars().flat_map(char::to_lowercase);
         prefix.chars().flat_map(char::to_lowercase).all(|p| word.next() == Some(p))
     };
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut found: Vec<(usize, String)> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    // Sort key: same-case prefix first, then the current buffer, then shorter words, then the word.
+    let mut found: Vec<(bool, usize, usize, &str)> = Vec::new();
     for (rank, words) in sources.enumerate() {
+        // A buffer's words are unique already (`words_of`): only the later buffers need checking.
+        if rank == 1 {
+            seen.extend(found.iter().map(|f| f.3));
+        }
         for w in words.iter().filter(|w| w.as_str() != prefix && w.len() > prefix.len() && matches(w)) {
-            if seen.insert(w.clone()) {
-                found.push((rank, w.clone()));
+            if rank == 0 || seen.insert(w) {
+                found.push((!w.starts_with(prefix), rank, w.chars().count(), w));
             }
         }
     }
-    // Same-case prefix first, then the current buffer, then shorter words.
-    found.sort_by_key(|(rank, w)| (!w.starts_with(prefix), *rank, w.chars().count(), w.clone()));
-    found.into_iter().map(|(_, w)| w).take(MAX_ITEMS).collect()
+    // The menu shows MAX_ITEMS: pick those, then sort only them (a big file matches thousands on each key).
+    if found.len() > MAX_ITEMS {
+        found.select_nth_unstable(MAX_ITEMS);
+        found.truncate(MAX_ITEMS);
+    }
+    found.sort_unstable();
+    found.into_iter().map(|(.., w)| w.to_owned()).collect()
 }
 
 impl Editor {
@@ -177,5 +191,15 @@ mod tests {
         let found: Vec<String> = candidates("res", [here.as_slice(), other.as_slice()].into_iter());
         assert_eq!(found, vec!["restock", "result", "resolve", "Restore"]);
         assert_eq!(candidates("Res", [here.as_slice()].into_iter()), vec!["Restore"]);
+        // More matches than the menu holds: the same first ones, in order, as a full sort gives.
+        let many: Vec<String> = (0..500).rev().map(|i| format!("item{i}")).collect();
+        let shown: Vec<String> = candidates("it", [many.as_slice()].into_iter());
+        let mut all: Vec<String> = many.clone();
+        all.sort_by_key(|w| (w.len(), w.clone()));
+        assert_eq!(shown, all[..MAX_ITEMS]);
+        // Non-ASCII words still compare by lowercasing: the Kelvin sign is a `k`.
+        let kelvin: Vec<String> = vec!["\u{212a}elvin".into(), "kettle".into()];
+        assert_eq!(candidates("ke", [kelvin.as_slice()].into_iter()), vec!["kettle", "\u{212a}elvin"]);
+        assert_eq!(candidates("re", [here.as_slice(), here.as_slice()].into_iter()).len(), 3, "no duplicates");
     }
 }

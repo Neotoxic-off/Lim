@@ -1,9 +1,12 @@
-//! The gallery of `docs/themes.md`: real frames drawn by the renderer, written as SVG to `docs/gallery`.
-//! Regenerate with `cargo test gallery -- --ignored` after changing a theme, an icon set or the bars.
+//! The gallery of `docs/themes.md` and the README's screenshots: real frames drawn by the renderer, written as SVG.
+//! `cargo test gallery -- --ignored` rewrites `docs/gallery` after a change to a theme, an icon set or the bars;
+//! `cargo test screenshots -- --ignored` writes the README's scenes to `target/screenshots`, to rasterise
+//! (docs/development.md).
 
 use std::fmt::{self, Write};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use super::icons::SETS;
 use super::palettes::{DEFAULT, THEMES};
@@ -134,9 +137,13 @@ fn svg(grid: &Grid) -> String {
     out
 }
 
+/// The gallery reads the working directory (the file tree), which the screenshots change: one at a time.
+static WORKING_DIR: Mutex<()> = Mutex::new(());
+
 #[test]
 #[ignore = "writes docs/gallery; run with `cargo test gallery -- --ignored`"]
 fn gallery() {
+    let _cwd: MutexGuard<'_, ()> = WORKING_DIR.lock().unwrap_or_else(PoisonError::into_inner);
     let dir: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs").join("gallery");
     fs::create_dir_all(&dir).unwrap();
     // Unicode icons for the themes, so the pictures need no Nerd Font to read.
@@ -196,4 +203,106 @@ fn which_key_has_the_editor_background() {
             "row {y} has another background"
         );
     }
+}
+
+/// The demo project the README's screenshots are taken in.
+const DEMO: &[(&str, &str)] = &[
+    ("Cargo.toml", "[package]\nname = \"inventory\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+    ("README.md", "# inventory\n\nA tiny stock service.\n"),
+    ("notes.txt", "restock on monday\n"),
+    ("src/stock.rs", "pub struct Stock;\n"),
+    ("src/main.rs", DEMO_MAIN),
+];
+
+const DEMO_MAIN: &str = r##"//! A tiny inventory service. Docs: https://example.com/inventory
+use std::collections::HashMap;
+
+const ACCENT: &str = "#61afef";
+
+/* Items are kept in memory;
+   swap in a database later. */
+#[derive(Debug, Clone, PartialEq)]
+struct Item {
+    name: String,
+    quantity: u32,
+}
+
+fn restock(stock: &mut HashMap<String, Item>, name: &str, amount: u32) {
+    match stock.get_mut(name) {
+        Some(item) => {
+            item.quantity = item.quantity.saturating_add(amount);
+            println!("restocked {} to {}", item.name, item.quantity);
+        }
+        None => {
+            // TODO: log unknown items
+            let item = Item { name: name.to_owned(), quantity: amount };
+            stock.insert(name.to_owned(), item);
+        }
+    }
+}
+
+fn main() {
+    let mut stock: HashMap<String, Item> = HashMap::new();
+    restock(&mut stock, "apples", 12);
+    restock(&mut stock, "pears", 4);
+    println!("{} items, accent {ACCENT}", stock.len());
+}
+"##;
+
+/// The README's screenshots: each scene played with real keys in the demo project, its frame written as SVG to
+/// `target/screenshots`, then rasterised to `docs/screenshots/*.png` (see docs/development.md).
+#[test]
+#[ignore = "writes target/screenshots; run with `cargo test screenshots -- --ignored`"]
+fn screenshots() {
+    let _cwd: MutexGuard<'_, ()> = WORKING_DIR.lock().unwrap_or_else(PoisonError::into_inner);
+    let out: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("screenshots");
+    fs::create_dir_all(&out).unwrap();
+    let demo: PathBuf = std::env::temp_dir().join(format!("lim-demo-{}", std::process::id())).join("inventory");
+    for (name, text) in DEMO {
+        fs::create_dir_all(demo.join(name).parent().unwrap()).unwrap();
+        fs::write(demo.join(name), text).unwrap();
+    }
+    let back: PathBuf = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&demo).unwrap();
+    for (name, size, keys) in scenes() {
+        // The theme picker installs the theme it previews: each scene starts from the default one.
+        apply_colorscheme(DEFAULT, &Config::default());
+        // As `lim src/main.rs`; the start screen is `lim` alone.
+        let files: Vec<String> = if name == "dashboard" { Vec::new() } else { vec!["src/main.rs".into()] };
+        let mut ed: Editor = Editor::new(&files);
+        ed.options.iconset = "nerd".into();
+        for key in keys {
+            ed.handle(key);
+        }
+        let (grid, _): (Grid, Option<(usize, usize)>) =
+            Screen::new(ColorDepth::TrueColor).compose(&mut ed, size.0, size.1);
+        fs::write(out.join(format!("{name}.svg")), svg(&grid)).unwrap();
+    }
+    std::env::set_current_dir(back).unwrap();
+    fs::remove_dir_all(demo.parent().unwrap()).unwrap();
+    apply_colorscheme(DEFAULT, &Config::default());
+}
+
+/// Each screenshot: its file name, its size in cells and the keys that set it up.
+fn scenes() -> Vec<(&'static str, (usize, usize), Vec<Key>)> {
+    let keys = |typed: &str| crate::fuzz::phrase_keys(typed);
+    let with = |mut first: Vec<Key>, more: &[Key]| {
+        first.extend_from_slice(more);
+        first
+    };
+    vec![
+        // The tree opens on `src`, unfolded, then the focus goes back to the code.
+        ("editor", (120, 34), with(keys(" el"), &[Key::Ctrl('l'), Key::Char('2'), Key::Char('1'), Key::Char('G')])),
+        ("dashboard", (120, 40), Vec::new()),
+        ("picker", (120, 34), keys(" ffma")),
+        ("grep", (120, 34), keys(" fwrestock")),
+        ("whichkey", (120, 34), keys("17G ")),
+        ("cheatsheet", (120, 34), vec![Key::F(1)]),
+        ("themes", (120, 34), keys(" fttokyo")),
+        ("completion", (120, 34), keys("30Goresto")),
+        ("cmdline", (120, 34), keys(":s")),
+        ("visual", (120, 34), keys("15GV4j")),
+        ("tools", (120, 34), keys(" xc2+3*4\nsqrt(2)\n200*15%\n")),
+        ("settings", (120, 34), keys(":settings\n")),
+    ]
 }

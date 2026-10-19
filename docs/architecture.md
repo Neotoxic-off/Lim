@@ -16,13 +16,18 @@ src/
 ├── editor/        modes, operators, registers, keymaps, the built-in binding table, windows, picker,
 │                  file tree, which-key, cheat sheet, completion, sessions, prompts, clipboard, macros,
 │                  text tools, reverse-engineering commands, config commands
+│   └── tools/     the <Leader>x tools, one module each (calc, units, bases, time, color, json, case,
+│                  generated text), and their popup
 ├── syntax/        keyword highlighter with multi-line state, language tables, todo-comments
 ├── config/        JSON reader, key notation, options/palette/highlights/keymaps/commands
 └── render/        cell grid, themes and palettes, icon sets, windows, bars, floats, picker, tree, start screen
 ```
 
-- **Rendering** draws each frame into a grid of cells (floats are later writes), encodes it to ANSI and sends
-  only the rows that changed; frames are skipped while keys are queued.
+- **Rendering** draws each frame into a grid of cells, back to front (`render/mod.rs`, `compose`): the tabline,
+  the side panels, the windows, the bars, then the floats over them. It encodes the grid to ANSI and sends only
+  the rows that changed; frames are skipped while keys are queued. A line of text is drawn in layers
+  (`render/view.rs`, `LinePaint`): its syntax color, then URL, word, TODO, hex color, bracket and selection or
+  search highlights over it.
 - **Built-in keys** live in one table (`editor/bindings.rs`): each prefixed key's action and description.
   The dispatcher, which-key, the cheat sheet and the keymaps picker all read it, so they cannot disagree.
 - **Undo** stores the lines an edit replaced, not copies of the file, and keeps 1000 steps. The same
