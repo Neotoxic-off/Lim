@@ -16,7 +16,7 @@ const DOWNLOAD: &str = "https://github.com/Neotoxic-off/Lim/releases/download";
 /// Runs on a background thread while editing goes on; what it returns becomes a notification.
 pub fn run() -> Result<String, String> {
     let exe: PathBuf = env::current_exe().map_err(|e| format!("cannot find lim's own file: {e}"))?;
-    upgrade(env!("LIM_VERSION"), &exe)
+    upgrade(env!("CARGO_PKG_VERSION"), &exe)
 }
 
 /// Puts the latest release in place of `exe`, a lim of version `current`, when the release is newer.
