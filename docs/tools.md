@@ -29,7 +29,7 @@ sqrt(-1)
 | `<Leader>xk` | Case of the WORD under the cursor | `snake` `camel` `pascal` `kebab` `constant` `title` `lower` `upper` (`sn`, `k`…) |
 | `<Leader>xd` `xD` | Insert the date / date and time (local) | `2026-10-18` · `2026-10-18 14:30:05` |
 | `<Leader>xi` `xp` `xl` | Insert a UUID v4 / a 20-char password / lorem ipsum | random bytes come from the system (`/dev/urandom`, `RtlGenRandom`) |
-| `<Leader>xj` `xJ` | Format / minify the buffer as JSON (`:json`, `:json!` on a range) | invalid JSON is left alone with the parser's message |
+| `<Leader>xj` `xJ` | Format / minify the buffer as JSON (`:json`, `:json!` on a range) | `//` and `/* */` comments (JSONC) keep their place, minifying drops them; invalid JSON is left alone with the parser's message |
 | `<Leader>xw` `xs` | Count lines, words, chars / SHA-256 of the buffer | |
 
 ## Calculator

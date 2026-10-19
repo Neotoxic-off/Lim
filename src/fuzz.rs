@@ -588,6 +588,12 @@ fn tools_survive_any_input() {
         "\\",
         "snake",
         "camelCase",
+        "//",
+        "/*",
+        "*/",
+        "\n",
+        ",",
+        "1",
     ];
 
     fuzz("tools", 1500, |rng, log| {
@@ -598,7 +604,13 @@ fn tools_survive_any_input() {
         for tool in Tool::ALL {
             let _: Result<String, String> = tool.run(&input, Some(1.5));
         }
-        let _: Result<String, String> = tools::json(&input, rng.chance(50));
+        let minify: bool = rng.chance(50);
+        // Laid out JSON (comments included) is still JSON, and laying it out again changes nothing.
+        if let Ok(out) = tools::json(&input, minify)
+            && tools::json(&out, minify).as_ref() != Ok(&out)
+        {
+            return Err(format!("json not stable: {out:?}"));
+        }
         let _: String = WordCase::Camel.apply(&input);
         if start.elapsed() > HANG {
             return Err(format!("took {:?}", start.elapsed()));

@@ -991,19 +991,24 @@ fn rgb_to_hsl([r, g, b]: [u8; 3]) -> (f64, f64, f64) {
 // --- JSON ---------------------------------------------------------------------------------------------------
 
 /// `text` re-laid out (two-space indent, or `minify`d), token by token, so numbers and strings stay exactly as
-/// written. Invalid JSON (and comments, which JSON has not) is refused.
+/// written. Invalid JSON is refused. `//` and `/* */` comments (JSONC, as config files) are kept: one after a
+/// token stays on its line, one on its own line keeps it; minifying drops them, a `//` would swallow the rest.
 pub fn json(text: &str, minify: bool) -> Result<String, String> {
     json::parse(text).map_err(|e| format!("invalid JSON: {e}"))?;
     let chars: Vec<char> = text.chars().collect();
     let mut out: String = String::with_capacity(text.len());
     let (mut depth, mut in_string, mut escaped, mut empty): (usize, bool, bool, bool) = (0, false, false, false);
-    let newline = |out: &mut String, depth: usize| {
-        if !minify {
+    // A line break waits for the next token, so a comment after a token can still join its line.
+    let (mut pending, mut broke): (bool, bool) = (false, false);
+    let flush = |out: &mut String, pending: &mut bool, depth: usize| {
+        if std::mem::take(pending) && !minify {
             out.push('\n');
             out.push_str(&"  ".repeat(depth));
         }
     };
-    for (i, &c) in chars.iter().enumerate() {
+    let mut i: usize = 0;
+    while let Some(&c) = chars.get(i) {
+        i += 1;
         if in_string {
             out.push(c);
             if escaped {
@@ -1015,34 +1020,69 @@ pub fn json(text: &str, minify: bool) -> Result<String, String> {
             }
             continue;
         }
-        match c {
-            '"' => {
-                in_string = true;
-                out.push(c);
+        if c == '/' && matches!(chars.get(i), Some('/' | '*')) {
+            let line: bool = chars.get(i) == Some(&'/');
+            // The parser accepted the text, so a block comment is closed.
+            let end: usize = if line {
+                chars[i..].iter().position(|&c| c == '\n').map_or(chars.len(), |p| i + p)
+            } else {
+                chars[i + 1..].windows(2).position(|w| w == ['*', '/']).map_or(chars.len(), |p| i + 1 + p + 2)
+            };
+            let comment: String = chars[i - 1..end].iter().collect::<String>().trim_end().to_owned();
+            i = end;
+            if minify {
+                continue;
             }
-            '/' => return Err("comments are not JSON".into()),
+            // On its own line in the source: keeps one. Otherwise it joins the token before it.
+            let own_line: bool = broke || out.is_empty();
+            if own_line {
+                pending |= !out.is_empty();
+                flush(&mut out, &mut pending, depth);
+            } else if !out.ends_with(' ') {
+                out.push(' ');
+            }
+            out.push_str(&comment);
+            if line || own_line {
+                pending = true;
+            } else if !pending {
+                // Inside a line (`"a": /* x */ 1`): stays there.
+                out.push(' ');
+            }
+            continue;
+        }
+        match c {
+            '\n' => broke = true,
+            c if c.is_whitespace() => {}
             '{' | '[' => {
+                flush(&mut out, &mut pending, depth);
                 out.push(c);
                 depth += 1;
-                empty = chars[i + 1..].iter().find(|c| !c.is_whitespace()).is_some_and(|n| matches!(n, '}' | ']'));
-                if !empty {
-                    newline(&mut out, depth);
-                }
+                empty = chars[i..].iter().find(|c| !c.is_whitespace()).is_some_and(|n| matches!(n, '}' | ']'));
+                pending = !empty;
             }
             '}' | ']' => {
                 depth = depth.saturating_sub(1);
-                if !std::mem::take(&mut empty) {
-                    newline(&mut out, depth);
-                }
+                pending |= !std::mem::take(&mut empty);
+                flush(&mut out, &mut pending, depth);
                 out.push(c);
             }
             ',' => {
+                flush(&mut out, &mut pending, depth);
                 out.push(c);
-                newline(&mut out, depth);
+                pending = true;
             }
-            ':' => out.push_str(if minify { ":" } else { ": " }),
-            c if c.is_whitespace() => {}
-            c => out.push(c),
+            ':' => {
+                flush(&mut out, &mut pending, depth);
+                out.push_str(if minify { ":" } else { ": " });
+            }
+            c => {
+                flush(&mut out, &mut pending, depth);
+                in_string = c == '"';
+                out.push(c);
+            }
+        }
+        if !c.is_whitespace() {
+            broke = false;
         }
     }
     Ok(out)
@@ -1423,7 +1463,24 @@ mod tests {
             "{\n  \"a\": [\n    1,\n    2.50,\n    {}\n  ],\n  \"b\": {\n    \"c\": \"x,{y}\"\n  },\n  \"d\": []\n}"
         );
         assert!(json("{\"a\": }", false).is_err());
-        assert_eq!(json("{\"a\": 1 // c\n}", false).unwrap_err(), "comments are not JSON");
+        // JSONC: comments keep their place, trailing or on their own line; minifying drops them.
+        let commented: &str =
+            "// top\n{\"a\": 1, // one\n  /* own line */\n\"b\": /* inline */ [2,\n3], \"c\": 4 // last\n}";
+        assert_eq!(
+            json(commented, false).unwrap(),
+            "// top\n{\n  \"a\": 1, // one\n  /* own line */\n  \"b\": /* inline */ [\n    2,\n    3\n  ],\n  \"c\": 4 // last\n}"
+        );
+        assert_eq!(json(commented, true).unwrap(), r#"{"a":1,"b":[2,3],"c":4}"#);
+        assert_eq!(
+            json("{\"url\": \"http://x/*y*/\"}", true).unwrap(),
+            "{\"url\":\"http://x/*y*/\"}",
+            "not in strings"
+        );
+        let formatted: String = json(commented, false).unwrap();
+        assert_eq!(json(&formatted, false).unwrap(), formatted, "formatting twice changes nothing");
+        let config: String = json(crate::config::EXAMPLE, false).unwrap();
+        assert_eq!(config.matches("//").count(), crate::config::EXAMPLE.matches("//").count(), "{config}");
+        assert_eq!(json(&config, false).unwrap(), config);
         assert_eq!(json(r#"["a\"b", "c\\"]"#, true).unwrap(), r#"["a\"b","c\\"]"#, "escapes inside strings");
         assert_eq!(random_bytes_from(20, |_| false).len(), 20, "falls back when the system source fails");
         assert_ne!(random_bytes_from(8, |_| false), random_bytes_from(8, |_| false));
