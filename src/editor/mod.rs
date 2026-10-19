@@ -52,7 +52,7 @@ use cmdhistory::CmdHistory;
 pub use complete::{Completion, MENU_HEIGHT, words_of};
 pub use explorer::{Explorer, GitStatus, WIDTH as EXPLORER_WIDTH};
 use motion::Motion;
-pub use mouse::Pane;
+pub use mouse::{Pane, TabClick, TabHit};
 use operator::Operator;
 pub use picker::{Item, Picker, Target};
 pub use prompt::Prompt;
@@ -200,6 +200,8 @@ pub struct Editor {
     pub view_height: usize,
     /// Where each window's text was drawn in the last frame, for the mouse.
     pub panes: Vec<Pane>,
+    /// Where the tabline's tabs and buttons were drawn in the last frame, for the mouse.
+    pub tab_hits: Vec<TabHit>,
     /// The window and position a drag selects from; any key forgets it.
     mouse_anchor: Option<(usize, Pos)>,
     pub quit: bool,
@@ -302,6 +304,7 @@ impl Editor {
             highlight_search: false,
             view_height: 1,
             panes: Vec::new(),
+            tab_hits: Vec::new(),
             mouse_anchor: None,
             quit: false,
             windows: vec![Window::new(0, 0, View::default())],

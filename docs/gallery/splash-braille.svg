@@ -1,8 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="720" height="684" viewBox="0 0 720 684" font-family="'JetBrainsMono Nerd Font','Symbols Nerd Font','Cascadia Code',Consolas,monospace" font-size="14" xml:space="preserve">
 <rect x="0" y="0" width="189" height="18" fill="#1e222a"/>
-<rect x="189" y="0" width="531" height="18" fill="#252931"/>
+<rect x="189" y="0" width="477" height="18" fill="#252931"/>
+<rect x="666" y="0" width="27" height="18" fill="#31353d"/>
+<rect x="693" y="0" width="27" height="18" fill="#e06c75"/>
 <text x="36 54 63 72 90 99 108 117 126" y="13" fill="#abb2bf">[NoName]</text>
 <text x="171" y="13" fill="#e06c75"></text>
+<text x="675" y="13" fill="#abb2bf" font-weight="bold"></text>
+<text x="702" y="13" fill="#1e222a" font-weight="bold"></text>
 <rect x="0" y="18" width="720" height="18" fill="#1e222a"/>
 <text x="108 117 126 135 144 153 162 171 180 189 198 207 216 225 234 243 252 261 270 279 288 297 306 315 324 333 342 351 360 369 378 387 396 405 414 423 432 441 450 459 468 477 486 495 504 513 522 531 540 549 558 567 576 585 594 603" y="31" fill="#abb2bf">⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡀⠀⠀⠀⠠⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀</text>
 <rect x="0" y="36" width="720" height="18" fill="#1e222a"/>

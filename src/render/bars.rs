@@ -4,9 +4,10 @@ use super::Context;
 use super::icons::{Icons, icons};
 use super::row::{Grid, Row};
 use super::theme::{Group, Rgb, Style, mode_group, theme};
+use crate::buffer::git::Counts;
 use crate::buffer::{Buffer, Pos, text};
 use crate::config::StatusStyle;
-use crate::editor::{Editor, Message, Mode, Rect};
+use crate::editor::{Editor, Message, Mode, Rect, TabClick, TabHit};
 use crate::render::Theme;
 use std::sync::Arc;
 
@@ -43,10 +44,13 @@ fn bar_at(grid: &mut Grid, x: usize, y: usize, left: &[Segment], right: &[Segmen
 const BUF_WIDTH: usize = 21;
 
 /// Buffer tabs from column `offset`: the part over the file tree takes the tree's color, as `NvChad`'s tree offset.
-pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) {
+/// Returns where each tab, close mark and button landed, for the mouse.
+pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) -> Vec<TabHit> {
     let t: Arc<Theme> = theme();
     let set: &Icons = icons(&ed.options);
-    let mut segments: Vec<(Style, String)> = Vec::with_capacity(ed.buffers.len() * 4);
+    let mut segments: Vec<(Style, String)> = Vec::with_capacity(ed.buffers.len() * 5);
+    let mut hits: Vec<TabHit> = Vec::with_capacity(ed.buffers.len() * 2 + 2);
+    let mut x: usize = offset;
     // While picking (`<Leader>bb`), heirline swaps each icon for a red jump label.
     let labels: Option<Vec<char>> = matches!(ed.mode, Mode::BufferPick(_)).then(|| ed.pick_labels());
     for (i, buf) in ed.buffers.iter().enumerate() {
@@ -71,6 +75,13 @@ pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) {
         let label: String = buf.name();
         let used: usize = text::str_width(&icon) + text::str_width(&label) + text::str_width(&mark);
         let pad: usize = BUF_WIDTH.saturating_sub(used).max(2);
+        let mark_x: usize = x + pad + used - text::str_width(&mark);
+        let end: usize = x + pad + used;
+        hits.extend([
+            TabHit { from: x, to: mark_x, click: TabClick::Buffer(i) },
+            TabHit { from: mark_x, to: end, click: TabClick::Close(i) },
+        ]);
+        x = end;
         segments.extend([
             (name, " ".repeat(pad / 2)),
             (icon_style, icon),
@@ -79,10 +90,27 @@ pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) {
             (mark_style, mark),
         ]);
     }
+    // NvChad's buttons on the right: light/dark theme, close all buffers.
+    let buttons: [(Style, String); 2] = [
+        (t.style(Group::TabLineButton), format!(" {} ", set.theme)),
+        (t.style(Group::TabLineCloseAll), format!(" {} ", set.close)),
+    ];
+    let right_width: usize = buttons.iter().map(|(_, s)| text::str_width(s)).sum();
+    let right: &[Segment] = if offset + right_width <= grid.width { &buttons } else { &[] };
+    // Tabs cut off by the buttons cannot be clicked.
+    let avail: usize = grid.width - if right.is_empty() { 0 } else { right_width };
+    hits.retain(|h| h.to <= avail);
+    let mut bx: usize = avail;
+    for ((_, s), click) in right.iter().zip([TabClick::ToggleTheme, TabClick::CloseAll]) {
+        let w: usize = text::str_width(s);
+        hits.push(TabHit { from: bx, to: bx + w, click });
+        bx += w;
+    }
     if offset > 0 {
         grid.text(0, y, offset, t.style(Group::ExplorerNormal), "");
     }
-    bar_at(grid, offset, y, &segments, &[], t.style(Group::TabLineFill));
+    bar_at(grid, offset, y, &segments, right, t.style(Group::TabLineFill));
+    hits
 }
 
 pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
@@ -114,7 +142,15 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
     left.push((section, format!(" {}{} ", buf.name(), if buf.is_dirty() { " [+]" } else { "" })));
     left.push((Style::new(section.bg, fill.bg), right_cap.into()));
     if let Some(branch) = &ctx.branch {
-        left.push((t.style(Group::StatusGit), format!(" {}{branch}", Icons::spaced(set.branch))));
+        let git: Style = t.style(Group::StatusGit);
+        left.push((git, format!(" {}{branch}", Icons::spaced(set.branch))));
+        let Counts { added, changed, removed }: Counts =
+            if ed.options.gitsigns { buf.git_counts() } else { Counts::default() };
+        for (count, icon) in [(added, set.git_added), (changed, set.git_modified), (removed, set.git_deleted)] {
+            if count > 0 {
+                left.push((git, format!("  {}{count}", Icons::spaced(icon))));
+            }
+        }
     }
     let mut right: Vec<(Style, String)> = Vec::new();
     if let Some(reg) = ed.recording() {

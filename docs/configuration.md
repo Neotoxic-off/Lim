@@ -60,7 +60,7 @@ Names and defaults follow AstroNvim.
 | `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` |
 | `statusline_style` | `"rounded"` | Statusline section ends: `"rounded"`, `"slanted"`, `"arrow"` or `"flat"` (Nerd Font icon set only) |
 | `splash` | `"random"` | Start screen hydra: `"random"` (one that fits, each start), `"classic"`, `"braille"` or `"small"` |
-| `mouse` | `true` | Click, drag to select, wheel; `false` gives the terminal its own selection back (to copy) |
+| `mouse` | `true` | Click (text, tabs, tabline buttons), drag to select, wheel; `false` gives the terminal its own selection back (to copy) |
 | `completion` | `true` | Completion menu while typing (`<C-Space>` still opens it when off) |
 | `truecolor` | `"auto"` | `true`, `false` (256 colors) or `"auto"` |
 | `highlighturl` `indentguides` `matchparen` `gitsigns` `wordhighlight` `colorhighlight` `todocomments` `notifications` `dashboard` `syntax` | `true` | Turn each feature off |
@@ -81,12 +81,12 @@ Each takes `fg`, `bg` (`"#RRGGBB"`), `bold`, `italic`, `underline`, or `link` to
 | Editor | `Normal` `NormalNC` `CursorLine` `LineNr` `CursorLineNr` `Visual` `Search` `CurSearch` `MatchParen` `LspReferenceText` `HighlightURL` `IblIndent` `Directory` |
 | Syntax | `@variable` `@comment` `@string` `@number` `@keyword` `@function` `@type` `@type.builtin` `@constant` `@function.macro` `@property` |
 | Statusline | `StatusLine` `StatusLineSection` `StatusLineNormal` `StatusLineInsert` `StatusLineVisual` `StatusLineCommand` `StatusLineReplace` `StatusLineCwd` `StatusLinePosition` `StatusLineRecording` `StatusLineModeSep` (the grey step after the mode) `StatusLineGit` |
-| Tabline, windows | `TabLine` `TabLineSel` `TabLineFill` `TabLineModified` `BufferPicker` `WinSeparator` `WinBar` `WinBarNC` |
+| Tabline, windows | `TabLine` `TabLineSel` `TabLineFill` `TabLineModified` `TabLineButton` (light/dark button) `TabLineCloseAll` `BufferPicker` `WinSeparator` `WinBar` `WinBarNC` |
 | Messages, floats | `MsgArea` `ErrorMsg` `NormalFloat` `FloatBorder` (fg = bg hides the frame, the default; set an fg to bring lines back) `FloatTitle` (title pill) `PmenuSel` `SnacksNotifierInfo` `SnacksNotifierError` |
 | Completion | `BlinkCmpLabelMatch` `BlinkCmpKind` `BlinkCmpSource` (menu: `NormalFloat`, `FloatBorder`, `PmenuSel`) |
 | Git, TODO | `GitSignsAdd` `GitSignsChange` `GitSignsDelete` · `TodoFgFIX` `TodoFgTODO` `TodoFgHACK` `TodoFgWARN` `TodoFgPERF` `TodoFgNOTE` `TodoFgTEST` |
-| Plugins look-alikes | `WhichKey` `WhichKeyNormal` (menu background, the editor's by default) `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksPickerMatch` `SnacksPickerDir` `SnacksPickerInput` · `NeoTreeNormal` `NeoTreeRootName` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
-| lim | `LimCheatsheetKey` `LimCheatsheetDesc` (the start screen uses `Normal`) |
+| Plugins look-alikes | `WhichKey` `WhichKeyNormal` (menu background, the editor's by default) `WhichKeyDesc` `WhichKeyGroup` `WhichKeySeparator` · `SnacksPickerMatch` `SnacksPickerDir` `SnacksPickerInput` · `NeoTreeNormal` `NeoTreeDirectoryIcon` `NeoTreeFileName` `NeoTreeIndentMarker` `NeoTreeFileNameOpened` `NeoTreeGitModified` `NeoTreeGitAdded` `NeoTreeGitUntracked` `NeoTreeGitDeleted` |
+| lim | `LimCheatsheetKey` `LimCheatsheetDesc` (the start screen uses `Normal` for the hydra, these two for its buttons) |
 
 ## Keymaps
 

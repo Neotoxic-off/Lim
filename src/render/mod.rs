@@ -174,6 +174,7 @@ impl Screen {
     fn compose(&mut self, ed: &mut Editor, width: usize, height: usize) -> (Grid, Option<(usize, usize)>) {
         ed.refresh_completion();
         ed.panes.clear();
+        ed.tab_hits.clear();
         let t: Arc<Theme> = theme();
         let options: Options = ed.options.clone();
         let mut grid: Grid = Grid::new(width, height, t.style(Group::Normal));
@@ -188,7 +189,7 @@ impl Screen {
         // Columns taken by the file tree and its border, shared by the tabline and the windows.
         let tree_width: usize = if ed.explorer.is_some() && width >= 20 { EXPLORER_WIDTH.min(width / 2) } else { 0 };
         if top == 1 {
-            bars::tabline(ed, &mut grid, 0, if tree_width > 0 { tree_width + 1 } else { 0 });
+            ed.tab_hits = bars::tabline(ed, &mut grid, 0, if tree_width > 0 { tree_width + 1 } else { 0 });
         }
         let startup: Duration = *self.startup.get_or_insert_with(|| ed.started.elapsed());
         let mut area: Rect = Rect { x: 0, y: top, w: width, h: text_height };
@@ -220,7 +221,7 @@ impl Screen {
         };
         if ed.dashboard {
             grid.fill(area, theme().style(Group::Normal));
-            home::dashboard(&mut grid, area, startup, options.splash);
+            home::dashboard(&mut grid, area, startup, &options);
         } else if ed.mode != Mode::Explorer {
             cursor = windows_cursor;
         }
@@ -229,6 +230,10 @@ impl Screen {
         if status == 1 {
             // The branch can change under us (a shell, another terminal): re-read HEAD, a tiny file.
             self.ctx.branch = env::current_dir().ok().and_then(git_branch);
+            // The counts come with the signs, cached per buffer version; the gutter may not have asked for them.
+            if options.gitsigns {
+                ed.buf_mut().git_signs();
+            }
             bars::statusline(ed, &self.ctx, &mut grid, top + text_height);
         }
         if cmd == 1 || prompt {

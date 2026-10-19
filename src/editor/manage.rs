@@ -106,7 +106,7 @@ impl Editor {
     }
 
     /// Removes buffer `i`; windows showing it fall back to the previous buffer.
-    fn remove_buffer(&mut self, i: usize, force: bool) -> Result<(), Error> {
+    pub(super) fn remove_buffer(&mut self, i: usize, force: bool) -> Result<(), Error> {
         let Some(buf): Option<&Buffer> = self.buffers.get(i) else { return Ok(()) };
         if !force && buf.is_dirty() {
             return Err(Error::Unsaved(buf.name()));

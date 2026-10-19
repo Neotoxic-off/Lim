@@ -514,6 +514,11 @@ impl Buffer {
         self.git.signs(&self.lines, version)
     }
 
+    /// Lines added and changed, and deletions, as of the last `git_signs`.
+    pub fn git_counts(&self) -> git::Counts {
+        self.git.counts()
+    }
+
     /// `]g` / `[g`: first line of the next (or previous) hunk, wrapping around.
     pub fn next_hunk(&mut self, from: usize, forward: bool) -> Option<usize> {
         let signs: &[Option<git::Sign>] = self.git_signs();

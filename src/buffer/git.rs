@@ -17,7 +17,17 @@ pub enum Sign {
 pub struct GitState {
     base: Option<Vec<String>>,
     signs: Vec<Option<Sign>>,
+    counts: Counts,
     computed_for: Option<u64>,
+}
+
+/// gitsigns' status counts, shown in the statusline.
+/// shortcut: `removed` counts deletion hunks, not deleted lines; diff would have to report them to be exact.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counts {
+    pub added: usize,
+    pub changed: usize,
+    pub removed: usize,
 }
 
 /// Diagonal steps one diff may take (a few ms); a rewrite needing more marks what is left changed wholesale.
@@ -36,9 +46,22 @@ impl GitState {
     pub fn signs(&mut self, lines: &[String], version: u64) -> &[Option<Sign>] {
         if self.computed_for != Some(version) {
             self.signs = self.base.as_deref().map_or_else(Vec::new, |base| diff(base, lines));
+            self.counts = Counts::default();
+            for sign in self.signs.iter().flatten() {
+                match sign {
+                    Sign::Add => self.counts.added += 1,
+                    Sign::Change => self.counts.changed += 1,
+                    Sign::Delete => self.counts.removed += 1,
+                }
+            }
             self.computed_for = Some(version);
         }
         &self.signs
+    }
+
+    /// The counts of the last `signs` call.
+    pub fn counts(&self) -> Counts {
+        self.counts
     }
 }
 
@@ -302,6 +325,15 @@ mod tests {
         assert_eq!(diff(&lines("a b c d"), &lines("a d")), vec![Some(Delete), None]);
         assert_eq!(diff(&lines("a b c"), &lines("b c")), vec![Some(Delete), None]);
         assert_eq!(diff(&lines("a b c"), &lines("a B B2 c")), vec![None, Some(Change), Some(Add), None]);
+    }
+
+    #[test]
+    fn counts_follow_the_signs() {
+        let mut state: GitState = GitState { base: Some(lines("a b c d e")), ..GitState::default() };
+        state.signs(&lines("a B B2 c e"), 1);
+        assert_eq!(state.counts(), Counts { added: 1, changed: 1, removed: 1 });
+        state.signs(&lines("a b c d e"), 2);
+        assert_eq!(state.counts(), Counts::default(), "recounted with each version");
     }
 
     /// Myers' ops rebuild `new` from `old` and keep as many lines as a plain LCS table finds.

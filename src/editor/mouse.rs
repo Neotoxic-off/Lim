@@ -1,6 +1,7 @@
 //! The mouse (`mouse` option): a click places the cursor and focuses its window, a drag selects, the wheel
 //! scrolls the window under the pointer, or moves through a picker or the settings.
 
+use super::manage::CloseSet;
 use super::{Editor, Mode, Rect};
 use crate::buffer::{Buffer, Pos, text};
 use crate::term::{Key, Mouse, MouseKind};
@@ -27,6 +28,23 @@ impl Pane {
     }
 }
 
+/// What a click on the tabline does, as `NvChad`'s tabufline buttons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabClick {
+    Buffer(usize),
+    Close(usize),
+    ToggleTheme,
+    CloseAll,
+}
+
+/// Columns of the tabline (the top row) a click acts on, from the last frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TabHit {
+    pub from: usize,
+    pub to: usize,
+    pub click: TabClick,
+}
+
 impl Editor {
     pub(super) fn mouse(&mut self, event: Mouse) {
         if !self.options.mouse {
@@ -37,6 +55,13 @@ impl Editor {
             MouseKind::ScrollDown => Some(Key::Down),
             _ => None,
         };
+        if self.mode == Mode::Normal
+            && event.kind == MouseKind::Press
+            && event.row == 0
+            && self.click_tabline(event.col)
+        {
+            return;
+        }
         match self.mode {
             Mode::Normal | Mode::Insert | Mode::Replace | Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
                 self.mouse_in_text(event);
@@ -49,6 +74,24 @@ impl Editor {
             }
             _ => {}
         }
+    }
+
+    /// A click on a tab, its close button or a button on the right; false when `col` holds none.
+    fn click_tabline(&mut self, col: usize) -> bool {
+        let Some(hit): Option<TabHit> = self.tab_hits.iter().copied().find(|h| (h.from..h.to).contains(&col)) else {
+            return false;
+        };
+        match hit.click {
+            TabClick::Buffer(i) => self.switch_to(i),
+            TabClick::Close(i) => {
+                if let Err(e) = self.remove_buffer(i, false) {
+                    self.error(&e);
+                }
+            }
+            TabClick::ToggleTheme => self.toggle_background(),
+            TabClick::CloseAll => self.close_buffers(CloseSet::All),
+        }
+        true
     }
 
     fn mouse_in_text(&mut self, event: Mouse) {

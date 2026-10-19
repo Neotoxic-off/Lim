@@ -182,7 +182,7 @@ impl Editor {
 
 impl Editor {
     /// `<Leader>ub`: the light or dark variant of the current theme family.
-    fn toggle_background(&mut self) {
+    pub(super) fn toggle_background(&mut self) {
         const PAIRS: &[(&str, &str)] = &[
             ("astrodark", "astrolight"),
             ("catppuccin-mocha", "catppuccin-latte"),

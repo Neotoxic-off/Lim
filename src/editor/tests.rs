@@ -1204,6 +1204,30 @@ fn mouse_clicks_drags_and_scrolls() {
 }
 
 #[test]
+fn mouse_on_the_tabline_switches_and_closes_buffers() {
+    use crate::render::Screen;
+    use crate::term::{ColorDepth, Mouse, MouseKind, Size};
+    let mut ed: Editor = editor("one");
+    keys(&mut ed, ":enew\n:enew\n");
+    let mut screen: Screen = Screen::new(ColorDepth::TrueColor);
+    let click = |ed: &mut Editor, screen: &mut Screen, wanted: TabClick| {
+        screen.draw(ed, Size { cols: 120, rows: 20 });
+        let hit: TabHit = *ed.tab_hits.iter().find(|h| h.click == wanted).expect("drawn");
+        ed.handle(Key::Mouse(Mouse { kind: MouseKind::Press, col: hit.from, row: 0 }));
+    };
+    click(&mut ed, &mut screen, TabClick::Buffer(0));
+    assert_eq!((ed.current, text(&ed).as_str()), (0, "one"));
+    click(&mut ed, &mut screen, TabClick::Close(2));
+    assert_eq!(ed.buffers.len(), 2);
+    keys(&mut ed, "x");
+    click(&mut ed, &mut screen, TabClick::CloseAll);
+    assert_eq!((ed.buffers.len(), text(&ed).as_str()), (1, "ne"), "the modified buffer stays");
+    screen.draw(&mut ed, Size { cols: 120, rows: 20 });
+    let last: usize = ed.tab_hits.iter().map(|h| h.to).max().unwrap_or(0);
+    assert_eq!(last, 120, "the buttons end the row");
+}
+
+#[test]
 fn mouse_in_another_window_ends_visual_mode() {
     use crate::render::Screen;
     use crate::term::{ColorDepth, Mouse, MouseKind, Size};

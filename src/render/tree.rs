@@ -19,15 +19,8 @@ pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, 
     let explorer: &mut Explorer = ed.explorer.as_mut()?;
     let base: Style = t.style(Group::ExplorerNormal);
     grid.fill(area, base);
-    let mut header: Row = Row::new(area.w);
-    let root: String = explorer
-        .root
-        .file_name()
-        .map_or_else(|| explorer.root.display().to_string(), |n| n.to_string_lossy().into_owned());
-    header.text(t.on(Group::ExplorerRoot, base.bg), &format!(" {}{root}", Icons::spaced(set.folder_open)));
-    grid.put(area.x, area.y, &header.finish(base));
-
-    let rows: usize = area.h.saturating_sub(1);
+    // No root line, as NvChad's `root_folder_label = false`: the statusline shows the folder.
+    let rows: usize = area.h;
     if explorer.cursor < explorer.scroll {
         explorer.scroll = explorer.cursor;
     } else if rows > 0 && explorer.cursor >= explorer.scroll + rows {
@@ -58,7 +51,7 @@ pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, 
             row.text(Style { fg: color, ..line }, &format!("{icon} "));
         }
         if selected {
-            cursor = Some((area.y + 1 + r, area.x + row.used()));
+            cursor = Some((area.y + r, area.x + row.used()));
         }
         let name_group: Group = match entry.git {
             Some(GitStatus::Modified) => Group::ExplorerGitModified,
@@ -80,7 +73,7 @@ pub fn explorer(ed: &mut Editor, grid: &mut Grid, area: Rect) -> Option<(usize, 
             row.pad_to(line, area.w.saturating_sub(2));
             row.text(Style { fg: t.fg(name_group), ..line }, symbol);
         }
-        grid.put(area.x, area.y + 1 + r, &row.finish(line));
+        grid.put(area.x, area.y + r, &row.finish(line));
     }
     explorer.focused.then_some(cursor).flatten()
 }
