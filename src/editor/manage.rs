@@ -241,7 +241,9 @@ impl Editor {
 
     /// `<C-w>o` / `:only`.
     pub(super) fn only_window(&mut self) {
-        let Some(window): Option<Window> = self.windows.get(self.active).cloned() else { return };
+        let Some(mut window): Option<Window> = self.windows.get(self.active).cloned() else { return };
+        // A popup kept alone becomes the one window of the layout.
+        window.floating = false;
         self.layout = Layout::Leaf(window.id);
         self.windows = vec![window];
         self.active = 0;

@@ -1159,8 +1159,8 @@ fn is_answer(line: &str) -> bool {
 }
 
 impl Editor {
-    /// `<Leader>xc`…: the tool's window, focused (split below the current one the first time), in insert mode on
-    /// its last line.
+    /// `<Leader>xc`…: the tool's popup over the windows (one popup, shared by the tools), focused, in insert mode
+    /// on its last line.
     pub(super) fn open_tool(&mut self, tool: Tool) {
         let existing: Option<usize> =
             self.buffers.iter().position(|b| b.throwaway && b.title.as_deref() == Some(tool.title()));
@@ -1171,17 +1171,18 @@ impl Editor {
             self.buffers.push(buf);
             self.buffers.len() - 1
         });
-        // The split keeps the code in view; over the start screen or an empty buffer there is nothing to keep.
-        let buf: &Buffer = self.buf();
-        let nothing_shown: bool =
-            self.dashboard || (buf.path.is_none() && !buf.throwaway && buf.line_count() == 1 && buf.line(0).is_empty());
         if let Some(window) = self.windows.iter().position(|w| w.buffer == index) {
             self.focus(window);
-        } else {
-            if !nothing_shown {
-                self.split(false);
-            }
+        } else if let Some(popup) = self.windows.iter().position(|w| w.floating) {
+            self.focus(popup);
             self.switch_to(index);
+        } else {
+            let mut popup: super::Window =
+                super::Window::new(self.next_window_id, index, super::View::of(&self.buffers[index]));
+            popup.floating = true;
+            self.next_window_id += 1;
+            self.windows.push(popup);
+            self.focus(self.windows.len() - 1);
         }
         self.dashboard = false;
         let buf: &mut Buffer = self.buf_mut();

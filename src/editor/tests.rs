@@ -1479,10 +1479,26 @@ fn closing_a_tool_buffer_closes_its_window() {
  c",
     );
     assert_eq!((ed.buffers.len(), ed.windows.len(), text(&ed).as_str()), (1, 1, "code"), "the last window stays");
-    // Over an empty buffer or the start screen there is no code to keep in view: no split.
-    for start in [editor(""), Editor::new(&[])] {
-        let mut ed: Editor = start;
-        keys(&mut ed, " xc");
-        assert_eq!((ed.windows.len(), ed.buf().title.as_deref()), (1, Some("[Calculator]")));
-    }
+}
+
+/// A tool opens in a small popup over the windows, outside the layout; Esc hides it, its key brings it back, and
+/// the tools share one popup.
+#[test]
+fn tools_open_in_one_small_popup() {
+    use crate::render::Screen;
+    use crate::term::{ColorDepth, Size};
+    let mut ed: Editor = editor("code");
+    let layout: Layout = ed.layout.clone();
+    keys(&mut ed, " xc2+2\n");
+    assert_eq!((ed.windows.len(), ed.windows[ed.active].floating), (2, true));
+    assert_eq!(ed.layout, layout, "the split windows stay as they were");
+    let frame: String = Screen::new(ColorDepth::TrueColor).draw(&mut ed, Size { cols: 120, rows: 40 });
+    assert!(frame.contains("Calculator") && frame.contains("= 4"), "the popup shows the tool");
+    assert!(ed.view_height < 10, "{}", ed.view_height);
+    keys(&mut ed, "\x1b\x1b");
+    assert_eq!((ed.windows.len(), text(&ed).as_str()), (1, "code"), "Esc in normal mode hides it");
+    keys(&mut ed, " xc\x1b");
+    assert_eq!((ed.windows.len(), ed.buf().line(1)), (2, "= 4"), "back with its history");
+    keys(&mut ed, " xu");
+    assert_eq!((ed.windows.len(), ed.buf().title.as_deref()), (2, Some("[Convert]")), "one popup for all tools");
 }

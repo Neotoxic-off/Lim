@@ -150,7 +150,13 @@ impl Editor {
             Key::CtrlDown => self.resize_window(false, -2),
             Key::CtrlLeft => self.resize_window(true, -2),
             Key::CtrlRight => self.resize_window(true, 2),
-            Key::Esc => self.register_name = None,
+            Key::Esc => {
+                self.register_name = None;
+                // A popup closes on Esc, as NvChad's floats.
+                if self.windows.get(self.active).is_some_and(|w| w.floating) {
+                    self.close_window();
+                }
+            }
             Key::Char('|') => self.split(true),
             Key::Char('\\') => self.split(false),
             Key::Ctrl('h') => self.focus_direction(Direction::Left),

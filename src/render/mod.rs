@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::{env, fs};
 
-use crate::buffer::text;
+use crate::buffer::{Buffer, text};
 use crate::config::Options;
 use crate::editor::{EXPLORER_WIDTH, Editor, Mode, Rect, Separator, WindowId};
 use crate::term::{ColorDepth, Size};
@@ -94,6 +94,10 @@ fn git_branch(mut dir: PathBuf) -> Option<String> {
         }
     }
 }
+
+/// A tool's popup, border included: room for a few questions and answers, not a window's worth.
+const POPUP_WIDTH: usize = 56;
+const POPUP_HEIGHT: usize = 10;
 
 pub struct Screen {
     /// The terminal's own depth, used while `truecolor` is "auto".
@@ -271,6 +275,23 @@ impl Screen {
             } else {
                 grid.text(sep.x, sep.y, sep.len, border, &"\u{2500}".repeat(sep.len));
             }
+        }
+        // Popups (the tools) over the windows: small, centred, a float with the tool's name as title.
+        let popups: Vec<usize> = (0..ed.windows.len()).filter(|&i| ed.windows[i].floating).collect();
+        for index in popups {
+            let (w, h): (usize, usize) = (POPUP_WIDTH.min(area.w.saturating_sub(4)), POPUP_HEIGHT.min(area.h));
+            if w < 10 || h < 3 {
+                continue;
+            }
+            let frame: Rect = Rect { x: area.x + (area.w - w) / 2, y: area.y + (area.h - h) / 2, w, h };
+            let title: String = ed.buffers.get(ed.windows[index].buffer).map(Buffer::name).unwrap_or_default();
+            let t: Arc<Theme> = theme();
+            grid.float(frame, t.style(Group::FloatBorder), t.style(Group::NormalFloat), title.trim_matches(['[', ']']));
+            let inside: Rect = Rect { x: frame.x + 1, y: frame.y + 1, w: w - 2, h: h - 2 };
+            if index == ed.active {
+                ed.view_height = inside.h;
+            }
+            cursor = view::window(ed, index, inside, grid).or(cursor);
         }
         cursor
     }

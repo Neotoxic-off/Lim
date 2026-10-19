@@ -40,11 +40,13 @@ pub struct Window {
     pub id: WindowId,
     pub buffer: usize,
     pub view: View,
+    /// A popup over the others (a tool's), outside the layout.
+    pub floating: bool,
 }
 
 impl Window {
     pub fn new(id: u32, buffer: usize, view: View) -> Self {
-        Self { id: WindowId(id), buffer, view }
+        Self { id: WindowId(id), buffer, view, floating: false }
     }
 }
 

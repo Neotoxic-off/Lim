@@ -95,7 +95,9 @@ impl Editor {
     }
 
     fn mouse_in_text(&mut self, event: Mouse) {
-        let Some(pane): Option<Pane> = self.panes.iter().copied().find(|p| p.contains(event.col, event.row)) else {
+        // Popups are drawn last, over the rest: the topmost pane takes the click.
+        let Some(pane): Option<Pane> = self.panes.iter().rev().copied().find(|p| p.contains(event.col, event.row))
+        else {
             return;
         };
         match event.kind {
