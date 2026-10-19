@@ -99,7 +99,7 @@
 <rect x="423" y="162" width="477" height="18" fill="#fdf6e3"/>
 <text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162 171 180 189" y="175" fill="#657b83">▫config.example.json</text>
 <text x="270" y="175" fill="#fdf6e3">│</text>
-<text x="306" y="175" fill="#586e75">9</text>
+<text x="306" y="175" fill="#657b83">9</text>
 <text x="333" y="175" fill="#93a1a1">▏</text>
 <text x="369 378 387 396 405 414" y="175" fill="#657b83">counts</text>
 <rect x="0" y="180" width="900" height="18" fill="#fdf6e3"/>
@@ -168,15 +168,17 @@
 <rect x="0" y="360" width="900" height="18" fill="#fdf6e3"/>
 <text x="270" y="373" fill="#fdf6e3">│</text>
 <rect x="0" y="378" width="90" height="18" fill="#268bd2"/>
-<rect x="90" y="378" width="648" height="18" fill="#eee8d5"/>
-<rect x="738" y="378" width="18" height="18" fill="#dc322f"/>
-<rect x="756" y="378" width="45" height="18" fill="#eee8d5"/>
-<rect x="801" y="378" width="18" height="18" fill="#859900"/>
-<rect x="819" y="378" width="81" height="18" fill="#eee8d5"/>
+<rect x="90" y="378" width="99" height="18" fill="#93a1a1"/>
+<rect x="189" y="378" width="585" height="18" fill="#eee8d5"/>
+<rect x="774" y="378" width="18" height="18" fill="#dc322f"/>
+<rect x="792" y="378" width="45" height="18" fill="#93a1a1"/>
+<rect x="837" y="378" width="18" height="18" fill="#859900"/>
+<rect x="855" y="378" width="45" height="18" fill="#93a1a1"/>
 <text x="9 27 36 45 54 63 72" y="391" fill="#fdf6e3" font-weight="bold">◆NORMAL</text>
-<text x="99 117 126 135 144 153 162 171 198 216 225 234" y="391" fill="#657b83">▫main.rs⎇dev</text>
-<text x="738" y="391" fill="#fdf6e3">▣</text>
-<text x="765 774 783" y="391" fill="#657b83">Lim</text>
-<text x="801" y="391" fill="#fdf6e3">≡</text>
-<text x="828 837 846 864 873 882" y="391" fill="#657b83">9:556%</text>
+<text x="99 117 126 135 144 153 162 171" y="391" fill="#657b83">▫main.rs</text>
+<text x="198 216 225 234" y="391" fill="#839496" font-weight="bold">⎇dev</text>
+<text x="774" y="391" fill="#fdf6e3">▣</text>
+<text x="801 810 819" y="391" fill="#657b83">Lim</text>
+<text x="837" y="391" fill="#fdf6e3">≡</text>
+<text x="864 873 882" y="391" fill="#859900">9/5</text>
 </svg>

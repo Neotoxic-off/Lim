@@ -55,14 +55,13 @@ pub fn tabline(ed: &Editor, grid: &mut Grid, y: usize, offset: usize) {
         let (icon, icon_fg): (String, Option<u32>) = set.for_file(buf.lang);
         let (icon, icon_style): (String, Style) = match labels.as_ref().and_then(|l| l.get(i)) {
             Some(label) => (format!("{label} "), t.on(Group::BufferPicker, name.bg)),
-            None if !icon.is_empty() => {
-                let fg: Rgb = if active { icon_fg.map_or(name.fg, Rgb) } else { name.fg };
-                (format!("{icon} "), Style { fg, ..name })
-            }
+            None if !icon.is_empty() => (format!("{icon} "), Style { fg: icon_fg.map_or(name.fg, Rgb), ..name }),
             None => (String::new(), name),
         };
         let (mark, mark_style): (String, Style) = if buf.is_dirty() {
-            (format!("{} ", set.modified), t.on(Group::TabLineModified, name.bg))
+            // Green on the current buffer, red on the others (TbBufOnModified / TbBufOffModified).
+            let group: Group = if active { Group::TabLineModified } else { Group::ErrorMsg };
+            (format!("{} ", set.modified), t.on(group, name.bg))
         } else if active {
             // NvChad's red close button on the current buffer.
             (format!("{} ", set.close), t.on(Group::ErrorMsg, name.bg))
@@ -102,9 +101,12 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
         StatusStyle::Arrow => ("\u{e0b2}", "\u{e0b0}"),
         StatusStyle::Flat => ("", ""),
     };
+    // NvChad steps from the mode down to the file through a grey cap.
+    let step: Rgb = t.bg(Group::StatusModeSep);
     let mut left: Vec<(Style, String)> = vec![
         (mode, format!(" {}{} ", Icons::spaced(set.mode), ed.mode.label())),
-        (Style::new(mode.bg, section.bg), right_cap.into()),
+        (Style::new(mode.bg, step), right_cap.into()),
+        (Style::new(step, section.bg), right_cap.into()),
     ];
     if !icon.is_empty() {
         left.push((Style { fg: icon_fg.map_or(section.fg, Rgb), ..section }, format!(" {icon}")));
@@ -112,18 +114,13 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
     left.push((section, format!(" {}{} ", buf.name(), if buf.is_dirty() { " [+]" } else { "" })));
     left.push((Style::new(section.bg, fill.bg), right_cap.into()));
     if let Some(branch) = &ctx.branch {
-        left.push((fill, format!(" {}{branch}", Icons::spaced(set.branch))));
+        left.push((t.style(Group::StatusGit), format!(" {}{branch}", Icons::spaced(set.branch))));
     }
     let mut right: Vec<(Style, String)> = Vec::new();
     if let Some(reg) = ed.recording() {
         right.push((t.style(Group::StatusRecording), format!("{}@{reg}  ", Icons::spaced(set.recording))));
     }
     let Pos { line, col }: Pos = buf.cursor;
-    let progress: String = match line {
-        0 => "Top".into(),
-        l if l == buf.last_line() => "Bot".into(),
-        l => format!("{}%", (l + 1) * 100 / buf.line_count()),
-    };
     let cwd: Style = t.style(Group::StatusCwd);
     let position: Style = t.style(Group::StatusPosition);
     right.extend([
@@ -132,7 +129,8 @@ pub fn statusline(ed: &Editor, ctx: &Context, grid: &mut Grid, y: usize) {
         (section, format!(" {} ", ctx.cwd)),
         (Style::new(position.bg, section.bg), left_cap.into()),
         (position, format!("{} ", if set.position.is_empty() { "" } else { set.position })),
-        (section, format!(" {}:{} {progress} ", line + 1, col + 1)),
+        // NvChad's `%l/%v`, in the position's color.
+        (Style { fg: position.bg, ..section }, format!(" {}/{} ", line + 1, col + 1)),
     ]);
     bar(grid, y, &left, &right, fill);
 }

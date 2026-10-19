@@ -80,7 +80,7 @@ Each takes `fg`, `bg` (`"#RRGGBB"`), `bold`, `italic`, `underline`, or `link` to
 |---|---|
 | Editor | `Normal` `NormalNC` `CursorLine` `LineNr` `CursorLineNr` `Visual` `Search` `CurSearch` `MatchParen` `LspReferenceText` `HighlightURL` `IblIndent` `Directory` |
 | Syntax | `@variable` `@comment` `@string` `@number` `@keyword` `@function` `@type` `@type.builtin` `@constant` `@function.macro` `@property` |
-| Statusline | `StatusLine` `StatusLineSection` `StatusLineNormal` `StatusLineInsert` `StatusLineVisual` `StatusLineCommand` `StatusLineReplace` `StatusLineCwd` `StatusLinePosition` `StatusLineRecording` |
+| Statusline | `StatusLine` `StatusLineSection` `StatusLineNormal` `StatusLineInsert` `StatusLineVisual` `StatusLineCommand` `StatusLineReplace` `StatusLineCwd` `StatusLinePosition` `StatusLineRecording` `StatusLineModeSep` (the grey step after the mode) `StatusLineGit` |
 | Tabline, windows | `TabLine` `TabLineSel` `TabLineFill` `TabLineModified` `BufferPicker` `WinSeparator` `WinBar` `WinBarNC` |
 | Messages, floats | `MsgArea` `ErrorMsg` `NormalFloat` `FloatBorder` (fg = bg hides the frame, the default; set an fg to bring lines back) `FloatTitle` (title pill) `PmenuSel` `SnacksNotifierInfo` `SnacksNotifierError` |
 | Completion | `BlinkCmpLabelMatch` `BlinkCmpKind` `BlinkCmpSource` (menu: `NormalFloat`, `FloatBorder`, `PmenuSel`) |

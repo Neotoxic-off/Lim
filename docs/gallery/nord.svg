@@ -41,7 +41,7 @@
 <text x="9 27 36 45 54 63 72" y="103" fill="#81a1c1">▸target</text>
 <text x="270" y="103" fill="#2e3440">│</text>
 <text x="306" y="103" fill="#616e88">5</text>
-<text x="333" y="103" fill="#616e88">▏</text>
+<text x="333" y="103" fill="#3b4252">▏</text>
 <text x="369 378 387" y="103" fill="#81a1c1">let</text>
 <text x="405 414 423" y="103" fill="#81a1c1">mut</text>
 <text x="441 450 459 468 477 486 495" y="103" fill="#d8dee9">counts:</text>
@@ -59,7 +59,7 @@
 <text x="9 27 36 45 54 63 72 81 90 99 108" y="121" fill="#d8dee9">▫Cargo.lock</text>
 <text x="270" y="121" fill="#2e3440">│</text>
 <text x="306" y="121" fill="#616e88">6</text>
-<text x="333" y="121" fill="#616e88">▏</text>
+<text x="333" y="121" fill="#3b4252">▏</text>
 <text x="369 378 387" y="121" fill="#81a1c1">for</text>
 <text x="405 414 423 432" y="121" fill="#d8dee9">word</text>
 <text x="450 459" y="121" fill="#81a1c1">in</text>
@@ -74,8 +74,8 @@
 <text x="9 27 36 45 54 63 72 81 90 99 108" y="139" fill="#d8dee9">▫Cargo.toml</text>
 <text x="270" y="139" fill="#2e3440">│</text>
 <text x="306" y="139" fill="#616e88">7</text>
-<text x="333" y="139" fill="#616e88">▏</text>
-<text x="369" y="139" fill="#616e88">▏</text>
+<text x="333" y="139" fill="#3b4252">▏</text>
+<text x="369" y="139" fill="#3b4252">▏</text>
 <text x="405 414 423 432 441 450 459 468" y="139" fill="#d8dee9">*counts.</text>
 <text x="477 486 495 504 513" y="139" fill="#88c0d0">entry</text>
 <text x="522 531 540 549 558 567 576" y="139" fill="#d8dee9">(word).</text>
@@ -92,7 +92,7 @@
 <text x="9 27 36 45 54 63 72 81 90 99" y="157" fill="#d8dee9">▫CLAUDE.md</text>
 <text x="270" y="157" fill="#2e3440">│</text>
 <text x="306" y="157" fill="#616e88">8</text>
-<text x="333" y="157" fill="#616e88">▏</text>
+<text x="333" y="157" fill="#3b4252">▏</text>
 <text x="369" y="157" fill="#d8dee9">}</text>
 <rect x="0" y="162" width="369" height="18" fill="#2e3440"/>
 <rect x="369" y="162" width="54" height="18" fill="#3b4252"/>
@@ -100,7 +100,7 @@
 <text x="9 27 36 45 54 63 72 81 90 99 108 117 126 135 144 153 162 171 180 189" y="175" fill="#d8dee9">▫config.example.json</text>
 <text x="270" y="175" fill="#2e3440">│</text>
 <text x="306" y="175" fill="#d8dee9">9</text>
-<text x="333" y="175" fill="#616e88">▏</text>
+<text x="333" y="175" fill="#3b4252">▏</text>
 <text x="369 378 387 396 405 414" y="175" fill="#d8dee9">counts</text>
 <rect x="0" y="180" width="900" height="18" fill="#2e3440"/>
 <text x="9 27 36 45 54 63 72 81 90 99 108 117" y="193" fill="#d8dee9">▫install.bat</text>
@@ -122,7 +122,7 @@
 <text x="9 27 36 45 54 63 72 81 90 99" y="247" fill="#d8dee9">▫README.md</text>
 <text x="270" y="247" fill="#2e3440">│</text>
 <text x="297 306" y="247" fill="#616e88">13</text>
-<text x="333" y="247" fill="#616e88">▏</text>
+<text x="333" y="247" fill="#3b4252">▏</text>
 <text x="369 378 387" y="247" fill="#81a1c1">let</text>
 <text x="405 414 423 432 441 459" y="247" fill="#d8dee9">text:&amp;</text>
 <text x="468 477 486" y="247" fill="#81a1c1">str</text>
@@ -134,7 +134,7 @@
 <text x="9 27 36 45 54 63 72 81 90 99 108 117 126" y="265" fill="#d8dee9">▫rustfmt.toml</text>
 <text x="270" y="265" fill="#2e3440">│</text>
 <text x="297 306" y="265" fill="#616e88">14</text>
-<text x="333" y="265" fill="#616e88">▏</text>
+<text x="333" y="265" fill="#3b4252">▏</text>
 <text x="369 378 387" y="265" fill="#81a1c1">let</text>
 <text x="405 414 423 432 441 450 468" y="265" fill="#d8dee9">counts=</text>
 <text x="486 495 504 513 522 531 540 549 558 567 576" y="265" fill="#88c0d0">word_counts</text>
@@ -146,7 +146,7 @@
 <rect x="828" y="270" width="72" height="18" fill="#2e3440"/>
 <text x="270" y="283" fill="#2e3440">│</text>
 <text x="297 306" y="283" fill="#616e88">15</text>
-<text x="333" y="283" fill="#616e88">▏</text>
+<text x="333" y="283" fill="#3b4252">▏</text>
 <text x="369 378 387 396 405 414 423" y="283" fill="#81a1c1">println</text>
 <text x="432 441" y="283" fill="#d8dee9">!(</text>
 <text x="450 459 468 486 495 504 513 522 531 540 549 567 576 585 594 603 612 630 639 648 657 666" y="283" fill="#a3be8c">"{}distinctwords,color</text>
@@ -167,17 +167,17 @@
 <text x="270" y="355" fill="#2e3440">│</text>
 <rect x="0" y="360" width="900" height="18" fill="#2e3440"/>
 <text x="270" y="373" fill="#2e3440">│</text>
-<rect x="0" y="378" width="90" height="18" fill="#81a1c1"/>
-<rect x="90" y="378" width="99" height="18" fill="#434c5e"/>
-<rect x="189" y="378" width="549" height="18" fill="#3b4252"/>
-<rect x="738" y="378" width="18" height="18" fill="#bf616a"/>
-<rect x="756" y="378" width="45" height="18" fill="#434c5e"/>
-<rect x="801" y="378" width="18" height="18" fill="#a3be8c"/>
-<rect x="819" y="378" width="81" height="18" fill="#434c5e"/>
+<rect x="0" y="378" width="90" height="18" fill="#88c0d0"/>
+<rect x="90" y="378" width="684" height="18" fill="#3b4252"/>
+<rect x="774" y="378" width="18" height="18" fill="#bf616a"/>
+<rect x="792" y="378" width="45" height="18" fill="#3b4252"/>
+<rect x="837" y="378" width="18" height="18" fill="#a3be8c"/>
+<rect x="855" y="378" width="45" height="18" fill="#3b4252"/>
 <text x="9 27 36 45 54 63 72" y="391" fill="#2e3440" font-weight="bold">◆NORMAL</text>
-<text x="99 117 126 135 144 153 162 171 198 216 225 234" y="391" fill="#d8dee9">▫main.rs⎇dev</text>
-<text x="738" y="391" fill="#2e3440">▣</text>
-<text x="765 774 783" y="391" fill="#d8dee9">Lim</text>
-<text x="801" y="391" fill="#2e3440">≡</text>
-<text x="828 837 846 864 873 882" y="391" fill="#d8dee9">9:556%</text>
+<text x="99 117 126 135 144 153 162 171" y="391" fill="#d8dee9">▫main.rs</text>
+<text x="198 216 225 234" y="391" fill="#616e88" font-weight="bold">⎇dev</text>
+<text x="774" y="391" fill="#2e3440">▣</text>
+<text x="801 810 819" y="391" fill="#d8dee9">Lim</text>
+<text x="837" y="391" fill="#2e3440">≡</text>
+<text x="864 873 882" y="391" fill="#a3be8c">9/5</text>
 </svg>
