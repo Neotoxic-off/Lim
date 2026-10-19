@@ -104,34 +104,31 @@ impl Editor {
     }
 
     fn submit(&mut self, action: PromptAction, input: &str) {
-        let touched: Option<PathBuf> = match &action {
-            PromptAction::TreeAdd { dir, .. } => Some(dir.join(input)),
-            PromptAction::TreeRename { from } | PromptAction::TreeMove { from } | PromptAction::TreeCopy { from } => {
-                Some(from.clone())
-            }
-            PromptAction::TreeDelete { path } => Some(path.clone()),
-            PromptAction::RenameFile => self.buf().path.clone(),
-            _ => None,
-        };
-        if touched.is_some_and(|p| !super::may_touch(&p)) {
+        if touched_path(&action, self.buf().path.as_deref(), input).is_some_and(|p| !super::may_touch(&p)) {
             return;
         }
-        let result: Result<String, String> = match action {
-            _ if input.is_empty() && !matches!(action, PromptAction::TreeDelete { .. }) => return,
+        // An empty answer cancels, except to the delete question, where it means no.
+        if input.is_empty() && !matches!(action, PromptAction::TreeDelete { .. }) {
+            return;
+        }
+        let Some(result): Option<Result<String, String>> = self.run_prompt(action, input) else { return };
+        if let Some(tree) = &mut self.explorer {
+            tree.refresh();
+        }
+        match result {
+            Ok(done) => self.set_message(Message::Info(done)),
+            Err(e) => self.set_message(Message::Error(e)),
+        }
+    }
+
+    /// Does what the prompt asked; None when there is nothing to report (a copy outside the allowed paths, a
+    /// delete not confirmed).
+    fn run_prompt(&mut self, action: PromptAction, input: &str) -> Option<Result<String, String>> {
+        Some(match action {
             PromptAction::Case => self.case_word(input),
             PromptAction::RenameFile => self.rename_current(input),
             PromptAction::IndentWidth => self.set_indent(input),
-            PromptAction::TreeAdd { dir, directory } => {
-                let path: PathBuf = dir.join(input);
-                let made: io::Result<()> = if directory || input.ends_with('/') {
-                    fs::create_dir_all(&path)
-                } else {
-                    path.parent()
-                        .map_or(Ok(()), fs::create_dir_all)
-                        .and_then(|()| fs::File::create_new(&path).map(drop))
-                };
-                made.map(|()| format!("Created {}", path.display())).map_err(|e| format!("{}: {e}", path.display()))
-            }
+            PromptAction::TreeAdd { dir, directory } => tree_add(&dir.join(input), directory || input.ends_with('/')),
             PromptAction::TreeRename { from } => {
                 let to: PathBuf = sibling(&from, input);
                 self.move_path(&from, &to).map(|()| format!("Renamed to {}", to.display()))
@@ -140,32 +137,10 @@ impl Editor {
                 let to: PathBuf = self.tree_target(input);
                 self.move_path(&from, &to).map(|()| format!("Moved to {}", to.display()))
             }
-            PromptAction::TreeCopy { from } => {
-                let to: PathBuf = self.tree_target(input);
-                if !super::may_touch(&to) {
-                    return;
-                }
-                copy_recursive(&from, &to)
-                    .map(|()| format!("Copied to {}", to.display()))
-                    .map_err(|e| format!("{}: {e}", to.display()))
-            }
-            PromptAction::TreeDelete { path } => {
-                if !input.eq_ignore_ascii_case("y") {
-                    return;
-                }
-                let removed: io::Result<()> =
-                    if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
-                removed.map(|()| format!("Deleted {}", path.display())).map_err(|e| format!("{}: {e}", path.display()))
-            }
+            PromptAction::TreeCopy { from } => tree_copy(&from, &self.tree_target(input))?,
+            PromptAction::TreeDelete { path } => tree_delete(&path, input)?,
             PromptAction::SessionSave => self.save_session(input).map(|()| format!("Session \"{input}\" saved")),
-        };
-        if let Some(tree) = &mut self.explorer {
-            tree.refresh();
-        }
-        match result {
-            Ok(done) => self.set_message(Message::Info(done)),
-            Err(e) => self.set_message(Message::Error(e)),
-        }
+        })
     }
 
     /// `<Leader>R` and `:rename`: renames the file on disk (if it exists) and the buffer.
@@ -251,4 +226,45 @@ fn copy_recursive(from: &Path, to: &Path) -> io::Result<()> {
         }
         fs::copy(from, to).map(drop)
     }
+}
+
+/// The path a prompt's action will write to, so it can be checked first; `current` is the buffer's file.
+fn touched_path(action: &PromptAction, current: Option<&Path>, input: &str) -> Option<PathBuf> {
+    match action {
+        PromptAction::TreeAdd { dir, .. } => Some(dir.join(input)),
+        PromptAction::TreeRename { from } | PromptAction::TreeMove { from } | PromptAction::TreeCopy { from } => {
+            Some(from.clone())
+        }
+        PromptAction::TreeDelete { path } => Some(path.clone()),
+        PromptAction::RenameFile => current.map(Path::to_path_buf),
+        _ => None,
+    }
+}
+
+/// `a` in the tree: a folder (named with a trailing `/`), or an empty file with its missing folders.
+fn tree_add(path: &Path, directory: bool) -> Result<String, String> {
+    let made: io::Result<()> = if directory {
+        fs::create_dir_all(path)
+    } else {
+        path.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| fs::File::create_new(path).map(drop))
+    };
+    made.map(|()| format!("Created {}", path.display())).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// `c` in the tree: copies a file or a folder; None when the target is not allowed.
+fn tree_copy(from: &Path, to: &Path) -> Option<Result<String, String>> {
+    if !super::may_touch(to) {
+        return None;
+    }
+    let copied: io::Result<()> = copy_recursive(from, to);
+    Some(copied.map(|()| format!("Copied to {}", to.display())).map_err(|e| format!("{}: {e}", to.display())))
+}
+
+/// `d` in the tree, once confirmed with `y`; None otherwise.
+fn tree_delete(path: &Path, answer: &str) -> Option<Result<String, String>> {
+    if !answer.eq_ignore_ascii_case("y") {
+        return None;
+    }
+    let removed: io::Result<()> = if path.is_dir() { fs::remove_dir_all(path) } else { fs::remove_file(path) };
+    Some(removed.map(|()| format!("Deleted {}", path.display())).map_err(|e| format!("{}: {e}", path.display())))
 }
