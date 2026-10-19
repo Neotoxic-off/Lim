@@ -7,7 +7,7 @@ use super::operator::Operator;
 use super::picker::PickerKind;
 use super::textops::TextOp;
 use super::tools::{Generated, Tool};
-use super::ui::{CTRL_W, LEADER_B, LEADER_BS, LEADER_F, LEADER_G, LEADER_S, LEADER_T, LEADER_U, LEADER_X};
+use super::ui::{CTRL_W, LEADER_B, LEADER_BS, LEADER_F, LEADER_G, LEADER_P, LEADER_S, LEADER_T, LEADER_U, LEADER_X};
 use super::window::Direction;
 use super::{Mode, PickAction};
 use crate::config::keys::LEADER;
@@ -45,6 +45,7 @@ pub enum Action {
         forward: bool,
     },
     Shell,
+    Upgrade,
     Tool(&'static [&'static str]),
     GitBrowse,
     Hunk {
@@ -158,6 +159,7 @@ pub const MENUS: &[(char, &str)] = &[
     (LEADER_T, "<Leader>t"),
     (LEADER_U, "<Leader>u"),
     (LEADER_X, "<Leader>x"),
+    (LEADER_P, "<Leader>p"),
     ('g', "g"),
     (']', "]"),
     ('[', "["),
@@ -175,6 +177,7 @@ pub const BINDINGS: &[Binding] = &[
     b(LEADER, 't', A::Group(LEADER_T), "+Terminal"),
     b(LEADER, 'u', A::Group(LEADER_U), "+UI/UI Toggles"),
     b(LEADER, 'x', A::Group(LEADER_X), "+Tools"),
+    b(LEADER, 'p', A::Group(LEADER_P), "+Packages"),
     b(LEADER, 'c', A::CloseBuffer { force: false }, "Close buffer"),
     b(LEADER, 'C', A::CloseBuffer { force: true }, "Force close buffer"),
     b(LEADER, 'e', A::ToggleExplorer, "Toggle Explorer"),
@@ -247,6 +250,7 @@ pub const BINDINGS: &[Binding] = &[
     b(LEADER_T, 'p', A::Tool(&["python3"]), "ToggleTerm python"),
     b(LEADER_T, 't', A::Tool(&["btm"]), "ToggleTerm btm"),
     b(LEADER_T, 'u', A::Tool(&["gdu"]), "ToggleTerm gdu"),
+    b(LEADER_P, 'u', A::Upgrade, "Update lim"),
     b(LEADER_U, 'a', A::Toggle(Toggle::Autopairs), "Toggle autopairs"),
     b(LEADER_U, 'b', A::Toggle(Toggle::Background), "Toggle background"),
     b(LEADER_U, 'c', A::Toggle(Toggle::Autocomplete), "Toggle autocompletion (buffer)"),

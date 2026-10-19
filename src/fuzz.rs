@@ -119,6 +119,8 @@ fn every_key() -> Vec<Key> {
 /// Sequences a random key stream would almost never type, so the fuzz reaches every screen and command.
 const PHRASES: &[&str] = &[
     ":settings\n",
+    ":upgrade\n",
+    " pu",
     " ,",
     " ff",
     " fw",

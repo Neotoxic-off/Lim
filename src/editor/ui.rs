@@ -18,6 +18,8 @@ pub const LEADER_S: char = '\u{F8F5}';
 pub const LEADER_BS: char = '\u{F8F6}';
 /// `<Leader>x`: tools (calculator, converter, generators).
 pub const LEADER_X: char = '\u{F8F7}';
+/// `<Leader>p`: packages, as in `AstroNvim`; here lim's own update.
+pub const LEADER_P: char = '\u{F8F8}';
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuEntry {
@@ -64,6 +66,7 @@ fn prefix_keys(prefix: char) -> Vec<Key> {
         LEADER_U => vec![Key::Char(LEADER), Key::Char('u')],
         LEADER_S => vec![Key::Char(LEADER), Key::Char('S')],
         LEADER_X => vec![Key::Char(LEADER), Key::Char('x')],
+        LEADER_P => vec![Key::Char(LEADER), Key::Char('p')],
         LEADER_BS => vec![Key::Char(LEADER), Key::Char('b'), Key::Char('s')],
         CTRL_W => vec![Key::Ctrl('w')],
         c => vec![Key::Char(c)],

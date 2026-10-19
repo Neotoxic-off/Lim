@@ -1,10 +1,10 @@
-//! `lim --update`: asks GitHub for the latest release and, when it is newer, rebuilds lim from that tag with cargo,
-//! as the installer does. curl ships with Linux, macOS and Windows 10+, so lim needs no TLS of its own.
+//! `:upgrade` / `<Leader>pu`: asks GitHub for the latest release and, when it is newer, rebuilds lim from that tag
+//! with cargo, as the installer does. curl ships with Linux, macOS and Windows 10+, so lim needs no TLS of its own.
 
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::process::{Command, ExitCode, ExitStatus};
+use std::process::{Command, Output, Stdio};
 use std::{env, iter};
 
 use crate::config::json::{self, Json};
@@ -13,20 +13,8 @@ use crate::editor::pipe;
 const REPO: &str = "https://github.com/Neotoxic-off/Lim";
 const LATEST: &str = "https://api.github.com/repos/Neotoxic-off/Lim/releases/latest";
 
-pub fn run() -> ExitCode {
-    match update() {
-        Ok(message) => {
-            println!("{message}");
-            ExitCode::SUCCESS
-        }
-        Err(why) => {
-            eprintln!("lim --update: {why}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn update() -> Result<String, String> {
+/// Runs on a background thread while editing goes on; what it returns becomes a notification.
+pub fn run() -> Result<String, String> {
     let current: &str = env!("CARGO_PKG_VERSION");
     let argv: Vec<String> = ["curl", "-fsSL", "-H", "User-Agent: lim", LATEST].map(str::to_owned).to_vec();
     let reply: String = pipe(&argv, "").map_err(|e| {
@@ -40,7 +28,6 @@ fn update() -> Result<String, String> {
     if !newer(&tag, current) {
         return Ok(format!("lim {current} is up to date (latest release: {tag})"));
     }
-    println!("lim {current} -> {tag}: building it with cargo (about a minute)...");
     // Windows cannot overwrite a running exe but can rename it, so this one steps aside for cargo.
     let exe: Option<PathBuf> = env::current_exe().ok().filter(|_| cfg!(windows));
     let old: Option<PathBuf> = exe.as_ref().map(|e| e.with_extension("old"));
@@ -48,18 +35,26 @@ fn update() -> Result<String, String> {
         let _: io::Result<()> = fs::remove_file(old);
         let _: io::Result<()> = fs::rename(exe, old);
     }
-    let status: io::Result<ExitStatus> =
-        Command::new("cargo").args(["install", "--git", REPO, "--tag", &tag, "--locked", "--force", "lim"]).status();
+    // Captured, so cargo's progress never draws over the editor.
+    let built: io::Result<Output> = Command::new("cargo")
+        .args(["install", "--git", REPO, "--tag", &tag, "--locked", "--force", "lim"])
+        .stdin(Stdio::null())
+        .output();
     // Back in place unless cargo put the new one there (this exe was not the installed one, or the build failed).
     if let (Some(exe), Some(old)) = (&exe, &old)
         && !exe.exists()
     {
         let _: io::Result<()> = fs::rename(old, exe);
     }
-    if status.as_ref().is_ok_and(ExitStatus::success) {
-        return Ok(format!("lim updated to {tag}"));
+    match built {
+        Ok(out) if out.status.success() => Ok(format!("lim updated to {tag}: restart lim to use it")),
+        Ok(out) => {
+            let stderr: String = String::from_utf8_lossy(&out.stderr).into_owned();
+            let error: &str = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+            Err(format!("cargo {}: {}", out.status, error.trim()))
+        }
+        Err(e) => Err(format!("cargo: {e} (install Rust from https://rustup.rs)")),
     }
-    Err(status.map_or_else(|e| format!("cargo: {e} (install Rust from https://rustup.rs)"), |s| format!("cargo {s}")))
 }
 
 /// `tag_name` of GitHub's releases/latest answer.

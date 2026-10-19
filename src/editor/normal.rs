@@ -284,6 +284,7 @@ impl Editor {
             Action::SortBuffers(by) => self.sort_buffers(by),
             Action::CycleBuffer { forward } => self.cycle(forward, n),
             Action::Shell => self.shell_requested = Some(Vec::new()),
+            Action::Upgrade => self.upgrade(),
             Action::Tool(argv) => self.run_tool(argv),
             Action::ToolWindow(tool) => self.open_tool(tool),
             Action::CasePrompt => self.open_case_prompt(),

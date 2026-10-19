@@ -150,7 +150,8 @@ pub fn notification(ed: &Editor, grid: &mut Grid, top: usize) {
         Some(Message::Info(m)) if !m.is_empty() => (m, Group::NotifyInfo, icons(&ed.options).info),
         _ => return,
     };
-    let fill: Style = t.style(Group::NormalFloat);
+    // The editor's background, not the float's: a toast sits on the text, and a darker block there clashes.
+    let fill: Style = t.style(Group::Normal);
     let border: Style = t.on(group, fill.bg);
     let max: usize = (grid.width / 2).max(20).min(grid.width.saturating_sub(2));
     let body: String = format!("{}{text}", Icons::spaced(icon));

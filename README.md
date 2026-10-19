@@ -29,7 +29,7 @@ lim is that editor with all of it **built in**:
 
 - **No Lua.** One JSON file for options, colors and keymaps, or the `<Leader>,` settings screen.
 - **No plugins.** File tree, pickers, live grep, which-key, git signs, completion, sessions, 30 themes,
-  text tools: part of the binary, tested together. `lim --update` gets the latest release.
+  text tools: part of the binary, tested together. `<Leader>pu` gets the latest release.
 - **No dependencies.** Zero crates, nothing to install beside the binary; it runs the same on Linux, macOS
   and Windows.
 - **Nothing breaks after an update.** There is no ecosystem to drift out of sync.
@@ -76,7 +76,7 @@ the start screen.
 | Hex & RE | binary files open as an editable hex dump, written back as bytes · `:hexedit` · `:detect` (ELF/PE/Mach-O and 20 formats, architecture, entropy, UPX) · `:strings` · `:inspect` · `:pack` · `:xor` |
 | Commands | `:Commands` in the config pipe the lines through a program in any language and put its output back or show it · format on save |
 | Robustness | atomic saves · refuses to clobber other files · a broken hex dump is never written · files too big for memory are refused, not half-loaded · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
-| Updates | `lim --update` checks the latest GitHub release and rebuilds lim from it |
+| Updates | `<Leader>pu` or `:upgrade` checks the latest GitHub release and rebuilds lim from it, from inside the editor |
 
 ## Install
 
@@ -101,9 +101,10 @@ curl -fsSLo %TEMP%\lim-install.bat https://raw.githubusercontent.com/Neotoxic-of
 curl.exe -fsSLo $env:TEMP\lim-install.bat https://raw.githubusercontent.com/Neotoxic-off/Lim/master/install.bat; & $env:TEMP\lim-install.bat
 ```
 
-**Update** with `lim --update`: it asks GitHub for the latest release and, when it is newer than yours, rebuilds
-lim from that tag with cargo (it needs `curl`, present on Linux, macOS and Windows 10+); otherwise it says you are
-up to date. Running the installer again also updates.
+**Update** from inside lim with `<Leader>pu` (or `:upgrade`): it asks GitHub for the latest release and, when it is
+newer than yours, rebuilds lim from that tag with cargo in the background while you keep editing (it needs `curl`,
+present on Linux, macOS and Windows 10+). A notification says when it is done; restart lim to use the new version.
+Running the installer again also updates.
 
 Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim --locked`, or from a clone
 `cargo build --release` and copy `target/release/lim` (`lim.exe`) onto your `PATH`.
@@ -122,7 +123,6 @@ lim                    # start screen
 lim src/main.rs a.lua  # open files
 lim ../project         # work in that folder (explorer, finder, git, sessions)
 lim app.exe            # a binary opens as a hex dump
-lim --update           # update to the latest GitHub release
 lim --print-config     # the documented default config
 lim --config-path      # where lim looks for config.json
 lim --help | --version

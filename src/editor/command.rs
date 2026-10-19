@@ -46,6 +46,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("split", "Split window"),
     ("strings", "Printable strings of the bytes, with offsets"),
     ("uniq", "Drop repeated adjacent lines"),
+    ("upgrade", "Update lim to the latest release"),
     ("url", "Percent-encode each line (! decodes)"),
     ("vsplit", "Split window vertically"),
     ("wall", "Write all buffers"),
@@ -172,6 +173,7 @@ pub enum Command {
     },
     Help,
     Setup,
+    Upgrade,
     /// `:[range]Name args`: a config command, by Vim's rule that user commands start uppercase.
     User {
         range: String,
@@ -477,6 +479,7 @@ impl Command {
             "noh" | "nohlsearch" => Self::NoHighlight,
             "h" | "help" => Self::Help,
             "settings" | "setup" => Self::Setup,
+            "upgrade" => Self::Upgrade,
             _ => return Err(Error::NotACommand(input.into())),
         }))
     }
@@ -706,6 +709,7 @@ impl Editor {
             }
             Command::Help => self.open_cheatsheet(),
             Command::Setup => self.open_setup(),
+            Command::Upgrade => self.upgrade(),
             Command::User { range, name, args } => self.run_user_command(&range, &name, &args, true)?,
             Command::Goto(n) => {
                 let buf: &mut Buffer = self.buf_mut();

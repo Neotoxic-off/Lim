@@ -45,15 +45,12 @@ fn main() -> ExitCode {
     let started: Instant = Instant::now();
     let args: Vec<String> = env::args().skip(1).collect();
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("usage: lim [dir] [file...] | --update | --version | --print-config | --config-path");
+        println!("usage: lim [dir] [file...] | --version | --print-config | --config-path");
         return ExitCode::SUCCESS;
     }
     if args.iter().any(|a| a == "-V" || a == "--version") {
         println!("lim {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
-    }
-    if args.iter().any(|a| a == "--update") {
-        return update::run();
     }
     if args.iter().any(|a| a == "--print-config") {
         print!("{}", config::EXAMPLE);

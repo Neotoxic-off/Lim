@@ -90,6 +90,11 @@ Files changed meanwhile are reloaded. *lim*: there is no embedded terminal.
 `<Leader>Sl` last session · `Ss` save (named) · `SS` save for this directory · `S.` load this directory's ·
 `Sf` / `SF` pick a session / directory session · `Sd` / `SD` delete one. The last session is saved on exit.
 
+## Packages
+
+`<Leader>pu` (or `:upgrade`) updates lim in the background: when GitHub has a newer release, cargo rebuilds it
+while you keep editing, then a notification says to restart lim. *lim*: there are no plugins to update.
+
 ## UI toggles
 
 | Keys | Action |

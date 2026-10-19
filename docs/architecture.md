@@ -7,7 +7,7 @@ sequences to one key decoder. The Windows clipboard is user32. Everything else i
 ```
 src/
 ├── main.rs        startup, event loop, panic recovery
-├── update.rs      --update: the latest GitHub release, rebuilt with cargo
+├── update.rs      :upgrade / <Leader>pu: the latest GitHub release, rebuilt with cargo
 ├── error.rs       Vim-worded errors (E32, E37, E492…)
 ├── term/          raw mode, window size, resize events, key decoding (sys/unix.rs, sys/windows.rs)
 ├── buffer/        lines, undo history, motions, text objects, git signs, file I/O, hex dumps

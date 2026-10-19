@@ -26,7 +26,8 @@ The `:` line completes as you type: command names, then file paths for `:e`, `:w
 ## Ex commands
 
 `:w [file]` `:q` `:wq` `:x` `:wa` `:qa` `:e file` `:e!` `:enew` `:saveas file` `:ls` `:b N`/`:b name`
-`:bn` `:bp` `:bd` `:sp` `:vs` `:only` `:close` `:noh` `:help` `:settings` (or `:setup`); on line ranges
+`:bn` `:bp` `:bd` `:sp` `:vs` `:only` `:close` `:noh` `:help` `:settings` (or `:setup`), `:upgrade` (update
+lim); on line ranges
 `:s/pat/rep/[flags]`, `:g/pat/cmd` and `:v/pat/cmd`, `:norm[!] keys`, `:sort[!] [i] [n] [u]`, `:m {address}`,
 `:t {address}`, `:r file`, `:d` `:y` `:>` `:<` `:j`. Addresses: `N`, `.`, `$`, `%`, `'a`, `'<,'>`, with `+N`/`-N`
 offsets (`.,+3`, `$-1`). `:rename file` moves the file on disk and the buffer with it. Commands that start with an

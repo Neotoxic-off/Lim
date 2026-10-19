@@ -547,6 +547,16 @@ fn ctrl_w_arrow_focuses_window() {
 }
 
 #[test]
+fn upgrade_from_a_command_or_the_leader() {
+    // Tests may not start programs, so both paths reach the update and stop at that guard.
+    for typed in [":upgrade\n", " pu"] {
+        let mut ed: Editor = editor("a");
+        keys(&mut ed, typed);
+        assert_eq!(ed.message, Some(Message::Error("upgrade: cannot run programs here".into())), "{typed}");
+    }
+}
+
+#[test]
 fn command_line_completion() {
     let mut ed: Editor = editor("a");
     keys(&mut ed, ":sett");

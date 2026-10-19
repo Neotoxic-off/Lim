@@ -80,6 +80,16 @@ impl Editor {
         self.apply_output(name, command.output, lines, &input, &output)
     }
 
+    /// `:upgrade` / `<Leader>pu`: checks for a newer release and rebuilds lim in the background, as a job.
+    pub(super) fn upgrade(&mut self) {
+        if !may_spawn() {
+            return self.error(&Error::UserCommand("upgrade".into(), "cannot run programs here".into()));
+        }
+        let (send, result): (Sender<Outcome>, Receiver<Outcome>) = mpsc::channel();
+        thread::spawn(move || send.send(crate::update::run()));
+        self.start_job("upgrade", CommandOutput::Message, LineRange { first: 0, last: 0 }, result);
+    }
+
     /// Tracks a background command on the current buffer until `result` arrives.
     pub(super) fn start_job(&mut self, name: &str, output: CommandOutput, lines: LineRange, result: Receiver<Outcome>) {
         let revision: u64 = self.buf().revision();
