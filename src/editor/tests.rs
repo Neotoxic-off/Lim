@@ -1066,7 +1066,8 @@ fn gn_line_commands_files_and_block_end() {
 
     let mut ed: Editor = editor(&format!("see {}:2 for details", two.display()));
     keys(&mut ed, "wwgf");
-    assert_eq!(ed.buf().path.as_deref(), Some(two.as_path()));
+    // `gf` resolves the path: macOS' temp dir is behind the /var symlink, Windows' may be an 8.3 short name.
+    assert_eq!(ed.buf().path.as_deref(), Some(crate::buffer::canonical(&two).as_path()));
     assert_eq!(ed.buf().cursor.line, 1, "path:line jumps to the line");
     let _: std::io::Result<()> = std::fs::remove_dir_all(&dir);
 
