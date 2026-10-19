@@ -80,9 +80,9 @@ const SMALL: &[&str] = &[
     "⠀⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣶⣶⣾⣿⣿⣿⣿⣿⣿⣿⣿⡟⢀⣀⣤⣾⡿⠃⠀⠀⠀⠀",
 ];
 
-/// The spinner for work in the background: a neck of the hydra swimming through its lake, in the drawings' own
-/// characters ('@' the eye, '#' the body, '.' the tail, '~' the lake).
-pub const SPINNER: [&str; 8] = ["@~~~~", "#@~~~", ".#@~~", "~.#@~", "~~.#@", "~~~.#", "~~~~.", "~~~~~"];
+/// The spinner for work in the background: a neck of the hydra rising from its lake and swimming across, in the
+/// braille drawings' characters (`⣀` the lake, `⢀⣴⣿` the neck, `⣷` the head).
+pub const SPINNER: [&str; 8] = ["⣀⣀⣀⣀", "⢀⣀⣀⣀", "⣴⢀⣀⣀", "⣿⣴⢀⣀", "⣷⣿⣴⢀", "⣀⣷⣿⣴", "⣀⣀⣷⣿", "⣀⣀⣀⣷"];
 
 /// Time each spinner frame stays.
 pub const SPINNER_FRAME_MS: u128 = 120;
@@ -168,12 +168,12 @@ mod tests {
 
     #[test]
     fn the_spinner_keeps_its_width_and_swims_through() {
-        assert!(SPINNER.iter().all(|f| text::str_width(f) == 5));
-        let heads: Vec<Option<usize>> = SPINNER.iter().map(|f| f.find('@')).collect();
+        assert!(SPINNER.iter().all(|f| text::str_width(f) == 4 && f.chars().all(|c| ('⠀'..='⣿').contains(&c))));
+        let heads: Vec<Option<usize>> = SPINNER.iter().map(|f| f.chars().position(|c| c == '⣷')).collect();
         assert_eq!(
             heads,
-            [Some(0), Some(1), Some(2), Some(3), Some(4), None, None, None],
-            "the eye leads, left to right"
+            [None, None, None, None, Some(0), Some(1), Some(2), Some(3)],
+            "the head leads, left to right"
         );
     }
 
