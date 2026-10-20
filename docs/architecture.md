@@ -30,7 +30,9 @@ src/
 │                  generated text), and their popup
 ├── syntax/        syntect highlighting with per-line state, language facts, todo-comments
 ├── config/        JSON (jsonc-parser), key notation, options/palette/highlights/keymaps/commands
-└── render/        cell grid, themes and palettes, icon sets, windows, bars, floats, picker, tree, start screen
+├── render/        cell grid, themes and palettes, icon sets, windows, bars, floats, picker, tree, start screen
+└── bin/lim-gui.rs lim in its own window: a small terminal emulator (alacritty_terminal over a pty, ConPTY on
+                   Windows; winit + softbuffer; fontdue with the Nerd Font in assets/fonts) running the lim beside it
 ```
 
 - **Rendering** draws each frame into a grid of cells, back to front (`render/mod.rs`, `compose`): the tabline,

@@ -65,13 +65,18 @@ jobs:
       - name: Name the binary
         shell: bash
         run: |
-          exe=target/${{ matrix.target }}/release/lim
-          [ -f "$exe.exe" ] && exe="$exe.exe"
-          cp "$exe" "${{ matrix.asset }}"
+          for bin in lim lim-gui; do
+            exe=target/${{ matrix.target }}/release/$bin
+            [ -f "$exe.exe" ] && exe="$exe.exe"
+            asset="${{ matrix.asset }}"
+            cp "$exe" "$bin${asset#lim}"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            lim-gui-*
 
   release:
     needs: build
