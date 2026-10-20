@@ -80,6 +80,7 @@ the start screen.
 | Hex & RE | binary files open as an editable hex dump, written back as bytes · `:hexedit` · `:detect` (ELF/PE/Mach-O and 20 formats, architecture, entropy, UPX) · `:strings` · `:inspect` · `:pack` · `:xor` |
 | Commands | `:Commands` in the config pipe the lines through a program in any language and put its output back or show it · format on save |
 | Robustness | atomic saves · refuses to clobber other files · a broken hex dump is never written · files too big for memory are refused, not half-loaded · internal errors are caught, the session goes on and unsaved buffers are backed up · `unwrap`/`panic!` denied by lints |
+| Own window | `lim-gui` opens lim in a window of its own, without a terminal's tabs, padding or font settings, its Nerd Font built in; the shell and `<Leader>t…` tools run inside it |
 | Updates | `<Leader>pu` or `:upgrade` downloads the latest GitHub release's binary and swaps it in, from inside the editor |
 
 ## Install
@@ -131,6 +132,7 @@ lim app.exe            # a binary opens as a hex dump
 lim --print-config     # the documented default config
 lim --config-path      # where lim looks for config.json
 lim --help | --version
+lim-gui [files]        # the same lim, in its own window (installed beside lim)
 ```
 
 Messages appear as notifications in the top-right corner (`cmdheight = 0`, as in AstroNvim); `:` and `/`
@@ -158,7 +160,9 @@ grammars stand in), plugins, scripting the editor (config commands only filter t
 embedded terminal (`<F7>` suspends to your shell), Vim tab pages,
 line wrapping, folds, spell checking, persistent undo. Files are read whole into memory, as in Vim: text files
 over 512 MB and binaries over 64 MB (their hex dump takes about 7 times their size) are refused with a message.
-There is no disassembler.
+There is no disassembler. `lim-gui` draws one font weight (no bold or italic), emoji in one color, and on Linux and
+macOS has no fallback font for the chars its Nerd Font lacks; `:upgrade` updates `lim` only: run the installer again,
+or take `lim-gui` from the release page, for a new `lim-gui`.
 
 ## License
 

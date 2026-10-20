@@ -21,6 +21,10 @@ jsonc-parser = { version = "0.34", features = ["preserve_order"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+alacritty_terminal = "0.26"
+winit = "0.30"
+softbuffer = "0.4"
+fontdue = "0.9"
 
 # The crates (syntect's regexes, gix) are optimized even in debug builds, so `cargo test` keeps its perf budgets.
 [profile.dev.package."*"]

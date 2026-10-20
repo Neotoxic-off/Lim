@@ -447,7 +447,8 @@ fn has_nerd_font(dir: &Path, depth: usize) -> bool {
 pub fn load() -> (Config, Vec<String>) {
     let mut config: Config = Config::default();
     // Nerd Font glyphs show as boxes without the font (a fresh install); the config's `iconset` still wins.
-    if !nerd_font_installed() {
+    // lim-gui sets `LIM_GUI`: it draws with its own Nerd Font.
+    if env::var_os("LIM_GUI").is_none() && !nerd_font_installed() {
         config.options.iconset = "unicode".into();
     }
     let mut warnings: Vec<String> = Vec::new();
