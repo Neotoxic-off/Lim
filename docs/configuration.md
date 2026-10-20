@@ -57,7 +57,7 @@ Names and defaults follow AstroNvim.
 | `cmdheight` | `0` | `0`: notifications and an on-demand command line; `1`: permanent command line |
 | `clipboard` | `"unnamedplus"` | `""` keeps yanks inside lim |
 | `colorscheme` | unset | A theme name; unset uses the last one picked (nvchad at first) |
-| `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` |
+| `icons` · `iconset` | `true` · `"nerd"` | Glyphs at all · `"nerd"`, `"unicode"`, `"emoji"` or `"ascii"` (`"unicode"` when no Nerd Font is installed) |
 | `statusline_style` | `"rounded"` | Statusline section ends: `"rounded"`, `"slanted"`, `"arrow"` or `"flat"` (Nerd Font icon set only) |
 | `splash` | `"random"` | Start screen hydra: `"random"` (one that fits, each start), `"braille"` or `"small"` |
 | `mouse` | `true` | Click (text, tabs, tabline buttons), drag to select, wheel; `false` gives the terminal its own selection back (to copy) |
