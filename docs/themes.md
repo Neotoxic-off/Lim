@@ -38,7 +38,8 @@ top of any theme.
 ## Icon sets
 
 `nerd` (default, Nerd Font devicons as AstroNvim), `unicode` (any font), `emoji` (color emoji,
-two cells each) and `ascii`. Switch in the settings (`<Leader>,`), `<Leader>fI`, or the `iconset` option.
+two cells each) and `ascii`. When no Nerd Font file is found in the system or user font folders, lim starts with
+`unicode` instead; an `iconset` in the config always wins. Switch in the settings (`<Leader>,`), `<Leader>fI`, or the `iconset` option.
 
 |   |   |
 |---|---|

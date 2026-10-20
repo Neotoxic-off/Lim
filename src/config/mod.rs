@@ -412,9 +412,44 @@ fn user_dir(xdg: &str, windows: &str, home: &[&str]) -> Option<PathBuf> {
     Some(base.join("lim"))
 }
 
+/// Whether a Nerd Font is installed in the system or user font folders.
+/// shortcut: looks at font file names, not the terminal's font; set `iconset` when the guess is wrong.
+fn nerd_font_installed() -> bool {
+    let var = |name: &str, parts: &[&str]| {
+        env::var_os(name).map(|v| parts.iter().fold(PathBuf::from(v), |p, part| p.join(part)))
+    };
+    let dirs: [Option<PathBuf>; 3] = if cfg!(windows) {
+        [var("WINDIR", &["Fonts"]), var("LOCALAPPDATA", &["Microsoft", "Windows", "Fonts"]), None]
+    } else if cfg!(target_os = "macos") {
+        [Some(PathBuf::from("/Library/Fonts")), var("HOME", &["Library", "Fonts"]), None]
+    } else {
+        [Some(PathBuf::from("/usr/share/fonts")), var("HOME", &[".local", "share", "fonts"]), var("HOME", &[".fonts"])]
+    };
+    dirs.iter().flatten().any(|dir| has_nerd_font(dir, 3))
+}
+
+/// A font file named like a Nerd Font (`JetBrainsMonoNerdFont-Regular.ttf`, `CascadiaCodeNF.ttf`) under `dir`.
+fn has_nerd_font(dir: &Path, depth: usize) -> bool {
+    let Ok(entries): io::Result<fs::ReadDir> = fs::read_dir(dir) else { return false };
+    entries.flatten().any(|entry| {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            return depth > 0 && has_nerd_font(&entry.path(), depth - 1);
+        }
+        let name: String = entry.file_name().to_string_lossy().to_lowercase().replace(' ', "");
+        let Some((stem, ext)): Option<(&str, &str)> = name.rsplit_once('.') else { return false };
+        let family: &str = stem.split('-').next().unwrap_or(stem);
+        matches!(ext, "ttf" | "otf" | "ttc")
+            && (family.contains("nerdfont") || ["nf", "nfm", "nfp"].iter().any(|s| family.ends_with(s)))
+    })
+}
+
 /// The config and every problem found. A missing file is not a problem.
 pub fn load() -> (Config, Vec<String>) {
     let mut config: Config = Config::default();
+    // Nerd Font glyphs show as boxes without the font (a fresh install); the config's `iconset` still wins.
+    if !nerd_font_installed() {
+        config.options.iconset = "unicode".into();
+    }
     let mut warnings: Vec<String> = Vec::new();
     let Some(path): Option<PathBuf> = path() else { return (config, warnings) };
     match fs::read_to_string(&path) {
@@ -782,6 +817,23 @@ mod tests {
         let (config, warnings): (Config, Vec<String>) = Config::from_str(EXAMPLE);
         assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(config.options, Options::default());
+    }
+
+    #[test]
+    fn finds_nerd_fonts_by_file_name() {
+        let dir: PathBuf = env::temp_dir().join(format!("lim-fonts-{}", std::process::id()));
+        let nested: PathBuf = dir.join("truetype").join("jetbrains");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(dir.join("DejaVuSans.ttf"), "").unwrap();
+        fs::write(dir.join("fonts.conf"), "").unwrap();
+        assert!(!has_nerd_font(&dir, 3));
+        for name in ["JetBrainsMonoNerdFont-Regular.ttf", "Hack Nerd Font Complete.otf", "CascadiaCodeNF.ttf"] {
+            fs::write(nested.join(name), "").unwrap();
+            assert!(has_nerd_font(&dir, 3), "{name}");
+            assert!(!has_nerd_font(&dir, 0), "{name} is two folders down");
+            fs::remove_file(nested.join(name)).unwrap();
+        }
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Every option written by `save_options` reads back to the same value, and other sections survive.

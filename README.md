@@ -115,7 +115,8 @@ Without the installer: `cargo install --git https://github.com/Neotoxic-off/Lim 
 `cargo build --release` and copy `target/release/lim` (`lim.exe`) onto your `PATH`.
 
 Runs on Linux, macOS and Windows 10+ (Windows Terminal or the console, not mintty). A
-[Nerd Font](https://www.nerdfonts.com) for the default icons (or `"iconset": "unicode"` / `"ascii"`). Truecolor is
+[Nerd Font](https://www.nerdfonts.com) for the default icons; without one installed, lim starts with
+`"iconset": "unicode"` (or set `"ascii"`). Truecolor is
 detected; other terminals get the 256-color palette.
 
 Optional, picked up when installed: `node`, `python3`, `btm`, `gdu`, and the TUI tools of `<Leader>t…`.
